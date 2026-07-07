@@ -80,6 +80,10 @@
           if (re.removed === 0 && re.boundary === 0) history.undoStack.pop();
           break;
         }
+        case "brush":
+          history.push(doc);
+          VB.brushStroke(doc, op.points, op.radius, op.color);
+          break;
         case "undo":
           history.undo(doc);
           break;

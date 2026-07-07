@@ -20,6 +20,7 @@
 <script src="../js/bucket.js"></script>
 <script src="../js/swath.js"></script>
 <script src="../js/eraser.js"></script>
+<script src="../js/brush.js"></script>
 <script src="../js/planarity.js"></script>
 <script src="../js/journal.js"></script>
 <script src="../js/history.js"></script>
@@ -343,6 +344,17 @@
         points: scrub(spot2.x + (rnd() - 0.5) * 400, spot2.y + (rnd() - 0.5) * 400,
           50 + Math.floor(rnd() * 60), 400 + rnd() * 700, 40),
         radius: 200
+      });
+    }
+    // brush strokes over channels, fills, and strokes alike
+    for (var br = 0; br < 3; br++) {
+      var bspot = eraseSpots[br % eraseSpots.length];
+      ops.push({
+        op: "brush",
+        points: track(bspot.x + (rnd() - 0.5) * 1200, bspot.y + (rnd() - 0.5) * 1200,
+          rnd() * Math.PI * 2, 30 + Math.floor(rnd() * 40), 60, 12, 0.35),
+        radius: 100 + rnd() * 150,
+        color: br % 2 ? { r: 204, g: 102, b: 102, a: 255 } : green
       });
     }
     for (var b3 = 0; b3 < 4; b3++) {

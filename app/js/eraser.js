@@ -403,4 +403,5 @@
   window.VB = window.VB || {};
   VB.EraserTool = EraserTool;
   VB.eraseStroke = eraseStroke;
+  VB.stitchOpenChains = stitchOpenChains; // shared with the brush tool
 })();

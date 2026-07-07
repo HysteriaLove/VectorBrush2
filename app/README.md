@@ -20,7 +20,13 @@ Drop a `.swf` or `.vbd` onto the canvas, or use **Open…**.
   loops close, ends that stop just short of a line weld onto it as a
   T-junction. Without this, casual drawings are full of invisible twip
   gaps and fills flood through them (Flash snaps for the same reason)
-- **Bucket** (`B`): click a region to fill it with the toolbar fill color.
+- **Brush** (`B`): paint the swept disc as a fill (size in the toolbar,
+  uses the fill color). Matches the Brush*.swf references: a dab is one
+  closed all-curves loop with no stroke; same-color strokes union;
+  different colors split at crossings with two-sided F|G borders and the
+  new color owning the overlap; crossed pencil strokes survive as
+  interior edges
+- **Bucket** (`K`): click a region to fill it with the toolbar fill color.
   Finds the planar-map face under the cursor (half-edge walk with hole
   assignment, so islands keep their fill), stamps the facing side of every
   boundary edge, and dissolves lineless borders between same-fill regions
@@ -65,6 +71,7 @@ no epsilons.
 | `js/bucket.js` | Bucket tool: stamp the clicked face's boundary sides, dissolve redundant borders |
 | `js/swath.js` | Capsule-chain outlines (drag path + radius → closed loop of lines and quad arcs); interior lobes are cleaned by winding classification |
 | `js/eraser.js` | Eraser tool: node the swath into the map, delete edges inside (exact distance-to-path test), re-side the boundary to the surviving fills |
+| `js/brush.js` | Brush tool: the eraser's positive twin — paint the swath as a fill, submerge covered boundaries, keep crossed strokes as interior edges |
 | `js/journal.js` | Action log: record every tool op, deterministic replay, integrity reporting |
 | `js/history.js` | Snapshot undo/redo |
 | `js/debug.js` | Vector debug overlay + hover edge inspector |
@@ -126,5 +133,8 @@ files.
 2. ~~Pencil tool (capture → curve fit → planar merge), undo/redo, vector debug view~~
 3. ~~Bucket fill (face tracing, edge re-siding, border dissolution)~~
 4. ~~Eraser (swath subtraction, stroke trimming, boundary re-siding)~~
-5. Brush tool (paint the swath as a fill — reuses swath.js)
-6. Pixi.js rendering backend
+5. ~~Brush tool (paint the swath as a fill)~~
+6. Region-boolean erase/brush core (Flash-style `region ∓ swath` per
+   affected fill, regenerating boundary records wholesale — retires the
+   remaining sliver-concession cases)
+7. Pixi.js rendering backend

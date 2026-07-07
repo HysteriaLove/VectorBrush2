@@ -22,6 +22,7 @@
     strokeWidth: 20,          // twips (1 px), Flash's default pencil width
     fillColor: { r: 102, g: 204, b: 255, a: 255 },
     eraserWidth: 20,          // eraser diameter, px
+    brushWidth: 10,           // brush diameter, px
     debug: false,
     debugHover: -1,
     debugPin: -1,
@@ -34,6 +35,7 @@
 
   var tools = {
     pencil: new VB.PencilTool(app),
+    brush: new VB.BrushTool(app),
     bucket: new VB.BucketTool(app),
     eraser: new VB.EraserTool(app)
   };
@@ -384,7 +386,8 @@
     if (ev.ctrlKey || ev.altKey) return;
     var k = ev.key.toLowerCase();
     if (k === "d") { toggleDebug(); return; }
-    var toolKeys = { v: "select", p: "pencil", b: "bucket", e: "eraser" };
+    // Flash-accurate bindings: B = brush, K = paint bucket
+    var toolKeys = { v: "select", p: "pencil", b: "brush", k: "bucket", e: "eraser" };
     if (toolKeys[k]) selectTool(toolKeys[k]);
   });
   window.addEventListener("keyup", function (ev) {
@@ -423,6 +426,12 @@
   widthInput.addEventListener("input", function () {
     var px = parseFloat(widthInput.value);
     if (isFinite(px) && px > 0) app.strokeWidth = Math.round(px * VB.TWIPS);
+  });
+
+  var brushInput = document.getElementById("brush-size");
+  brushInput.addEventListener("input", function () {
+    var px = parseFloat(brushInput.value);
+    if (isFinite(px) && px > 0) app.brushWidth = px;
   });
 
   var eraserInput = document.getElementById("eraser-size");
@@ -488,6 +497,10 @@
     VB.eraseStroke(d, [
       { x: 2600, y: 1000 }, { x: 4200, y: 3200 }, { x: 6200, y: 4600 }, { x: 8600, y: 5400 }
     ], 260);
+    // brush a stroke over fills, the erase channel, and the pencil wave
+    VB.brushStroke(d, [
+      { x: 1200, y: 5200 }, { x: 3200, y: 4400 }, { x: 5400, y: 3600 }, { x: 7600, y: 2400 }
+    ], 180, { r: 204, g: 102, b: 102, a: 255 });
     document.getElementById("drophint").classList.add("hidden");
     toggleDebug();
     app.debugPin = Math.min(9, d.edges.length - 1);

@@ -183,8 +183,11 @@
     <label class="ctl" title="Stroke width (px)">
       <input type="number" id="stroke-width" value="1" min="0.05" max="10" step="0.25">px
     </label>
-    <label class="ctl" title="Fill color (bucket)">
+    <label class="ctl" title="Fill color (brush + bucket)">
       🪣<input type="color" id="fill-color" value="#66ccff">
+    </label>
+    <label class="ctl" title="Brush size (px)">
+      🖌<input type="number" id="brush-size" value="10" min="1" max="100" step="1">px
     </label>
     <label class="ctl" title="Eraser size (px)">
       🧽<input type="number" id="eraser-size" value="20" min="2" max="100" step="2">px
@@ -204,7 +207,8 @@
     <div id="tools">
       <button data-tool="select" class="active" title="Selection tool (V)">➤</button>
       <button data-tool="pencil" title="Pencil tool (P)">✎</button>
-      <button data-tool="bucket" title="Bucket fill (B)">🪣</button>
+      <button data-tool="brush" title="Brush (B)">🖌</button>
+      <button data-tool="bucket" title="Paint bucket (K)">🪣</button>
       <button data-tool="eraser" title="Eraser (E)">🧽</button>
     </div>
     <div id="canvaswrap">
@@ -243,6 +247,7 @@
   <script src="js/bucket.js"></script>
   <script src="js/swath.js"></script>
   <script src="js/eraser.js"></script>
+  <script src="js/brush.js"></script>
   <script src="js/planarity.js"></script>
   <script src="js/journal.js"></script>
   <script src="js/history.js"></script>

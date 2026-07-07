@@ -33,6 +33,7 @@
 <script src="../js/bucket.js"></script>
 <script src="../js/swath.js"></script>
 <script src="../js/eraser.js"></script>
+<script src="../js/brush.js"></script>
 <script src="../js/planarity.js"></script>
 <script src="../js/journal.js"></script>
 <script src="../js/history.js"></script>
@@ -516,6 +517,104 @@
       }
     }
     check("storm: fill chains closed", stormOpen === 0, stormOpen + " open chains");
+  })();
+
+  // ======================= unit tests: brush ===============================
+  // Semantics dictated by the SWFExamples Brush series: a dab is one
+  // closed all-curves loop, fill on one side, NO line style; same-color
+  // overlap unions; different colors split with F|G shared borders and
+  // the new color owns the overlap; crossed strokes survive as interior
+  // fill|fill+line edges.
+  log("brush:");
+  (function () {
+    var red = { r: 204, g: 102, b: 102, a: 255 };
+    var blue = { r: 51, g: 102, b: 204, a: 255 };
+    var stroke = { width: 20, color: { r: 0, g: 0, b: 0, a: 255 } };
+
+    // 1. Dab on blank canvas — the Brush001/brush002.swf pattern.
+    var doc = new VB.VBDocument();
+    var r1 = VB.brushStroke(doc, [{ x: 4000, y: 4000 }], 500, red);
+    check("dab paints", r1.boundary > 0);
+    check("dab has one fill style", doc.fills.length === 1);
+    check("dab fillAt center", VB.geom.fillAt(doc, 4000, 4000) === 1);
+    check("dab all edges curved", doc.edges.every(function (e) { return e.cx !== null; }));
+    check("dab no line styles", doc.edges.every(function (e) { return e.line === 0; }));
+    check("dab one-sided boundary", doc.edges.every(function (e) {
+      return (e.fill0 === 0) !== (e.fill1 === 0);
+    }));
+    check("dab chains closed + planar", VB.integrityReport(doc).length === 0,
+      VB.integrityReport(doc)[0]);
+
+    // 2. Same-color overlap = union (Brush002 series).
+    var doc2 = new VB.VBDocument();
+    VB.brushStroke(doc2, [{ x: 2000, y: 4000 }, { x: 5000, y: 4000 }], 400, red);
+    var edgesA = doc2.edges.length;
+    VB.brushStroke(doc2, [{ x: 4000, y: 4000 }, { x: 7000, y: 4000 }], 400, red);
+    check("union single style", doc2.fills.length === 1);
+    check("union covers both", VB.geom.fillAt(doc2, 2000, 4000) === 1 &&
+      VB.geom.fillAt(doc2, 7000, 4000) === 1 && VB.geom.fillAt(doc2, 4500, 4000) === 1);
+    check("union no interior borders", doc2.edges.every(function (e) {
+      return !(e.fill0 === e.fill1 && e.line === 0);
+    }));
+    check("union consistent", VB.integrityReport(doc2).length === 0,
+      VB.integrityReport(doc2)[0]);
+
+    // 3. Two colors crossing (Brush002/Brush003.swf): new color owns the
+    //    overlap; shared borders are two-sided F|G.
+    var doc3 = new VB.VBDocument();
+    VB.brushStroke(doc3, [{ x: 4000, y: 1500 }, { x: 4000, y: 6500 }], 400, red);
+    VB.brushStroke(doc3, [{ x: 1500, y: 4000 }, { x: 6500, y: 4000 }], 400, blue);
+    check("two styles registered", doc3.fills.length === 2);
+    check("overlap owned by new color", VB.geom.fillAt(doc3, 4000, 4000) === 2);
+    check("red arms intact", VB.geom.fillAt(doc3, 4000, 1800) === 1 &&
+      VB.geom.fillAt(doc3, 4000, 6200) === 1);
+    check("blue arms intact", VB.geom.fillAt(doc3, 1800, 4000) === 2 &&
+      VB.geom.fillAt(doc3, 6200, 4000) === 2);
+    var shared = doc3.edges.filter(function (e) {
+      return e.fill0 > 0 && e.fill1 > 0 && e.fill0 !== e.fill1;
+    });
+    check("F|G shared borders exist", shared.length > 0, shared.length + " shared");
+    check("two-color consistent", VB.integrityReport(doc3).length === 0,
+      VB.integrityReport(doc3)[0]);
+
+    // 4. Brush across a pencil stroke: the stroke survives, its pieces
+    //    inside become interior fill|fill+line edges.
+    var doc4 = new VB.VBDocument();
+    VB.pencilCommit(doc4, [{ x: 1000, y: 4000 }, { x: 4000, y: 4000 }, { x: 7000, y: 4000 }], stroke);
+    VB.brushStroke(doc4, [{ x: 4000, y: 3000 }, { x: 4000, y: 5000 }], 600, red);
+    var interior = doc4.edges.filter(function (e) {
+      return e.line === 1 && e.fill0 === 1 && e.fill1 === 1;
+    });
+    var outside = doc4.edges.filter(function (e) {
+      return e.line === 1 && e.fill0 === 0 && e.fill1 === 0;
+    });
+    check("stroke pieces interior to paint", interior.length > 0, interior.length + " interior");
+    check("stroke pieces outside remain bare", outside.length >= 2, outside.length + " outside");
+    check("brush-over-stroke consistent", VB.integrityReport(doc4).length === 0,
+      VB.integrityReport(doc4)[0]);
+
+    // 5. Brush across an existing fill (different color): paints over.
+    var doc5 = new VB.VBDocument();
+    doc5.fills.push(VB.solidFill(51, 102, 204)); // blue square, style 1
+    doc5.edges.push(
+      VB.edge(2000, 2000, null, null, 6000, 2000, 0, 1, 0),
+      VB.edge(6000, 2000, null, null, 6000, 6000, 0, 1, 0),
+      VB.edge(6000, 6000, null, null, 2000, 6000, 0, 1, 0),
+      VB.edge(2000, 6000, null, null, 2000, 2000, 0, 1, 0));
+    VB.brushStroke(doc5, [{ x: 1000, y: 4000 }, { x: 7000, y: 4000 }], 400, red);
+    check("paint-over: band is red", VB.geom.fillAt(doc5, 4000, 4000) === 2);
+    check("paint-over: above still blue", VB.geom.fillAt(doc5, 4000, 2800) === 1);
+    check("paint-over: below still blue", VB.geom.fillAt(doc5, 4000, 5200) === 1);
+    check("paint-over: outside band red tips", VB.geom.fillAt(doc5, 1200, 4000) === 2);
+    check("paint-over consistent", VB.integrityReport(doc5).length === 0,
+      VB.integrityReport(doc5)[0]);
+
+    // 6. Same color painted twice over itself is stable (idempotent-ish).
+    var before6 = doc2.edges.length;
+    VB.brushStroke(doc2, [{ x: 3000, y: 4000 }, { x: 6000, y: 4000 }], 300, red);
+    check("repaint keeps single style", doc2.fills.length === 1);
+    check("repaint stays consistent", VB.integrityReport(doc2).length === 0,
+      VB.integrityReport(doc2)[0]);
   })();
 
   // =============== unit tests: fill normalization ==========================
