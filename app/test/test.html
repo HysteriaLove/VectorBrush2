@@ -30,6 +30,8 @@
 <script src="../js/merge.js"></script>
 <script src="../js/faces.js"></script>
 <script src="../js/bucket.js"></script>
+<script src="../js/swath.js"></script>
+<script src="../js/eraser.js"></script>
 <script src="../js/planarity.js"></script>
 <script src="../js/history.js"></script>
 <script src="../js/debug.js"></script>
@@ -398,6 +400,77 @@
     check("divider T-weld blocks fill", VB.geom.fillAt(doc2, 9200, 6000) === 0);
     check("outside stays empty", VB.geom.fillAt(doc2, 500, 500) === 0);
     check("gap doc planar", VB.validatePlanar(doc2).length === 0);
+  })();
+
+  // ======================= unit tests: eraser ==============================
+  log("eraser:");
+  (function () {
+    var stroke = { width: 20, color: { r: 0, g: 0, b: 0, a: 255 } };
+    function filledSquare() {
+      var d = new VB.VBDocument();
+      d.fills.push(VB.solidFill(200, 60, 60));
+      d.edges.push(
+        VB.edge(0, 0, null, null, 4000, 0, 0, 1, 0),
+        VB.edge(4000, 0, null, null, 4000, 4000, 0, 1, 0),
+        VB.edge(4000, 4000, null, null, 0, 4000, 0, 1, 0),
+        VB.edge(0, 4000, null, null, 0, 0, 0, 1, 0));
+      return d;
+    }
+
+    // 1. Band erase across a filled square: two filled regions remain.
+    var doc = filledSquare();
+    var r1 = VB.eraseStroke(doc, [
+      { x: -600, y: 2000 }, { x: 2000, y: 2000 }, { x: 4600, y: 2000 }
+    ], 400);
+    check("band removes edges", r1.removed > 0, r1.removed + " removed");
+    check("band keeps boundary", r1.boundary > 0, r1.boundary + " kept");
+    check("band: top still filled", VB.geom.fillAt(doc, 2000, 800) === 1);
+    check("band: middle erased", VB.geom.fillAt(doc, 2000, 2000) === 0);
+    check("band: bottom still filled", VB.geom.fillAt(doc, 2000, 3300) === 1);
+    check("band: invariant", doc.validate().length === 0, doc.validate()[0]);
+    check("band: planar", VB.validatePlanar(doc).length === 0);
+
+    // 2. Dab hole in a fill, then bucket-refill heals it completely.
+    var doc2 = filledSquare();
+    var r2 = VB.eraseStroke(doc2, [{ x: 2000, y: 2000 }], 500);
+    check("dab erases hole", VB.geom.fillAt(doc2, 2000, 2000) === 0);
+    check("dab keeps surround", VB.geom.fillAt(doc2, 500, 500) === 1);
+    check("dab boundary has no line", doc2.edges.every(function (e) {
+      return e.line === 0 || (e.fill0 !== 0 || e.fill1 !== 0);
+    }));
+    var oneSided = doc2.edges.filter(function (e) {
+      return (e.fill0 === 1) !== (e.fill1 === 1);
+    });
+    check("dab boundary one-sided", oneSided.length >= 8 + 4, oneSided.length + " edges");
+    VB.bucketFill(doc2, 2000, 2000, { color: { r: 200, g: 60, b: 60, a: 255 } });
+    check("refill heals hole", VB.geom.fillAt(doc2, 2000, 2000) === 1);
+    check("refill dissolves boundary", doc2.edges.length === 4, doc2.edges.length + " edges");
+
+    // 3. Stroke trim: erasing the middle of a pencil line leaves two stubs.
+    var doc3 = new VB.VBDocument();
+    VB.pencilCommit(doc3, [{ x: 0, y: 0 }, { x: 2000, y: 0 }, { x: 4000, y: 0 }], stroke);
+    var r3 = VB.eraseStroke(doc3, [{ x: 2000, y: 0 }], 300);
+    check("trim removed middle", r3.removed >= 1);
+    check("trim leaves two stubs", doc3.edges.length === 2, doc3.edges.length + " edges");
+    check("trim keeps line style", doc3.edges.every(function (e) { return e.line === 1; }));
+    var gapClear = doc3.edges.every(function (e) {
+      return Math.max(
+        Math.hypot(e.ax - 2000, e.ay), Math.hypot(e.bx - 2000, e.by)) >= 280;
+    });
+    check("trim gap is open", gapClear);
+
+    // 4. Erasing blank canvas is a no-op.
+    var doc4 = new VB.VBDocument();
+    var r4 = VB.eraseStroke(doc4, [{ x: 2000, y: 2000 }], 400);
+    check("blank erase no-op", r4.removed === 0 && r4.boundary === 0 && doc4.edges.length === 0);
+
+    // 5. Erase clipping the square's corner: fill survives, corner rounded.
+    var doc5 = filledSquare();
+    VB.eraseStroke(doc5, [{ x: 0, y: 0 }], 600);
+    check("corner: center still filled", VB.geom.fillAt(doc5, 2000, 2000) === 1);
+    check("corner: corner erased", VB.geom.fillAt(doc5, 100, 100) === 0);
+    check("corner: invariant", doc5.validate().length === 0, doc5.validate()[0]);
+    check("corner: planar", VB.validatePlanar(doc5).length === 0);
   })();
 
   // ======================= fixture pipeline tests ==========================

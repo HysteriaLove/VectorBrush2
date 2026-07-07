@@ -185,6 +185,9 @@
     <label class="ctl" title="Fill color (bucket)">
       🪣<input type="color" id="fill-color" value="#66ccff">
     </label>
+    <label class="ctl" title="Eraser size (px)">
+      🧽<input type="number" id="eraser-size" value="20" min="2" max="100" step="2">px
+    </label>
     <div class="sep"></div>
     <button id="btn-zoom-out" title="Zoom out">−</button>
     <button id="btn-zoom-100" title="Zoom to 100%">100%</button>
@@ -201,7 +204,7 @@
       <button data-tool="select" class="active" title="Selection tool (V)">➤</button>
       <button data-tool="pencil" title="Pencil tool (P)">✎</button>
       <button data-tool="bucket" title="Bucket fill (B)">🪣</button>
-      <button data-tool="eraser" title="Eraser (E) — next milestone">🧽</button>
+      <button data-tool="eraser" title="Eraser (E)">🧽</button>
     </div>
     <div id="canvaswrap">
       <canvas id="stage-canvas"></canvas>
@@ -236,6 +239,8 @@
   <script src="js/merge.js"></script>
   <script src="js/faces.js"></script>
   <script src="js/bucket.js"></script>
+  <script src="js/swath.js"></script>
+  <script src="js/eraser.js"></script>
   <script src="js/history.js"></script>
   <script src="js/debug.js"></script>
   <script src="js/pencil.js"></script>

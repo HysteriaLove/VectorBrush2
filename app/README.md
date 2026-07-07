@@ -12,7 +12,7 @@ Drop a `.swf` or `.vbd` onto the canvas, or use **Open…**.
 
 - Mouse wheel: zoom around the cursor
 - Middle-drag or Space+drag: pan
-- `V`/`P`/`B`/`E`: tool shortcuts (eraser lands in the next milestone)
+- `V`/`P`/`B`/`E`: tool shortcuts
 - **Pencil** (`P`): draw; stroke color/width in the toolbar; strokes are
   smoothed to lines+quads and merged into the planar map (crossed edges
   split, fills inherited) exactly like Flash. Stroke endpoints snap
@@ -25,6 +25,12 @@ Drop a `.swf` or `.vbd` onto the canvas, or use **Open…**.
   assignment, so islands keep their fill), stamps the facing side of every
   boundary edge, and dissolves lineless borders between same-fill regions
   — Flash's exact behavior in the Fill*.swf reference snapshots
+- **Eraser** (`E`): drag to subtract the swept disc from the drawing
+  (size in the toolbar, circle cursor preview). Strokes crossing the swath
+  are trimmed to stubs, fills are carved with lineless boundaries that
+  inherit the surviving fill on the outside — matching the Eraser*.swf
+  snapshots. Erased holes can be bucket-refilled, and refilling with the
+  same color heals the geometry completely
 - `Ctrl+Z` / `Ctrl+Y` (or `Ctrl+Shift+Z`): undo / redo
 - `D` or **Debug**: vector debug view — edge wires (cyan straight, magenta
   quad), anchors, control points, direction chevrons, fill-side ticks, and
@@ -57,6 +63,8 @@ no epsilons.
 | `js/faces.js` | Face traversal: half-edge cycles via angular ordering at nodes, orientation classification, hole-to-face assignment, point-to-face lookup |
 | `js/planarity.js` | Integrity checker: finds transversal crossings without a shared node (the invariant everything else relies on) |
 | `js/bucket.js` | Bucket tool: stamp the clicked face's boundary sides, dissolve redundant borders |
+| `js/swath.js` | Capsule-chain outlines (drag path + radius → closed loop of lines and quad arcs); interior lobes are cleaned by winding classification |
+| `js/eraser.js` | Eraser tool: node the swath into the map, delete edges inside (signed winding), re-side the boundary to the surviving fills |
 | `js/history.js` | Snapshot undo/redo |
 | `js/debug.js` | Vector debug overlay + hover edge inspector |
 | `js/pencil.js` | Pencil tool: capture → fit → merge, with raw-trail preview |
@@ -85,7 +93,10 @@ The `<title>`/final line reads `VBTEST DONE pass=N fail=M`.
 verification (bounded faces must equal E − V + C), wavy-grid bucket
 containment, and the casual-drawing gap scenarios.
 
-Current status: 231 checks, 0 failures — the SWF/VBD pipeline suite plus
+Current status: 253 checks, 0 failures — the SWF/VBD pipeline suite plus
+eraser unit tests (band erase splitting a fill, dab holes with
+bucket-refill healing back to the original geometry, stroke trimming,
+blank no-op, corner clipping) and
 bucket-fill unit tests (outline fill, outside no-op, split-region fills,
 border dissolution, island/annulus hole assignment, style dedup) and
 unit tests for intersections, splitting, point-in-fill parity, stroke
@@ -100,5 +111,6 @@ files.
 1. ~~Canvas milestone: SWF loading, planar-map document, rendering, `.vbd`~~
 2. ~~Pencil tool (capture → curve fit → planar merge), undo/redo, vector debug view~~
 3. ~~Bucket fill (face tracing, edge re-siding, border dissolution)~~
-4. Eraser (boolean subtraction against fills, stroke trimming)
-5. Pixi.js rendering backend
+4. ~~Eraser (swath subtraction, stroke trimming, boundary re-siding)~~
+5. Brush tool (paint the swath as a fill — reuses swath.js)
+6. Pixi.js rendering backend

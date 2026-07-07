@@ -284,6 +284,44 @@
     return 0;
   }
 
+  // Signed winding number of a point against a DIRECTED edge list (a
+  // closed loop, e.g. an eraser swath outline). Downward crossings
+  // (y increasing) count +1, upward -1. Nonzero = inside under the
+  // nonzero rule, which is what a self-overlapping capsule chain needs.
+  function windingNumber(loopEdges, px, py) {
+    var w = 0;
+    for (var i = 0; i < loopEdges.length; i++) {
+      var e = loopEdges[i];
+      if (e.cx === null) {
+        if ((e.ay > py) !== (e.by > py)) {
+          var t = (py - e.ay) / (e.by - e.ay);
+          if (e.ax + (e.bx - e.ax) * t > px) w += (e.by > e.ay) ? 1 : -1;
+        }
+      } else {
+        var denom = e.ay - 2 * e.cy + e.by;
+        var tExt = denom !== 0 ? (e.ay - e.cy) / denom : -1;
+        var ts = [0];
+        if (tExt > T_EPS && tExt < 1 - T_EPS) ts.push(tExt);
+        ts.push(1);
+        for (var s = 0; s + 1 < ts.length; s++) {
+          var p0 = evalEdge(e, ts[s]), p1 = evalEdge(e, ts[s + 1]);
+          if ((p0.y > py) === (p1.y > py)) continue;
+          var roots = solveQuadratic(e.ay - 2 * e.cy + e.by, 2 * (e.cy - e.ay), e.ay - py);
+          for (var r2 = 0; r2 < roots.length; r2++) {
+            var t2 = roots[r2];
+            if (t2 >= ts[s] - 1e-9 && t2 <= ts[s + 1] + 1e-9) {
+              if (evalEdge(e, Math.min(1, Math.max(0, t2))).x > px) {
+                w += (p1.y > p0.y) ? 1 : -1;
+              }
+              break;
+            }
+          }
+        }
+      }
+    }
+    return w;
+  }
+
   // Which fill contains the point (0 = none). In a consistent planar map at
   // most one fill has odd parity.
   function fillAt(doc, px, py) {
@@ -372,6 +410,7 @@
     solveQuadratic: solveQuadratic,
     fillParity: fillParity,
     fillAt: fillAt,
+    windingNumber: windingNumber,
     distToEdge: distToEdge,
     distToSegment: distToSegment,
     nearestOnEdge: nearestOnEdge

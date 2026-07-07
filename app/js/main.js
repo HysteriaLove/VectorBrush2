@@ -21,6 +21,7 @@
     strokeColor: { r: 0, g: 0, b: 0, a: 255 },
     strokeWidth: 20,          // twips (1 px), Flash's default pencil width
     fillColor: { r: 102, g: 204, b: 255, a: 255 },
+    eraserWidth: 20,          // eraser diameter, px
     debug: false,
     debugHover: -1,
     debugPin: -1,
@@ -31,8 +32,8 @@
 
   var tools = {
     pencil: new VB.PencilTool(app),
-    bucket: new VB.BucketTool(app)
-    // eraser: next milestone
+    bucket: new VB.BucketTool(app),
+    eraser: new VB.EraserTool(app)
   };
 
   // ---- rendering loop ------------------------------------------------------
@@ -300,6 +301,8 @@
       requestRender();
     } else if (activePointerTool && activePointerTool.onMove) {
       activePointerTool.onMove(clientToTwips(ev));
+    } else if (tools[app.tool] && tools[app.tool].onHover) {
+      tools[app.tool].onHover(clientToTwips(ev));
     } else if (app.debug) {
       // hover inspector (pin wins)
       var pt = clientToTwips(ev);
@@ -398,6 +401,12 @@
     if (isFinite(px) && px > 0) app.strokeWidth = Math.round(px * VB.TWIPS);
   });
 
+  var eraserInput = document.getElementById("eraser-size");
+  eraserInput.addEventListener("input", function () {
+    var px = parseFloat(eraserInput.value);
+    if (isFinite(px) && px > 0) app.eraserWidth = px;
+  });
+
   var fillInput = document.getElementById("fill-color");
   fillInput.addEventListener("input", function () {
     var v = fillInput.value;
@@ -451,6 +460,10 @@
     VB.pencilCommit(d, wavePts, { width: 40, color: { r: 200, g: 40, b: 40, a: 255 } });
     // bucket-fill one of the faces the wave carved out of the square
     VB.bucketFill(d, 5000, 2200, { color: { r: 255, g: 214, b: 79, a: 255 } });
+    // erase a swipe across fills, borders, and the pencil wave
+    VB.eraseStroke(d, [
+      { x: 2600, y: 1000 }, { x: 4200, y: 3200 }, { x: 6200, y: 4600 }, { x: 8600, y: 5400 }
+    ], 260);
     document.getElementById("drophint").classList.add("hidden");
     toggleDebug();
     app.debugPin = Math.min(9, d.edges.length - 1);

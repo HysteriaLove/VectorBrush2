@@ -121,28 +121,21 @@
   }
 
   /**
-   * Merge a stroke into the document.
-   *  geoms:        [{ax,ay,cx,cy,bx,by}] from fitStroke (integer twips)
-   *  lineStyleIdx: 1-based line style for the new edges
-   *  snapTol:      endpoint snap distance in twips (default 80 = 4px)
-   * Returns the number of edges the stroke contributed after splitting.
+   * Node a batch of new edges into the planar map: split existing edges
+   * and the new edges at every mutual and self crossing (shared, exactly
+   * rounded junction points). Mutates doc.edges (splits in place, styles
+   * preserved) but does NOT insert the new edges — returns their split
+   * pieces so the caller can classify/style them first.
+   *  extraOldSplits: optional [{index, t, point}] forced splits on
+   *  existing edges (e.g. from endpoint snapping).
    */
-  function mergeStroke(doc, geoms, lineStyleIdx, snapTol) {
-    if (snapTol === undefined) snapTol = 80;
-    var newEdges = geoms.map(function (g) {
-      return VB.edge(g.ax, g.ay, g.cx, g.cy, g.bx, g.by, 0, 0, lineStyleIdx);
-    }).filter(function (e) { return !VB.edgeIsDegenerate(e); });
-    if (newEdges.length === 0) return 0;
-
+  function nodeEdges(doc, newEdges, extraOldSplits) {
     var oldSplits = new Map(); // index into doc.edges -> splits
     var newSplits = new Map(); // index into newEdges  -> splits
-
-    // Magnetize stroke endpoints before any crossing detection.
-    var snapSplits = snapEndpoints(doc, newEdges, snapTol);
-    newEdges = newEdges.filter(function (e) { return !VB.edgeIsDegenerate(e); });
-    if (newEdges.length === 0) return 0;
-    for (var sp = 0; sp < snapSplits.length; sp++) {
-      addSplit(oldSplits, snapSplits[sp].index, snapSplits[sp].t, snapSplits[sp].point);
+    if (extraOldSplits) {
+      for (var sp = 0; sp < extraOldSplits.length; sp++) {
+        addSplit(oldSplits, extraOldSplits[sp].index, extraOldSplits[sp].t, extraOldSplits[sp].point);
+      }
     }
 
     // New vs existing.
@@ -188,12 +181,35 @@
       doc.edges = rebuilt;
     }
 
-    // Split the stroke's own edges.
+    // Split the new edges themselves.
     var finalNew = [];
     for (var m = 0; m < newEdges.length; m++) {
       var pieces2 = applySplits(newEdges[m], newSplits.get(m));
       for (var p4 = 0; p4 < pieces2.length; p4++) finalNew.push(pieces2[p4]);
     }
+    return finalNew;
+  }
+
+  /**
+   * Merge a stroke into the document.
+   *  geoms:        [{ax,ay,cx,cy,bx,by}] from fitStroke (integer twips)
+   *  lineStyleIdx: 1-based line style for the new edges
+   *  snapTol:      endpoint snap distance in twips (default 80 = 4px)
+   * Returns the number of edges the stroke contributed after splitting.
+   */
+  function mergeStroke(doc, geoms, lineStyleIdx, snapTol) {
+    if (snapTol === undefined) snapTol = 80;
+    var newEdges = geoms.map(function (g) {
+      return VB.edge(g.ax, g.ay, g.cx, g.cy, g.bx, g.by, 0, 0, lineStyleIdx);
+    }).filter(function (e) { return !VB.edgeIsDegenerate(e); });
+    if (newEdges.length === 0) return 0;
+
+    // Magnetize stroke endpoints before any crossing detection.
+    var snapSplits = snapEndpoints(doc, newEdges, snapTol);
+    newEdges = newEdges.filter(function (e) { return !VB.edgeIsDegenerate(e); });
+    if (newEdges.length === 0) return 0;
+
+    var finalNew = nodeEdges(doc, newEdges, snapSplits);
 
     // Fill inheritance: a stroke piece inside a filled region carries that
     // fill on both sides. Query BEFORE inserting the new edges (splitting
@@ -211,4 +227,5 @@
 
   window.VB = window.VB || {};
   VB.mergeStroke = mergeStroke;
+  VB.nodeEdges = nodeEdges;
 })();
