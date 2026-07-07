@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>VectorBrush replay</title>
+<style>
+  body { font: 12px/1.5 Consolas, monospace; background: #1b1d20; color: #cfd2d6; margin: 16px; }
+  pre { white-space: pre-wrap; }
+  .pass { color: #7ad97a; }
+  .fail { color: #ff7a7a; font-weight: bold; }
+  #drop {
+    border: 2px dashed #555; border-radius: 8px; padding: 30px;
+    text-align: center; color: #8a8d93; margin-bottom: 14px;
+  }
+  canvas { background: #fff; display: block; margin-top: 12px; }
+  button { font: inherit; background: #3c4046; color: #cfd2d6; border: 1px solid #000;
+           border-radius: 4px; padding: 4px 10px; cursor: pointer; margin-right: 8px; }
+</style>
+</head>
+<body>
+<h3>VectorBrush action-log replay</h3>
+<div id="drop">Drop a <b>vectorbrush-log.json</b> here (or <input type="file" id="file" accept=".json">)<br>
+Each op is replayed through the real tool code; integrity is checked after every op.<br>
+The first op that corrupts the document is reported with full detail.</div>
+<div>
+  <button id="btn-debug" disabled>Toggle debug overlay</button>
+  <span id="summary"></span>
+</div>
+<pre id="out"></pre>
+<canvas id="cv" width="1100" height="800"></canvas>
+
+<script src="../js/bitio.js"></script>
+<script src="../js/doc.js"></script>
+<script src="../js/geom.js"></script>
+<script src="../js/swf.js"></script>
+<script src="../js/trace.js"></script>
+<script src="../js/render.js"></script>
+<script src="../js/vbd.js"></script>
+<script src="../js/fit.js"></script>
+<script src="../js/merge.js"></script>
+<script src="../js/faces.js"></script>
+<script src="../js/bucket.js"></script>
+<script src="../js/swath.js"></script>
+<script src="../js/eraser.js"></script>
+<script src="../js/planarity.js"></script>
+<script src="../js/journal.js"></script>
+<script src="../js/history.js"></script>
+<script src="../js/debug.js"></script>
+<script src="../js/pencil.js"></script>
+<script>
+(function () {
+  "use strict";
+  var out = document.getElementById("out");
+  var doc = null;
+  var showDebug = false;
+
+  function log(line, cls) {
+    var span = document.createElement("span");
+    span.textContent = line + "\n";
+    if (cls) span.className = cls;
+    out.appendChild(span);
+  }
+
+  function opLabel(op) {
+    if (op.op === "pencil") return "pencil (" + op.points.length + " pts, w=" + op.style.width + ")";
+    if (op.op === "erase") return "erase (" + op.points.length + " pts, r=" + op.radius + ")";
+    if (op.op === "bucket") return "bucket @(" + Math.round(op.x) + "," + Math.round(op.y) + ")";
+    if (op.op === "load") return "load " + op.name;
+    return op.op;
+  }
+
+  function render() {
+    if (!doc) return;
+    var cv = document.getElementById("cv");
+    var zoom = Math.min(cv.width / (doc.width / VB.TWIPS), cv.height / (doc.height / VB.TWIPS));
+    var view = { zoom: zoom, panX: 0, panY: 0, dpr: 1 };
+    VB.render(cv.getContext("2d"), doc, view);
+    if (showDebug) VB.renderDebug(cv.getContext("2d"), doc, view, -1);
+  }
+
+  async function runLog(json) {
+    out.textContent = "";
+    var ops = json.ops || json;
+    log("replaying " + ops.length + " ops…");
+    var firstFail = -1;
+    var t0 = performance.now();
+    var result = await VB.replayJournal(ops, {
+      onOp: function (i, op, d) {
+        var problems = d.edges.length <= 6000 ? VB.integrityReport(d) : [];
+        if (problems.length && firstFail < 0) {
+          firstFail = i;
+          log("op#" + i + " " + opLabel(op) + "  ← FIRST CORRUPTION", "fail");
+          problems.forEach(function (p) { log("    " + p, "fail"); });
+          log("    (subsequent ops still replayed; see final state below)");
+        } else if (problems.length) {
+          log("op#" + i + " " + opLabel(op) + " — still corrupt (" + problems.length + " problems)", "fail");
+        } else {
+          log("op#" + i + " " + opLabel(op) + " — ok" + (firstFail >= 0 ? " (recovered?)" : ""),
+            firstFail >= 0 ? undefined : "pass");
+        }
+      }
+    });
+    doc = result.doc;
+    var ms = (performance.now() - t0).toFixed(0);
+    var s = doc.stats();
+    var summary = firstFail < 0
+      ? "REPLAY CLEAN — " + ops.length + " ops, " + s.edges + " edges, " + ms + "ms"
+      : "REPLAY CORRUPT at op#" + firstFail + " — " + ops.length + " ops, " + ms + "ms";
+    document.title = summary;
+    document.getElementById("summary").textContent = summary;
+    log("");
+    log(summary, firstFail < 0 ? "pass" : "fail");
+    document.getElementById("btn-debug").disabled = false;
+    render();
+  }
+
+  function openFile(file) {
+    file.text().then(function (t) { return runLog(JSON.parse(t)); })
+      .catch(function (err) { log("ERROR: " + (err && err.stack || err), "fail"); });
+  }
+
+  document.getElementById("file").addEventListener("change", function (ev) {
+    if (ev.target.files.length) openFile(ev.target.files[0]);
+  });
+  var drop = document.getElementById("drop");
+  drop.addEventListener("dragover", function (ev) { ev.preventDefault(); });
+  drop.addEventListener("drop", function (ev) {
+    ev.preventDefault();
+    if (ev.dataTransfer.files.length) openFile(ev.dataTransfer.files[0]);
+  });
+  document.getElementById("btn-debug").addEventListener("click", function () {
+    showDebug = !showDebug;
+    render();
+  });
+
+  // Headless mode: ?journal=<url> auto-loads a log (used by the harness).
+  var m = location.search.match(/[?&]journal=([^&]+)/);
+  if (m) {
+    fetch(decodeURIComponent(m[1]))
+      .then(function (r) { return r.json(); })
+      .then(runLog)
+      .catch(function (err) { log("ERROR: " + err, "fail"); document.title = "REPLAY ERROR"; });
+  }
+})();
+</script>
+</body>
+</html>

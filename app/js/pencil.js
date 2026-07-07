@@ -59,6 +59,19 @@
     // zoomed in = precise, zoomed out = forgiving.
     var snapTol = Math.min(200, Math.max(20,
       Math.round(4 * VB.TWIPS / this.app.view.zoom)));
+    this.app.record({
+      op: "pencil",
+      points: pts.map(function (p) { return { x: p.x, y: p.y }; }),
+      style: {
+        width: this.app.strokeWidth,
+        color: {
+          r: this.app.strokeColor.r, g: this.app.strokeColor.g,
+          b: this.app.strokeColor.b, a: this.app.strokeColor.a
+        }
+      },
+      tolerance: null,
+      snapTol: snapTol
+    });
     var added = pencilCommit(this.app.doc, pts, {
       width: this.app.strokeWidth,
       color: this.app.strokeColor

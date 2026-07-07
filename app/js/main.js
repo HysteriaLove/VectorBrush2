@@ -25,6 +25,8 @@
     debug: false,
     debugHover: -1,
     debugPin: -1,
+    journal: [{ op: "new", width: 550 * VB.TWIPS, height: 400 * VB.TWIPS }],
+    record: function (op) { app.journal.push(op); },
     requestRender: requestRender,
     setMsg: setMsg,
     docChanged: docChanged
@@ -63,6 +65,14 @@
     app.debugHover = -1;
     refreshDebugPanel();
     requestRender();
+    // Integrity sentinel: surface corruption the moment it happens so the
+    // journal can be exported as a deterministic bug report.
+    if (app.doc.edges.length <= 4000) {
+      var problems = VB.integrityReport(app.doc);
+      if (problems.length) {
+        setMsg("⚠ " + problems.join(" · ") + " — use Save log to export a repro");
+      }
+    }
   }
 
   function refreshDebugPanel() {
@@ -176,6 +186,8 @@
       app.fileName = name;
       app.sourceBytes = bytes.length;
       app.history.clear();
+      app.journal.length = 0;
+      app.journal.push({ op: "load", name: name, b64: VB.bytesToB64(bytes) });
       document.getElementById("drophint").classList.add("hidden");
       document.getElementById("fileinfo").textContent =
         name + " · " + kind + " · " + bytes.length.toLocaleString() + " B";
@@ -201,6 +213,18 @@
 
   document.getElementById("btn-open").addEventListener("click", function () {
     fileInput.click();
+  });
+
+  document.getElementById("btn-log").addEventListener("click", function () {
+    var blob = new Blob(
+      [JSON.stringify({ version: 1, ops: app.journal })],
+      { type: "application/json" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "vectorbrush-log.json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast("Saved action log (" + app.journal.length + " ops) — replay with test/replay.html");
   });
 
   document.getElementById("btn-save").addEventListener("click", async function () {
@@ -233,10 +257,10 @@
   // ---- undo / redo -----------------------------------------------------------
 
   function doUndo() {
-    if (app.history.undo(app.doc)) { setMsg("undo"); docChanged(); }
+    if (app.history.undo(app.doc)) { app.record({ op: "undo" }); setMsg("undo"); docChanged(); }
   }
   function doRedo() {
-    if (app.history.redo(app.doc)) { setMsg("redo"); docChanged(); }
+    if (app.history.redo(app.doc)) { app.record({ op: "redo" }); setMsg("redo"); docChanged(); }
   }
   document.getElementById("btn-undo").addEventListener("click", doUndo);
   document.getElementById("btn-redo").addEventListener("click", doRedo);

@@ -20,18 +20,22 @@
   var SIDE_PROBE = 1.5; // twips: how far off a boundary piece to sample
 
   function eraseStroke(doc, points, radius) {
-    var loop = VB.buildSwath(points, radius);
+    var swath = VB.buildSwath(points, radius);
+    var loop = swath.loop;
     if (loop.length === 0) return { removed: 0, boundary: 0 };
 
-    // Directed loop for winding queries (kept pristine — noding splits
-    // copies, not these).
     var loopEdges = loop.map(function (g) {
       return VB.edge(g.ax, g.ay, g.cx, g.cy, g.bx, g.by, 0, 0, 0);
     }).filter(function (e) { return !VB.edgeIsDegenerate(e); });
     if (loopEdges.length === 0) return { removed: 0, boundary: 0 };
 
-    function winding(x, y) {
-      return VB.geom.windingNumber(loopEdges, x, y);
+    // The exact swept region: within `radius` of the drag path. This must
+    // NOT be a winding test on the outline loop — concave joins give the
+    // loop tiny backward lobes where the nonzero winding cancels to zero,
+    // which once misclassified flap fragments as boundary (open fill
+    // chains rendered as wedges).
+    function inside(x, y, slack) {
+      return VB.distToPath(swath.path, x, y) <= radius + (slack || 0);
     }
 
     var swathBBox = loopEdges.reduce(function (bb, e) {
@@ -51,9 +55,11 @@
     var pieces = VB.nodeEdges(doc, inserts);
 
     // Classify the swath boundary pieces BEFORE deleting anything: the
-    // outside fill query needs the regions intact. Multiply-split pieces
-    // are rounded copies that can drift ~1.5tw off the pristine loop, so
-    // the side probes escalate until the two sides actually disagree.
+    // outside fill query needs the regions intact. Boundary pieces sit at
+    // distance ≈ radius from the path (± rounding and arc-approximation
+    // error, ~1-2tw), so the side probes escalate until the two sides of
+    // a piece actually disagree; flap fragments from concave joins are
+    // fully inside the swept region and never decide — dropped.
     var probeLadder = [SIDE_PROBE, 4, 10];
     var kept = [];
     for (var i = 0; i < pieces.length; i++) {
@@ -68,13 +74,11 @@
       var rightInside = false, leftInside = false, decided = false, probe = 0;
       for (var pl = 0; pl < probeLadder.length && !decided; pl++) {
         probe = Math.min(probeLadder[pl], radius * 0.4);
-        var wRight = winding(mid.x - dy * probe, mid.y + dx * probe);
-        var wLeft = winding(mid.x + dy * probe, mid.y - dx * probe);
-        rightInside = wRight !== 0;
-        leftInside = wLeft !== 0;
+        rightInside = inside(mid.x - dy * probe, mid.y + dx * probe);
+        leftInside = inside(mid.x + dy * probe, mid.y - dx * probe);
         decided = rightInside !== leftInside;
       }
-      if (!decided) continue; // interior lobe or stray
+      if (!decided) continue; // flap lobe or stray — inside on both sides
 
       var ox = rightInside ? mid.x + dy * probe : mid.x - dy * probe;
       var oy = rightInside ? mid.y - dx * probe : mid.y + dx * probe;
@@ -88,7 +92,10 @@
       kept.push(e);
     }
 
-    // Delete existing edges swallowed by the swath.
+    // Delete existing edges swallowed by the swath. Old edges were split
+    // exactly at the constructed outline, which wobbles ~2tw around the
+    // true radius — the small negative slack keeps sliver pieces in that
+    // band alive rather than eating geometry just outside the eraser.
     var removed = 0;
     var survivors = [];
     for (var j = 0; j < doc.edges.length; j++) {
@@ -96,7 +103,7 @@
       var bb = VB.geom.edgeBBox(de);
       if (VB.geom.bboxOverlap(bb, swathBBox)) {
         var m = VB.geom.evalEdge(de, 0.5);
-        if (winding(m.x, m.y) !== 0) { removed++; continue; }
+        if (inside(m.x, m.y, -2)) { removed++; continue; }
       }
       survivors.push(de);
     }
@@ -146,6 +153,11 @@
     this.points = null;
     if (pos) pts.push({ x: pos.x, y: pos.y });
 
+    this.app.record({
+      op: "erase",
+      points: pts.map(function (p) { return { x: p.x, y: p.y }; }),
+      radius: this.radius()
+    });
     this.app.history.push(this.app.doc);
     var result = eraseStroke(this.app.doc, pts, this.radius());
     if (result.removed === 0 && result.boundary === 0) {

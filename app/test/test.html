@@ -33,6 +33,7 @@
 <script src="../js/swath.js"></script>
 <script src="../js/eraser.js"></script>
 <script src="../js/planarity.js"></script>
+<script src="../js/journal.js"></script>
 <script src="../js/history.js"></script>
 <script src="../js/debug.js"></script>
 <script src="../js/pencil.js"></script>
@@ -513,6 +514,44 @@
       }
     }
     check("storm: fill chains closed", stormOpen === 0, stormOpen + " open chains");
+  })();
+
+  // =================== unit tests: journal replay ==========================
+  // Regression: erasing across a pencil-outlined, bucket-filled shape once
+  // left open fill chains (concave-join bowtie fragments on the swath
+  // outline). This journal reproduced it deterministically.
+  log("journal replay:");
+  await (async function () {
+    var sq = [];
+    for (var i = 0; i <= 40; i++) {
+      var t = i / 40, x, y;
+      if (t < 0.25) { x = 1000 + t * 4 * 6000; y = 1000; }
+      else if (t < 0.5) { x = 7000; y = 1000 + (t - 0.25) * 4 * 5000; }
+      else if (t < 0.75) { x = 7000 - (t - 0.5) * 4 * 6000; y = 6000; }
+      else { x = 1000; y = 6000 - (t - 0.75) * 4 * 5000; }
+      sq.push({ x: x, y: y });
+    }
+    var ops = [
+      { op: "new", width: 11000, height: 8000 },
+      { op: "pencil", points: sq, style: { width: 40, color: { r: 0, g: 0, b: 0, a: 255 } },
+        tolerance: null, snapTol: 55 },
+      { op: "bucket", x: 4000, y: 3500, color: { r: 102, g: 204, b: 255, a: 255 } },
+      { op: "erase", points: [
+        { x: 2000, y: 3500 }, { x: 4000, y: 3600 }, { x: 6000, y: 3400 }], radius: 200 },
+      { op: "undo" },
+      { op: "redo" }
+    ];
+    var corruptAt = -1;
+    var res = await VB.replayJournal(ops, {
+      onOp: function (i, op, d) {
+        if (corruptAt < 0 && VB.integrityReport(d).length) corruptAt = i;
+      }
+    });
+    check("journal replays clean", corruptAt < 0, "corrupt at op#" + corruptAt);
+    check("journal end state sane", res.doc.edges.length > 4 &&
+      VB.geom.fillAt(res.doc, 4000, 3500 - 800) === 1,
+      res.doc.edges.length + " edges");
+    check("journal erase carved band", VB.geom.fillAt(res.doc, 4000, 3550) === 0);
   })();
 
   // ======================= fixture pipeline tests ==========================

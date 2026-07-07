@@ -20,6 +20,8 @@
 <script src="../js/swath.js"></script>
 <script src="../js/eraser.js"></script>
 <script src="../js/planarity.js"></script>
+<script src="../js/journal.js"></script>
+<script src="../js/history.js"></script>
 <script src="../js/pencil.js"></script>
 <script>
 (function () {
@@ -262,8 +264,88 @@
 
   if (!euler1) fails++;
   if (!euler2) fails++;
-  document.title = "REPRO DONE violations=" + (v.length + v2.length) + " fails=" + fails;
-  log("REPRO DONE violations=" + (v.length + v2.length) + " fails=" + fails);
+
+  // Pointer-realistic journals: dense jittery tracks like real mouse input
+  // (samples every ~2px, wobble, scrubbing erases), replayed through the
+  // exact journal path the app records. Integrity after every op.
+  async function pointerScenario(sd) {
+    seed = sd;
+    function track(x, y, heading, n, step, jitter, meander) {
+      var pts = [];
+      for (var i = 0; i < n; i++) {
+        pts.push({ x: x + (rnd() - 0.5) * jitter, y: y + (rnd() - 0.5) * jitter });
+        heading += (rnd() - 0.5) * meander;
+        x += Math.cos(heading) * step;
+        y += Math.sin(heading) * step;
+        if (x < 500 || x > 15500) heading = Math.PI - heading;
+        if (y < 500 || y > 11500) heading = -heading;
+      }
+      return pts;
+    }
+    function scrub(x, y, n, amp, step) {
+      // back-and-forth erase scrubbing, like a user rubbing something out
+      var pts = [];
+      var heading = rnd() * Math.PI * 2;
+      for (var i = 0; i < n; i++) {
+        var s = Math.sin(i * 0.35) * amp;
+        pts.push({
+          x: x + Math.cos(heading) * (i * step * 0.4) + Math.cos(heading + Math.PI / 2) * s,
+          y: y + Math.sin(heading) * (i * step * 0.4) + Math.sin(heading + Math.PI / 2) * s
+        });
+      }
+      return pts;
+    }
+
+    var ops = [{ op: "new", width: 16000, height: 12000 }];
+    var stroke = { width: 40, color: { r: 0, g: 0, b: 0, a: 255 } };
+    for (var p = 0; p < 8; p++) {
+      ops.push({
+        op: "pencil",
+        points: track(2000 + rnd() * 12000, 2000 + rnd() * 8000,
+          rnd() * Math.PI * 2, 100 + Math.floor(rnd() * 150), 40, 16, 0.25),
+        style: stroke, tolerance: null, snapTol: 55
+      });
+    }
+    for (var b = 0; b < 8; b++) {
+      ops.push({
+        op: "bucket", x: 3000 + rnd() * 10000, y: 2500 + rnd() * 7000,
+        color: { r: 102, g: 204, b: 255, a: 255 }
+      });
+    }
+    for (var e = 0; e < 3; e++) {
+      ops.push({
+        op: "erase",
+        points: scrub(3000 + rnd() * 10000, 2500 + rnd() * 7000,
+          60 + Math.floor(rnd() * 80), 500 + rnd() * 900, 40),
+        radius: 200
+      });
+    }
+
+    var firstFail = -1, failDetail = "";
+    await VB.replayJournal(ops, {
+      onOp: function (i, op, d) {
+        if (firstFail >= 0) return;
+        var problems = VB.integrityReport(d);
+        if (problems.length) {
+          firstFail = i;
+          failDetail = op.op + ": " + problems.join(" · ");
+        }
+      }
+    });
+    if (firstFail >= 0) {
+      fails++;
+      log("pointer seed " + sd + ": FAIL at op#" + firstFail + " — " + failDetail);
+    } else {
+      log("pointer seed " + sd + ": clean (" + ops.length + " ops)");
+    }
+  }
+
+  Promise.all([]).then(async function () {
+    var seeds = [11, 22, 33, 44, 55];
+    for (var i = 0; i < seeds.length; i++) await pointerScenario(seeds[i]);
+    document.title = "REPRO DONE violations=" + (v.length + v2.length) + " fails=" + fails;
+    log("REPRO DONE violations=" + (v.length + v2.length) + " fails=" + fails);
+  });
 })();
 </script>
 </body>

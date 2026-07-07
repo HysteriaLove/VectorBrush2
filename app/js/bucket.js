@@ -52,6 +52,13 @@
   }
 
   BucketTool.prototype.onDown = function (pos) {
+    this.app.record({
+      op: "bucket", x: pos.x, y: pos.y,
+      color: {
+        r: this.app.fillColor.r, g: this.app.fillColor.g,
+        b: this.app.fillColor.b, a: this.app.fillColor.a
+      }
+    });
     this.app.history.push(this.app.doc);
     var result = bucketFill(this.app.doc, pos.x, pos.y, { color: this.app.fillColor });
     if (result.stamped === 0) {

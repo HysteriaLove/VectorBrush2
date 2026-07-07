@@ -64,7 +64,8 @@ no epsilons.
 | `js/planarity.js` | Integrity checker: finds transversal crossings without a shared node (the invariant everything else relies on) |
 | `js/bucket.js` | Bucket tool: stamp the clicked face's boundary sides, dissolve redundant borders |
 | `js/swath.js` | Capsule-chain outlines (drag path + radius → closed loop of lines and quad arcs); interior lobes are cleaned by winding classification |
-| `js/eraser.js` | Eraser tool: node the swath into the map, delete edges inside (signed winding), re-side the boundary to the surviving fills |
+| `js/eraser.js` | Eraser tool: node the swath into the map, delete edges inside (exact distance-to-path test), re-side the boundary to the surviving fills |
+| `js/journal.js` | Action log: record every tool op, deterministic replay, integrity reporting |
 | `js/history.js` | Snapshot undo/redo |
 | `js/debug.js` | Vector debug overlay + hover edge inspector |
 | `js/pencil.js` | Pencil tool: capture → fit → merge, with raw-trail preview |
@@ -74,6 +75,17 @@ The document model is deliberately **not** an object/layer scene graph: like
 Flash's stage drawing layer, the whole document is one planar map. The pencil,
 bucket, and eraser tools will operate by inserting/splitting/re-siding edges
 in that map.
+
+## Deterministic bug reports: the action log
+
+Every document-mutating action (pencil strokes with their exact pointer
+trails, bucket clicks, erases, undo/redo, file loads) is recorded in an
+in-memory journal. **Save log** in the toolbar exports it as JSON; opening
+`test/replay.html` and dropping the file replays the session through the
+real tool code, runs integrity checks (twips invariant, planarity, fill
+chain closure) after every op, and names the **first op that corrupts the
+document**. The status bar also warns live (⚠) the moment an edit breaks
+integrity, so a repro can be exported right when it happens.
 
 ## Tests
 
@@ -93,7 +105,9 @@ The `<title>`/final line reads `VBTEST DONE pass=N fail=M`.
 verification (bounded faces must equal E − V + C), wavy-grid bucket
 containment, and the casual-drawing gap scenarios.
 
-Current status: 253 checks, 0 failures — the SWF/VBD pipeline suite plus
+Current status: 259 checks, 0 failures — the SWF/VBD pipeline suite plus
+the journal-replay regression (pencil square → bucket fill → erase across
+it, the case that exposed the concave-join bowtie bug) and
 eraser unit tests (band erase splitting a fill, dab holes with
 bucket-refill healing back to the original geometry, stroke trimming,
 blank no-op, corner clipping) and

@@ -1,0 +1,123 @@
+/* journal.js — deterministic action log.
+ *
+ * Every document-mutating user action is recorded with its exact inputs
+ * (pointer trails in float twips, colors, radii, snap tolerances), so a
+ * session can be exported as JSON and replayed bit-for-bit through the
+ * same code paths. This is the bug-reporting backbone: a broken drawing
+ * plus its journal is a deterministic reproduction.
+ *
+ * Ops:
+ *   {op:"new", width, height}                          fresh document
+ *   {op:"load", name, b64}                             open .swf/.vbd
+ *   {op:"pencil", points, style:{width,color}, tolerance, snapTol}
+ *   {op:"bucket", x, y, color}
+ *   {op:"erase", points, radius}
+ *   {op:"undo"} / {op:"redo"}
+ */
+(function () {
+  "use strict";
+
+  function bytesToB64(bytes) {
+    var s = "";
+    for (var i = 0; i < bytes.length; i += 0x8000) {
+      s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(s);
+  }
+
+  function b64ToBytes(b64) {
+    var bin = atob(b64);
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+
+  /**
+   * Replays a journal through the real tool code paths.
+   *  ops:   the journal array
+   *  hooks: optional { onOp(index, op, doc) } called AFTER each op —
+   *         throw from it to abort (used by the replay harness to run
+   *         integrity checks and pinpoint the corrupting op).
+   * Returns { doc, history }.
+   */
+  async function replayJournal(ops, hooks) {
+    var doc = new VB.VBDocument();
+    var history = new VB.History();
+
+    for (var i = 0; i < ops.length; i++) {
+      var op = ops[i];
+      switch (op.op) {
+        case "new":
+          doc = new VB.VBDocument();
+          if (op.width) doc.width = op.width;
+          if (op.height) doc.height = op.height;
+          history.clear();
+          break;
+        case "load": {
+          var bytes = b64ToBytes(op.b64);
+          var result = VB.isVBD(bytes)
+            ? await VB.decodeVBD(bytes)
+            : await VB.parseSWF(bytes.buffer);
+          doc = result.doc;
+          history.clear();
+          break;
+        }
+        case "pencil":
+          history.push(doc);
+          VB.pencilCommit(doc, op.points, op.style,
+            op.tolerance === null ? undefined : op.tolerance,
+            op.snapTol);
+          break;
+        case "bucket": {
+          history.push(doc);
+          var r = VB.bucketFill(doc, op.x, op.y, { color: op.color });
+          if (r.stamped === 0) history.undoStack.pop(); // mirror the tool
+          break;
+        }
+        case "erase": {
+          history.push(doc);
+          var re = VB.eraseStroke(doc, op.points, op.radius);
+          if (re.removed === 0 && re.boundary === 0) history.undoStack.pop();
+          break;
+        }
+        case "undo":
+          history.undo(doc);
+          break;
+        case "redo":
+          history.redo(doc);
+          break;
+        default:
+          throw new Error("unknown journal op: " + op.op);
+      }
+      if (hooks && hooks.onOp) hooks.onOp(i, op, doc);
+    }
+    return { doc: doc, history: history };
+  }
+
+  // Standard integrity sweep used by the replay harness and tests.
+  function integrityReport(doc) {
+    var problems = [];
+    var inv = doc.validate();
+    if (inv.length) problems.push("invariant: " + inv[0]);
+    var planar = VB.validatePlanar(doc, 10);
+    if (planar.length) {
+      problems.push("planarity: " + planar.length + " un-noded crossings, first at (" +
+        planar[0].point.x.toFixed(1) + "," + planar[0].point.y.toFixed(1) + ")");
+    }
+    var perFill = VB.buildFillPaths(doc);
+    var open = 0;
+    for (var f = 1; f < perFill.length; f++) {
+      for (var c = 0; c < perFill[f].length; c++) {
+        if (!perFill[f][c].closed) open++;
+      }
+    }
+    if (open) problems.push("fills: " + open + " open boundary chains");
+    return problems;
+  }
+
+  window.VB = window.VB || {};
+  VB.replayJournal = replayJournal;
+  VB.integrityReport = integrityReport;
+  VB.bytesToB64 = bytesToB64;
+  VB.b64ToBytes = b64ToBytes;
+})();
