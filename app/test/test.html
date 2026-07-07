@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>VBTEST RUNNING</title>
+<style>
+  body { font: 12px/1.5 Consolas, monospace; background: #1b1d20; color: #cfd2d6; margin: 16px; }
+  pre { white-space: pre-wrap; }
+  .grid { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+  .cell { background: #26282c; padding: 6px; border: 1px solid #000; }
+  .cell div { color: #8a8d93; font-size: 11px; margin-bottom: 4px; }
+  canvas { display: block; background: #fff; }
+  .pass { color: #7ad97a; }
+  .fail { color: #ff7a7a; font-weight: bold; }
+</style>
+</head>
+<body>
+<h3>VectorBrush pipeline tests</h3>
+<pre id="out"></pre>
+<div class="grid" id="grid"></div>
+
+<script src="../js/bitio.js"></script>
+<script src="../js/doc.js"></script>
+<script src="../js/swf.js"></script>
+<script src="../js/trace.js"></script>
+<script src="../js/render.js"></script>
+<script src="../js/vbd.js"></script>
+<script src="fixtures.js"></script>
+<script>
+(async function () {
+  "use strict";
+  var out = document.getElementById("out");
+  var pass = 0, fail = 0;
+
+  function log(line, cls) {
+    var span = document.createElement("span");
+    span.textContent = line + "\n";
+    if (cls) span.className = cls;
+    out.appendChild(span);
+  }
+
+  function check(name, cond, detail) {
+    if (cond) { pass++; }
+    else { fail++; log("  FAIL " + name + (detail ? " — " + detail : ""), "fail"); }
+    return cond;
+  }
+
+  function b64ToBuf(b64) {
+    var bin = atob(b64);
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes.buffer;
+  }
+
+  function hexColor(c) {
+    function h(v) { return v.toString(16).padStart(2, "0"); }
+    return "#" + h(c.r) + h(c.g) + h(c.b);
+  }
+
+  function edgeKeySet(doc) {
+    var keys = [];
+    for (var i = 0; i < doc.edges.length; i++) {
+      var e = doc.edges[i];
+      if (VB.edgeIsDegenerate(e)) continue;
+      keys.push([e.ax, e.ay, e.cx, e.cy, e.bx, e.by, e.fill0, e.fill1, e.line].join("/"));
+    }
+    keys.sort();
+    return keys;
+  }
+
+  function sameStringArrays(a, b) {
+    if (a.length !== b.length) return "length " + a.length + " vs " + b.length;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) return "first diff at " + i + ": " + a[i] + " vs " + b[i];
+    }
+    return null;
+  }
+
+  for (var fi = 0; fi < window.VBTestFixtures.length; fi++) {
+    var fx = window.VBTestFixtures[fi];
+    log(fx.name + ":");
+    try {
+      var buf = b64ToBuf(fx.b64);
+      var t0 = performance.now();
+      var res = await VB.parseSWF(buf);
+      var parseMs = performance.now() - t0;
+      var doc = res.doc;
+      var s = doc.stats();
+      var ex = fx.expected;
+
+      check("stage width", doc.width === ex.widthTwips, doc.width + " vs " + ex.widthTwips);
+      check("stage height", doc.height === ex.heightTwips, doc.height + " vs " + ex.heightTwips);
+      check("background", hexColor(doc.background) === ex.bg, hexColor(doc.background) + " vs " + ex.bg);
+      check("fill styles", s.fills === ex.fills, s.fills + " vs " + ex.fills);
+      check("line styles", s.lines === ex.lines, s.lines + " vs " + ex.lines);
+      check("straight edges", s.straight === ex.straight, s.straight + " vs " + ex.straight);
+      check("curved edges", s.curved === ex.curved, s.curved + " vs " + ex.curved);
+
+      // Fill/stroke tracing sanity: every fill style with edges must yield
+      // at least one closed loop.
+      var fillPaths = VB.buildFillPaths(doc);
+      var openLoops = 0, loops = 0;
+      for (var f = 1; f < fillPaths.length; f++) {
+        for (var c = 0; c < fillPaths[f].length; c++) {
+          loops++;
+          if (!fillPaths[f][c].closed) openLoops++;
+        }
+      }
+      check("fill loops close", openLoops === 0, openLoops + " of " + loops + " loops open");
+
+      // VBD round-trip, uncompressed.
+      var rawVbd = await VB.encodeVBD(doc, { compress: false });
+      var dec1 = await VB.decodeVBD(rawVbd);
+      var diff1 = sameStringArrays(edgeKeySet(doc), edgeKeySet(dec1.doc));
+      check("vbd roundtrip edges", diff1 === null, diff1);
+      check("vbd roundtrip fills", JSON.stringify(doc.fills) === JSON.stringify(dec1.doc.fills));
+      check("vbd roundtrip lines", JSON.stringify(doc.lines) === JSON.stringify(dec1.doc.lines));
+      check("vbd roundtrip stage", dec1.doc.width === doc.width && dec1.doc.height === doc.height);
+
+      // VBD round-trip, compressed.
+      var zipVbd = await VB.encodeVBD(doc, { compress: true });
+      var dec2 = await VB.decodeVBD(zipVbd);
+      var diff2 = sameStringArrays(edgeKeySet(doc), edgeKeySet(dec2.doc));
+      check("vbd compressed roundtrip", diff2 === null, diff2);
+
+      log("  ok · parse " + parseMs.toFixed(1) + "ms · swf " + fx.b64.length * 3 / 4 +
+          "B ≈ vbd " + rawVbd.length + "B raw / " + zipVbd.length + "B deflate", "pass");
+
+      // Render for the screenshot pass.
+      var cell = document.createElement("div");
+      cell.className = "cell";
+      var label = document.createElement("div");
+      label.textContent = fx.name;
+      var cv = document.createElement("canvas");
+      var scale = 260 / (doc.width / VB.TWIPS);
+      cv.width = 260;
+      cv.height = Math.round(doc.height / VB.TWIPS * scale);
+      cell.appendChild(label);
+      cell.appendChild(cv);
+      document.getElementById("grid").appendChild(cell);
+      VB.render(cv.getContext("2d"), doc, { zoom: scale, panX: 0, panY: 0, dpr: 1 });
+    } catch (err) {
+      fail++;
+      log("  EXCEPTION: " + (err && err.stack || err), "fail");
+    }
+  }
+
+  var summary = "VBTEST DONE pass=" + pass + " fail=" + fail;
+  document.title = summary;
+  log("");
+  log(summary, fail ? "fail" : "pass");
+})();
+</script>
+</body>
+</html>

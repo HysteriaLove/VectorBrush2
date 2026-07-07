@@ -1,0 +1,17 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "VectorBrush App",
+      "type": "msedge",
+      "request": "launch",
+      "file": "${workspaceFolder}/app/index.html"
+    },
+    {
+      "name": "VectorBrush Tests",
+      "type": "msedge",
+      "request": "launch",
+      "file": "${workspaceFolder}/app/test/test.html"
+    }
+  ]
+}

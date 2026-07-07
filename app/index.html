@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>VectorBrush</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #26282c;
+    --panel: #303338;
+    --panel-edge: #1c1e21;
+    --text: #d8dade;
+    --text-dim: #9a9da3;
+    --accent: #4da3ff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    font: 13px/1.4 "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    user-select: none;
+  }
+
+  #topbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--panel-edge);
+  }
+  #topbar .brand {
+    font-weight: 600;
+    letter-spacing: .4px;
+    margin-right: 8px;
+  }
+  #topbar .brand span { color: var(--accent); }
+  button {
+    font: inherit;
+    color: var(--text);
+    background: #3c4046;
+    border: 1px solid #24262a;
+    border-radius: 4px;
+    padding: 4px 10px;
+    cursor: pointer;
+  }
+  button:hover { background: #474c53; }
+  button:active { background: #2f3237; }
+  button:disabled { opacity: .45; cursor: default; }
+  .sep { width: 1px; align-self: stretch; background: var(--panel-edge); margin: 0 4px; }
+  .spacer { flex: 1; }
+  #fileinfo { color: var(--text-dim); font-size: 12px; }
+
+  #middle { flex: 1; display: flex; min-height: 0; }
+
+  #tools {
+    width: 46px;
+    background: var(--panel);
+    border-right: 1px solid var(--panel-edge);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 8px;
+    gap: 6px;
+  }
+  #tools button {
+    width: 34px; height: 34px;
+    padding: 0;
+    font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #tools button.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+
+  #canvaswrap { flex: 1; position: relative; min-width: 0; }
+  #stage-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #drophint {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    pointer-events: none;
+    color: var(--text-dim);
+    font-size: 15px;
+    text-align: center;
+  }
+  #drophint.hidden { display: none; }
+
+  #statusbar {
+    display: flex;
+    gap: 18px;
+    padding: 4px 10px;
+    background: var(--panel);
+    border-top: 1px solid var(--panel-edge);
+    color: var(--text-dim);
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  #status-msg { color: var(--text); }
+
+  #toast {
+    position: absolute;
+    left: 50%; bottom: 40px;
+    transform: translateX(-50%);
+    background: #16181b;
+    border: 1px solid #000;
+    color: var(--text);
+    padding: 8px 16px;
+    border-radius: 6px;
+    opacity: 0;
+    transition: opacity .25s;
+    pointer-events: none;
+    max-width: 70%;
+  }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+  <div id="topbar">
+    <div class="brand">Vector<span>Brush</span></div>
+    <button id="btn-open" title="Open .swf or .vbd (Ctrl+O)">Open…</button>
+    <button id="btn-save" title="Save as compact .vbd">Save .vbd</button>
+    <div class="sep"></div>
+    <button id="btn-zoom-out" title="Zoom out">−</button>
+    <button id="btn-zoom-100" title="Zoom to 100%">100%</button>
+    <button id="btn-zoom-in" title="Zoom in">+</button>
+    <button id="btn-fit" title="Fit stage in window">Fit</button>
+    <div class="spacer"></div>
+    <div id="fileinfo">no file loaded</div>
+  </div>
+
+  <div id="middle">
+    <div id="tools">
+      <button data-tool="select" class="active" title="Selection tool (V)">➤</button>
+      <button data-tool="pencil" title="Pencil tool (P) — next milestone">✎</button>
+      <button data-tool="bucket" title="Bucket fill (B) — next milestone">🪣</button>
+      <button data-tool="eraser" title="Eraser (E) — next milestone">🧽</button>
+    </div>
+    <div id="canvaswrap">
+      <canvas id="stage-canvas"></canvas>
+      <div id="drophint">Drop a .swf or .vbd file here<br>or use Open…</div>
+      <div id="toast"></div>
+    </div>
+  </div>
+
+  <div id="statusbar">
+    <span id="status-doc">—</span>
+    <span id="status-pos"></span>
+    <span id="status-zoom"></span>
+    <span class="spacer"></span>
+    <span id="status-msg"></span>
+  </div>
+
+  <input type="file" id="file-input" accept=".swf,.vbd" style="display:none">
+
+  <script src="js/bitio.js"></script>
+  <script src="js/doc.js"></script>
+  <script src="js/swf.js"></script>
+  <script src="js/trace.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/vbd.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

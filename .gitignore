@@ -1,0 +1,8 @@
+# Reference library checkouts (full upstream clones, not our code).
+# Re-clone if missing:
+#   git clone https://github.com/ruffle-rs/ruffle
+#   git clone https://github.com/paperjs/paper.js
+#   git clone https://github.com/fonttools/skia-pathops
+/ruffle/
+/paper.js/
+/skia-pathops/
