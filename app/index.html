@@ -177,10 +177,13 @@
     <button id="btn-redo" title="Redo (Ctrl+Y)" disabled>↷</button>
     <div class="sep"></div>
     <label class="ctl" title="Stroke color">
-      <input type="color" id="stroke-color" value="#000000">
+      ✎<input type="color" id="stroke-color" value="#000000">
     </label>
     <label class="ctl" title="Stroke width (px)">
       <input type="number" id="stroke-width" value="1" min="0.05" max="10" step="0.25">px
+    </label>
+    <label class="ctl" title="Fill color (bucket)">
+      🪣<input type="color" id="fill-color" value="#66ccff">
     </label>
     <div class="sep"></div>
     <button id="btn-zoom-out" title="Zoom out">−</button>
@@ -197,7 +200,7 @@
     <div id="tools">
       <button data-tool="select" class="active" title="Selection tool (V)">➤</button>
       <button data-tool="pencil" title="Pencil tool (P)">✎</button>
-      <button data-tool="bucket" title="Bucket fill (B) — next milestone">🪣</button>
+      <button data-tool="bucket" title="Bucket fill (B)">🪣</button>
       <button data-tool="eraser" title="Eraser (E) — next milestone">🧽</button>
     </div>
     <div id="canvaswrap">
@@ -231,6 +234,8 @@
   <script src="js/vbd.js"></script>
   <script src="js/fit.js"></script>
   <script src="js/merge.js"></script>
+  <script src="js/faces.js"></script>
+  <script src="js/bucket.js"></script>
   <script src="js/history.js"></script>
   <script src="js/debug.js"></script>
   <script src="js/pencil.js"></script>

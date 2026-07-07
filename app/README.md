@@ -12,10 +12,15 @@ Drop a `.swf` or `.vbd` onto the canvas, or use **Open…**.
 
 - Mouse wheel: zoom around the cursor
 - Middle-drag or Space+drag: pan
-- `V`/`P`/`B`/`E`: tool shortcuts (bucket and eraser land in the next milestones)
+- `V`/`P`/`B`/`E`: tool shortcuts (eraser lands in the next milestone)
 - **Pencil** (`P`): draw; stroke color/width in the toolbar; strokes are
   smoothed to lines+quads and merged into the planar map (crossed edges
   split, fills inherited) exactly like Flash
+- **Bucket** (`B`): click a region to fill it with the toolbar fill color.
+  Finds the planar-map face under the cursor (half-edge walk with hole
+  assignment, so islands keep their fill), stamps the facing side of every
+  boundary edge, and dissolves lineless borders between same-fill regions
+  — Flash's exact behavior in the Fill*.swf reference snapshots
 - `Ctrl+Z` / `Ctrl+Y` (or `Ctrl+Shift+Z`): undo / redo
 - `D` or **Debug**: vector debug view — edge wires (cyan straight, magenta
   quad), anchors, control points, direction chevrons, fill-side ticks, and
@@ -45,6 +50,8 @@ no epsilons.
 | `js/geom.js` | Edge geometry: line/quad/quad-quad intersections, de Casteljau splitting with shared rounded junctions, point-in-fill parity, distance queries |
 | `js/fit.js` | Pencil smoothing: corner segmentation + least-squares quad fitting with recursive split (Schneider-style, emits lines+quads) |
 | `js/merge.js` | Planar merge: re-nodes new strokes against the map (both sides split at crossings) and inherits region fills onto stroke pieces |
+| `js/faces.js` | Face traversal: half-edge cycles via angular ordering at nodes, orientation classification, hole-to-face assignment, point-to-face lookup |
+| `js/bucket.js` | Bucket tool: stamp the clicked face's boundary sides, dissolve redundant borders |
 | `js/history.js` | Snapshot undo/redo |
 | `js/debug.js` | Vector debug overlay + hover edge inspector |
 | `js/pencil.js` | Pencil tool: capture → fit → merge, with raw-trail preview |
@@ -69,7 +76,9 @@ msedge --headless --disable-gpu --user-data-dir=%TEMP%\vbtest ^
 ```
 
 The `<title>`/final line reads `VBTEST DONE pass=N fail=M`.
-Current status: 198 checks, 0 failures — the SWF/VBD pipeline suite plus
+Current status: 222 checks, 0 failures — the SWF/VBD pipeline suite plus
+bucket-fill unit tests (outline fill, outside no-op, split-region fills,
+border dissolution, island/annulus hole assignment, style dedup) and
 unit tests for intersections, splitting, point-in-fill parity, stroke
 fitting, planar merge (crossing, fill inheritance, self-crossing),
 undo/redo, and the Flash-parity invariant (`doc.validate()`: integer twips
@@ -81,6 +90,6 @@ files.
 
 1. ~~Canvas milestone: SWF loading, planar-map document, rendering, `.vbd`~~
 2. ~~Pencil tool (capture → curve fit → planar merge), undo/redo, vector debug view~~
-3. Bucket fill (region tracing in the planar map, edge re-siding, border dissolution)
+3. ~~Bucket fill (face tracing, edge re-siding, border dissolution)~~
 4. Eraser (boolean subtraction against fills, stroke trimming)
 5. Pixi.js rendering backend

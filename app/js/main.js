@@ -20,6 +20,7 @@
     history: new VB.History(),
     strokeColor: { r: 0, g: 0, b: 0, a: 255 },
     strokeWidth: 20,          // twips (1 px), Flash's default pencil width
+    fillColor: { r: 102, g: 204, b: 255, a: 255 },
     debug: false,
     debugHover: -1,
     debugPin: -1,
@@ -29,8 +30,9 @@
   };
 
   var tools = {
-    pencil: new VB.PencilTool(app)
-    // bucket, eraser: next milestones
+    pencil: new VB.PencilTool(app),
+    bucket: new VB.BucketTool(app)
+    // eraser: next milestone
   };
 
   // ---- rendering loop ------------------------------------------------------
@@ -396,6 +398,17 @@
     if (isFinite(px) && px > 0) app.strokeWidth = Math.round(px * VB.TWIPS);
   });
 
+  var fillInput = document.getElementById("fill-color");
+  fillInput.addEventListener("input", function () {
+    var v = fillInput.value;
+    app.fillColor = {
+      r: parseInt(v.slice(1, 3), 16),
+      g: parseInt(v.slice(3, 5), 16),
+      b: parseInt(v.slice(5, 7), 16),
+      a: 255
+    };
+  });
+
   // ---- tool palette -----------------------------------------------------------------
 
   function selectTool(tool) {
@@ -436,6 +449,8 @@
       wavePts.push({ x: 400 + wv * 165, y: 4000 + Math.round(2400 * Math.sin(wv / 6)) });
     }
     VB.pencilCommit(d, wavePts, { width: 40, color: { r: 200, g: 40, b: 40, a: 255 } });
+    // bucket-fill one of the faces the wave carved out of the square
+    VB.bucketFill(d, 5000, 2200, { color: { r: 255, g: 214, b: 79, a: 255 } });
     document.getElementById("drophint").classList.add("hidden");
     toggleDebug();
     app.debugPin = Math.min(9, d.edges.length - 1);

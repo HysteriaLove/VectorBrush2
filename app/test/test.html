@@ -28,6 +28,8 @@
 <script src="../js/vbd.js"></script>
 <script src="../js/fit.js"></script>
 <script src="../js/merge.js"></script>
+<script src="../js/faces.js"></script>
+<script src="../js/bucket.js"></script>
 <script src="../js/history.js"></script>
 <script src="../js/debug.js"></script>
 <script src="../js/pencil.js"></script>
@@ -258,6 +260,101 @@
     check("undo restores", doc4.edges.length === before, doc4.edges.length + " vs " + before);
     hist.redo(doc4);
     check("redo restores", doc4.edges.length === after, doc4.edges.length + " vs " + after);
+  })();
+
+  // ======================= unit tests: bucket fill =========================
+  log("bucket fill:");
+  (function () {
+    var stroke = { width: 20, color: { r: 0, g: 0, b: 0, a: 255 } };
+    var red = { color: { r: 220, g: 40, b: 40, a: 255 } };
+    var blue = { color: { r: 40, g: 80, b: 220, a: 255 } };
+
+    // 1. Fill a pencil-outlined rectangle: edges gain a fill on the
+    //    interior side, keep their line style, nothing dissolves.
+    var doc = new VB.VBDocument();
+    VB.pencilCommit(doc, [{ x: 0, y: 0 }, { x: 4000, y: 0 }], stroke);
+    VB.pencilCommit(doc, [{ x: 4000, y: 0 }, { x: 4000, y: 3000 }], stroke);
+    VB.pencilCommit(doc, [{ x: 4000, y: 3000 }, { x: 0, y: 3000 }], stroke);
+    VB.pencilCommit(doc, [{ x: 0, y: 3000 }, { x: 0, y: 0 }], stroke);
+    var r1 = VB.bucketFill(doc, 2000, 1500, red);
+    check("outline fill stamps 4 sides", r1.stamped === 4, r1.stamped + " stamped");
+    check("outline fill dissolves none", r1.dissolved === 0, r1.dissolved + " dissolved");
+    check("outline fill contains center", VB.geom.fillAt(doc, 2000, 1500) === 1);
+    check("outline fill keeps outside empty", VB.geom.fillAt(doc, 5000, 1500) === 0);
+    check("outline fill keeps strokes", doc.edges.every(function (e) { return e.line === 1; }));
+    check("outline fill invariant", doc.validate().length === 0, doc.validate()[0]);
+
+    // 2. Click outside any region: no-op.
+    var r0 = VB.bucketFill(doc, 9000, 9000, red);
+    check("outside click is a no-op", r0.stamped === 0 && doc.edges.length === 4);
+
+    // 3. Pencil line across the filled rect splits it into two faces;
+    //    each fills independently.
+    VB.pencilCommit(doc, [{ x: 2000, y: -500 }, { x: 2000, y: 1500 }, { x: 2000, y: 3500 }], stroke);
+    var r2 = VB.bucketFill(doc, 1000, 1500, blue);
+    check("left half fill works", r2.stamped > 0);
+    var fLeft = VB.geom.fillAt(doc, 1000, 1500);
+    var fRight = VB.geom.fillAt(doc, 3000, 1500);
+    check("left half is blue", JSON.stringify(doc.fills[fLeft - 1].color).indexOf("220") > 0 &&
+      doc.fills[fLeft - 1].color.b === 220, "fill " + fLeft);
+    check("right half still red", doc.fills[fRight - 1].color.r === 220, "fill " + fRight);
+    check("halves differ", fLeft !== fRight);
+    check("split-fill invariant", doc.validate().length === 0, doc.validate()[0]);
+
+    // 4. Dissolution: two rects sharing a lineless border; filling the
+    //    right one with the left one's color merges them.
+    var doc2 = new VB.VBDocument();
+    doc2.fills.push(VB.solidFill(200, 60, 60)); // style 1
+    doc2.fills.push(VB.solidFill(60, 60, 200)); // style 2
+    doc2.edges.push(
+      // left rect (clockwise, fill1 = interior)
+      VB.edge(0, 0, null, null, 2000, 0, 0, 1, 0),
+      VB.edge(2000, 2000, null, null, 0, 2000, 0, 1, 0),
+      VB.edge(0, 2000, null, null, 0, 0, 0, 1, 0),
+      // shared border: left rect on right of south travel, right rect on left
+      VB.edge(2000, 0, null, null, 2000, 2000, 2, 1, 0),
+      // right rect (clockwise)
+      VB.edge(2000, 0, null, null, 4000, 0, 0, 2, 0),
+      VB.edge(4000, 0, null, null, 4000, 2000, 0, 2, 0),
+      VB.edge(4000, 2000, null, null, 2000, 2000, 0, 2, 0));
+    var r3 = VB.bucketFill(doc2, 3000, 1000, { color: { r: 200, g: 60, b: 60, a: 255 } });
+    check("dissolve happened", r3.dissolved === 1, r3.dissolved + " dissolved");
+    check("merged region count", doc2.edges.length === 6, doc2.edges.length + " edges");
+    check("left still filled", VB.geom.fillAt(doc2, 1000, 1000) === 1);
+    check("right now same fill", VB.geom.fillAt(doc2, 3000, 1000) === 1);
+    check("dissolve invariant", doc2.validate().length === 0, doc2.validate()[0]);
+
+    // 5. Island: fill the annulus between two squares; the island keeps
+    //    its own fill (hole assignment).
+    var doc3 = new VB.VBDocument();
+    doc3.fills.push(VB.solidFill(0, 150, 80));  // style 1: island fill
+    doc3.edges.push(
+      // outer square (clockwise, no fill yet — outline-less region)
+      VB.edge(0, 0, null, null, 6000, 0, 0, 0, 0),
+      VB.edge(6000, 0, null, null, 6000, 6000, 0, 0, 0),
+      VB.edge(6000, 6000, null, null, 0, 6000, 0, 0, 0),
+      VB.edge(0, 6000, null, null, 0, 0, 0, 0, 0),
+      // island square (clockwise): interior = style 1, exterior empty
+      VB.edge(2000, 2000, null, null, 4000, 2000, 0, 1, 0),
+      VB.edge(4000, 2000, null, null, 4000, 4000, 0, 1, 0),
+      VB.edge(4000, 4000, null, null, 2000, 4000, 0, 1, 0),
+      VB.edge(2000, 4000, null, null, 2000, 2000, 0, 1, 0));
+    var r4 = VB.bucketFill(doc3, 1000, 1000, { color: { r: 255, g: 200, b: 0, a: 255 } });
+    check("annulus stamps outer+hole", r4.stamped === 8, r4.stamped + " stamped");
+    var fAnnulus = VB.geom.fillAt(doc3, 1000, 1000);
+    var fIsland = VB.geom.fillAt(doc3, 3000, 3000);
+    check("annulus filled", fAnnulus === 2, "fill " + fAnnulus);
+    check("island keeps its fill", fIsland === 1, "fill " + fIsland);
+    check("island edges dual-faced", doc3.edges.filter(function (e) {
+      return e.fill0 === 2 && e.fill1 === 1;
+    }).length === 4);
+    check("island invariant", doc3.validate().length === 0, doc3.validate()[0]);
+
+    // 6. Refill with the same color (idempotent, style deduped).
+    var stylesBefore = doc3.fills.length;
+    VB.bucketFill(doc3, 1000, 1000, { color: { r: 255, g: 200, b: 0, a: 255 } });
+    check("refill dedupes style", doc3.fills.length === stylesBefore);
+    check("refill keeps fill", VB.geom.fillAt(doc3, 1000, 1000) === 2);
   })();
 
   // ======================= fixture pipeline tests ==========================
