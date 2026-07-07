@@ -39,6 +39,7 @@
 <script src="../js/debug.js"></script>
 <script src="../js/pencil.js"></script>
 <script src="fixtures.js"></script>
+<script src="userlog.js"></script>
 <script>
 (async function () {
   "use strict";
@@ -610,6 +611,48 @@
       VB.geom.fillAt(res.doc, 4000, 3500 - 800) === 1,
       res.doc.edges.length + " edges");
     check("journal erase carved band", VB.geom.fillAt(res.doc, 4000, 3550) === 0);
+  })();
+
+  // ============== regression: real user session (189KB journal) ============
+  // Replays a recorded session (1 pencil scribble, 18 fills, 55 erases,
+  // 27 undos) that exhibited "erasing makes a whole region disappear" at
+  // ops 42/72/101. Coverage-diffs every erase: fills may only vanish
+  // within reach of the erase path.
+  log("user session replay:");
+  await (async function () {
+    var ops = window.VBUserLog.ops;
+    var GRID = 500;
+    function sampleFills(doc) {
+      var m = new Map();
+      for (var x = GRID / 2; x < doc.width; x += GRID) {
+        for (var y = GRID / 2; y < doc.height; y += GRID) {
+          var f = VB.geom.fillAt(doc, x, y);
+          if (f) m.set(x + "," + y, f);
+        }
+      }
+      return m;
+    }
+    var prevSamples = null;
+    var vanishEvents = 0, firstCorrupt = -1;
+    var res = await VB.replayJournal(ops, {
+      onOp: function (i, op, doc) {
+        if (firstCorrupt < 0 && VB.integrityReport(doc).length) firstCorrupt = i;
+        var cur = sampleFills(doc);
+        if (prevSamples && op.op === "erase") {
+          prevSamples.forEach(function (f, key) {
+            if (cur.has(key)) return;
+            var xy = key.split(",");
+            if (VB.distToPath(op.points, +xy[0], +xy[1]) > op.radius + 80) vanishEvents++;
+          });
+        }
+        prevSamples = cur;
+      }
+    });
+    check("session replays without corruption", firstCorrupt < 0, "corrupt at op#" + firstCorrupt);
+    check("no region vanishes beyond the eraser", vanishEvents === 0,
+      vanishEvents + " far-vanish samples");
+    check("session end state non-trivial", res.doc.edges.length > 100,
+      res.doc.edges.length + " edges");
   })();
 
   // ======================= fixture pipeline tests ==========================

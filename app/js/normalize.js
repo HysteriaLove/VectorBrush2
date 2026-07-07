@@ -22,7 +22,17 @@
     return Math.hypot(e.bx - e.ax, e.by - e.ay) + 1;
   }
 
-  function normalizeFills(doc) {
+  /**
+   * emptyProbes (optional): points KNOWN to lie in empty regions — the
+   * eraser passes its drag path. A face containing one is forced empty
+   * with no vote: stale claims on a freshly carved channel's boundary
+   * can outvote the new fences (observed 3608:2803 in a real session),
+   * and once the vote stamps the channel filled, the fences dissolve as
+   * "redundant" and the surrounding region merges with the channel —
+   * which a later emptiness pass then wipes entirely. The axiom must
+   * outrank the vote, inside the same pass.
+   */
+  function normalizeFills(doc, emptyProbes) {
     var edges = doc.edges;
     if (edges.length === 0) return { restamped: 0, dissolved: 0 };
     var built = VB.buildFaces(doc);
@@ -31,6 +41,19 @@
     var f0 = new Array(edges.length).fill(0);
     var f1 = new Array(edges.length).fill(0);
 
+    function containsProbe(boundary) {
+      if (!emptyProbes) return false;
+      for (var s = 0; s < emptyProbes.length; s++) {
+        var crossings = 0;
+        for (var b = 0; b < boundary.length; b++) {
+          crossings += VB.edgeRayCrossings(
+            edges[boundary[b].edge], emptyProbes[s].x, emptyProbes[s].y);
+        }
+        if (crossings & 1) return true;
+      }
+      return false;
+    }
+
     for (var fi = 0; fi < built.faces.length; fi++) {
       var face = built.faces[fi];
       var boundary = face.outer.slice();
@@ -38,18 +61,33 @@
         boundary = boundary.concat(face.holes[h]);
       }
 
-      // Length-weighted vote over the face's current claims.
-      var tally = new Map();
-      for (var b = 0; b < boundary.length; b++) {
-        var he = boundary[b];
-        var e = edges[he.edge];
-        var claim = he.forward ? e.fill1 : e.fill0;
-        tally.set(claim, (tally.get(claim) || 0) + edgeWeight(e));
+      var winner = 0;
+      if (!containsProbe(boundary)) {
+        // Length-weighted vote over the face's current claims — but only
+        // edges that SEPARATE this face from another one get a say. An
+        // edge whose both half-edges lie on this same boundary is
+        // dangling inside the face (stub strokes, orphaned fences): it
+        // divides nothing, its claims are stale noise, and it would vote
+        // with double weight (observed flipping a filled region to empty
+        // in a real session log).
+        var occurrences = new Map();
+        for (var o = 0; o < boundary.length; o++) {
+          var oe = boundary[o].edge;
+          occurrences.set(oe, (occurrences.get(oe) || 0) + 1);
+        }
+        var tally = new Map();
+        for (var b = 0; b < boundary.length; b++) {
+          var he = boundary[b];
+          if (occurrences.get(he.edge) > 1) continue;
+          var e = edges[he.edge];
+          var claim = he.forward ? e.fill1 : e.fill0;
+          tally.set(claim, (tally.get(claim) || 0) + edgeWeight(e));
+        }
+        var best = -1;
+        tally.forEach(function (w, claim) {
+          if (w > best || (w === best && claim === 0)) { best = w; winner = claim; }
+        });
       }
-      var winner = 0, best = -1;
-      tally.forEach(function (w, claim) {
-        if (w > best || (w === best && claim === 0)) { best = w; winner = claim; }
-      });
 
       for (var b2 = 0; b2 < boundary.length; b2++) {
         var he2 = boundary[b2];

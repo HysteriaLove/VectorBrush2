@@ -95,6 +95,12 @@
   }
 
   // Standard integrity sweep used by the replay harness and tests.
+  // Open fill chains are graded by their gap chord: a wide gap renders
+  // as a visible fill wedge (corruption); a gap of a few twips is a
+  // cosmetic seam — the unavoidable cost of integer-twips editing next
+  // to sub-probe slivers (Flash quantizes the same way).
+  var SEAM_TOL = 30; // twips (1.5px)
+
   function integrityReport(doc) {
     var problems = [];
     var inv = doc.validate();
@@ -105,13 +111,20 @@
         planar[0].point.x.toFixed(1) + "," + planar[0].point.y.toFixed(1) + ")");
     }
     var perFill = VB.buildFillPaths(doc);
-    var open = 0;
+    var wide = 0, widest = 0;
     for (var f = 1; f < perFill.length; f++) {
       for (var c = 0; c < perFill[f].length; c++) {
-        if (!perFill[f][c].closed) open++;
+        var ch = perFill[f][c];
+        if (ch.closed) continue;
+        var last = ch.pts[ch.pts.length - 1];
+        var gap = Math.hypot(last.x - ch.sx, last.y - ch.sy);
+        if (gap > SEAM_TOL) { wide++; widest = Math.max(widest, gap); }
       }
     }
-    if (open) problems.push("fills: " + open + " open boundary chains");
+    if (wide) {
+      problems.push("fills: " + wide + " open boundary chains (widest gap " +
+        Math.round(widest) + "tw)");
+    }
     return problems;
   }
 

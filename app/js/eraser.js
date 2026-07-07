@@ -48,9 +48,9 @@
     }, null);
 
     // Erasing blank space is a true no-op — don't litter the map with
-    // 0|0 fences that normalize would immediately dissolve. "Blank" means
-    // no edge nearby AND not inside a fill (a swath wholly inside a big
-    // fill overlaps no edge bboxes but is very much an erase).
+    // 0|0 fences. "Blank" means no edge nearby AND not inside a fill (a
+    // swath wholly inside a big fill overlaps no edge bboxes but is very
+    // much an erase).
     var touches = doc.edges.some(function (e) {
       return VB.geom.bboxOverlap(VB.geom.edgeBBox(e), swathBBox);
     });
@@ -60,6 +60,16 @@
           swath.path[swath.path.length - 1].y) === 0) {
       return { removed: 0, boundary: 0 };
     }
+
+    // Ground truth for the re-derivation at the end: the pre-op document
+    // is consistent (claims agree with faces — verified after every op),
+    // so region queries against this snapshot are exact.
+    var preOp = new VB.VBDocument();
+    preOp.width = doc.width; preOp.height = doc.height;
+    preOp.fills = doc.fills; preOp.lines = doc.lines;
+    preOp.edges = doc.edges.map(function (e) {
+      return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, e.fill0, e.fill1, e.line);
+    });
 
     // Node the swath boundary into the map (splits existing edges at the
     // swath outline; returns the outline's own pieces, not yet inserted).
@@ -135,63 +145,172 @@
     // crossing without a shared node — split them now or faces leak.
     VB.repairPlanar(doc);
 
-    // Re-derive every fill claim from face-level consensus: overlapping
-    // erases can strand boundary fragments asserting fills that are no
-    // longer there (thin slivers defeat any probe-based classification),
-    // and one stale claim renders as fill wedges.
-    VB.normalizeFills(doc);
+    deriveFills(doc, preOp, swath.path, radius);
 
-    // The consensus vote can still be won by a long stale boundary when
-    // channels merge — but any face containing a point of the erase path
-    // is empty BY DEFINITION. Enforce that directly. (Called through the
-    // namespace so tests can instrument it.)
-    VB.zeroErasedFaces(doc, swath.path);
+    // Terminal self-heal: old-fence × new-fence grazings can leave a fill
+    // boundary topologically open at twip precision even when everything
+    // above did its job. The renderer closes open chains with a straight
+    // chord anyway — so make that chord REAL geometry (lineless, fill on
+    // the chain's fill side, noded into the map). No visual change, but
+    // the closed-boundary invariant holds for the bucket and later ops.
+    stitchOpenChains(doc);
 
     return { removed: removed, boundary: kept.length };
   }
 
-  // Stamp fill 0 onto every face that contains a sample of the erase path,
-  // then dissolve boundaries that became invisible.
-  function zeroErasedFaces(doc, path) {
-    if (doc.edges.length === 0) return;
-    var samples = [];
-    var step = Math.max(1, Math.floor(path.length / 6));
-    for (var i = 0; i < path.length; i += step) samples.push(path[i]);
-    if (samples[samples.length - 1] !== path[path.length - 1]) {
-      samples.push(path[path.length - 1]);
+  function stitchOpenChains(doc) {
+    for (var pass = 0; pass < 2; pass++) {
+      var perFill = VB.buildFillPaths(doc);
+      var chords = [];
+      for (var f = 1; f < perFill.length; f++) {
+        for (var c = 0; c < perFill[f].length; c++) {
+          var ch = perFill[f][c];
+          if (ch.closed) continue;
+          var last = ch.pts[ch.pts.length - 1];
+          if (Math.hypot(last.x - ch.sx, last.y - ch.sy) <= 2) continue;
+          // Chains walk with their fill on the right (fill1 side); the
+          // closing chord end→start keeps the same handedness.
+          chords.push(VB.edge(last.x, last.y, null, null, ch.sx, ch.sy, 0, f, 0));
+        }
+      }
+      if (chords.length === 0) return;
+      var pieces = VB.nodeEdges(doc, chords);
+      for (var p = 0; p < pieces.length; p++) doc.edges.push(pieces[p]);
+      VB.repairPlanar(doc);
+    }
+  }
+
+  var FENCE_BAND = 4;    // twips: construction wobble of the swath outline
+  var SIDE_NUDGE = 2;    // twips: how far off an edge each face is sampled
+  var SUSPECT_PAD = 40;  // twips: a "carved channel" face must fit within this
+
+  // Fill re-derivation after the carve. Faces coordinate (so long shared
+  // boundaries get ONE consistent answer), but only where they can be
+  // trusted; where the face structure is suspect, exact per-edge local
+  // queries take over. Learned the hard way on real session logs:
+  //   - whole-face votes let stale claims empty entire regions,
+  //   - pure per-edge answers disagree along long walls (giant seams),
+  //   - the failure mode must always degrade toward "a sliver keeps its
+  //     old fill", never "a region vanishes".
+  // Rules per face (only faces near the swath are touched at all):
+  //   1. contains an erase-path probe and fits within the swept
+  //      neighborhood → it IS the carved channel → empty, by definition;
+  //   2. contains a probe but extends far beyond the swath → the fence
+  //      leaked and this "face" is a merger of channel and innocent
+  //      regions → don't trust it as a unit; re-derive its boundary
+  //      edges individually from local truth;
+  //   3. no probe inside → decide once, exactly, from its own boundary
+  //      probe (distance rules near the fence band, pre-op region parity
+  //      otherwise) and stamp the whole face with it.
+  function deriveFills(doc, preOp, path, radius) {
+    function sideFill(px, py, baseDist) {
+      var d = VB.distToPath(path, px, py);
+      if (d <= radius - FENCE_BAND) return 0;
+      if (d <= radius + FENCE_BAND && d < baseDist) return 0;
+      return VB.geom.fillAt(preOp, px, py);
     }
 
+    // Re-derives ONE face of an edge — the side of the given half-edge.
+    // Touching both sides here would clobber the claim a neighboring
+    // healthy face already stamped on its own side of a shared edge.
+    function deriveEdgeSide(e, forward) {
+      var mid = VB.geom.evalEdge(e, 0.5);
+      var baseDist = VB.distToPath(path, mid.x, mid.y);
+      if (baseDist > radius + 20) return; // local truth already exact
+      var ahead = VB.geom.evalEdge(e, 0.55);
+      var dx = ahead.x - mid.x, dy = ahead.y - mid.y;
+      var len = Math.hypot(dx, dy);
+      if (len === 0) return;
+      dx /= len; dy /= len;
+      // visual right of travel = (-dy, dx) → fill1; left → fill0
+      if (forward) {
+        e.fill1 = sideFill(mid.x - dy * SIDE_NUDGE, mid.y + dx * SIDE_NUDGE, baseDist);
+      } else {
+        e.fill0 = sideFill(mid.x + dy * SIDE_NUDGE, mid.y - dx * SIDE_NUDGE, baseDist);
+      }
+    }
+
+    var probes = [];
+    var step = Math.max(1, Math.floor(path.length / 24));
+    for (var ps = 0; ps < path.length; ps += step) probes.push(path[ps]);
+
     var built = VB.buildFaces(doc);
-    var changed = false;
-    for (var f = 0; f < built.faces.length; f++) {
-      var face = built.faces[f];
-      var cycles = [face.outer].concat(face.holes);
-      var contains = false;
-      for (var s = 0; s < samples.length && !contains; s++) {
+    for (var fi = 0; fi < built.faces.length; fi++) {
+      var face = built.faces[fi];
+      var boundary = face.outer.slice();
+      for (var h = 0; h < face.holes.length; h++) {
+        boundary = boundary.concat(face.holes[h]);
+      }
+
+      // Distance extent of the face's boundary from the erase path.
+      var minDist = Infinity, maxDist = 0;
+      for (var b = 0; b < boundary.length; b++) {
+        var em = VB.geom.evalEdge(doc.edges[boundary[b].edge], 0.5);
+        var d = VB.distToPath(path, em.x, em.y);
+        minDist = Math.min(minDist, d);
+        maxDist = Math.max(maxDist, d);
+      }
+      if (minDist > radius + 20) continue; // face untouched by this erase
+
+      var containsProbe = false;
+      for (var s = 0; s < probes.length && !containsProbe; s++) {
         var crossings = 0;
-        for (var c = 0; c < cycles.length; c++) {
-          for (var h = 0; h < cycles[c].length; h++) {
-            crossings += VB.edgeRayCrossings(
-              doc.edges[cycles[c][h].edge], samples[s].x, samples[s].y);
-          }
+        for (var b2 = 0; b2 < boundary.length; b2++) {
+          crossings += VB.edgeRayCrossings(
+            doc.edges[boundary[b2].edge], probes[s].x, probes[s].y);
         }
-        contains = (crossings & 1) === 1;
+        containsProbe = (crossings & 1) === 1;
       }
-      if (!contains) continue;
-      for (var c2 = 0; c2 < cycles.length; c2++) {
-        for (var h2 = 0; h2 < cycles[c2].length; h2++) {
-          var he = cycles[c2][h2];
-          var e = doc.edges[he.edge];
-          if (he.forward) { if (e.fill1 !== 0) { e.fill1 = 0; changed = true; } }
-          else { if (e.fill0 !== 0) { e.fill0 = 0; changed = true; } }
+
+      // Stamping is ALWAYS scope-limited: a face's boundary can reach
+      // arbitrarily far, and if the face is secretly merged through a
+      // fence leak, stamping remote sides silently corrupts regions the
+      // eraser never came near (observed: stroke edges 1900tw away left
+      // with 0|0 claims). Remote sides keep their exact pre-op claims.
+      function inScope(he) {
+        var m = VB.geom.evalEdge(doc.edges[he.edge], 0.5);
+        return VB.distToPath(path, m.x, m.y) <= radius + 20;
+      }
+
+      if (containsProbe && maxDist <= radius + SUSPECT_PAD) {
+        // 1. the carved channel itself
+        for (var b3 = 0; b3 < boundary.length; b3++) {
+          var he = boundary[b3];
+          if (!inScope(he)) continue;
+          if (he.forward) doc.edges[he.edge].fill1 = 0;
+          else doc.edges[he.edge].fill0 = 0;
+        }
+      } else if (containsProbe) {
+        // 2. suspect merger — fall back to exact local truth, one side
+        //    per half-edge (deriveEdgeSide is scope-limited itself)
+        for (var b4 = 0; b4 < boundary.length; b4++) {
+          deriveEdgeSide(doc.edges[boundary[b4].edge], boundary[b4].forward);
+        }
+      } else {
+        // 3. bystander face clipped by the swath: one exact decision
+        var probe = VB.probeForCycle(doc.edges, face.outer);
+        var dProbe = VB.distToPath(path, probe.x, probe.y);
+        var winner;
+        if (dProbe <= radius - FENCE_BAND) {
+          winner = 0;
+        } else if (dProbe <= radius + FENCE_BAND) {
+          var dBase = VB.distToPath(path, probe.baseX, probe.baseY);
+          winner = dProbe < dBase ? 0 : VB.geom.fillAt(preOp, probe.x, probe.y);
+        } else {
+          winner = VB.geom.fillAt(preOp, probe.x, probe.y);
+        }
+        for (var b5 = 0; b5 < boundary.length; b5++) {
+          var he2 = boundary[b5];
+          if (!inScope(he2)) continue;
+          if (he2.forward) doc.edges[he2.edge].fill1 = winner;
+          else doc.edges[he2.edge].fill0 = winner;
         }
       }
     }
-    if (changed) {
-      doc.edges = doc.edges.filter(function (e) {
-        return !(e.fill0 === e.fill1 && e.line === 0);
-      });
-    }
+
+    doc.edges = doc.edges.filter(function (e2) {
+      return !(e2.fill0 === e2.fill1 && e2.line === 0);
+    });
   }
 
   // ---- interactive tool ------------------------------------------------------
@@ -284,5 +403,4 @@
   window.VB = window.VB || {};
   VB.EraserTool = EraserTool;
   VB.eraseStroke = eraseStroke;
-  VB.zeroErasedFaces = zeroErasedFaces; // exposed for diagnostics/tests
 })();

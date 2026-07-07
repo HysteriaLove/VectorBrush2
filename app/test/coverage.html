@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>COVERAGE RUNNING</title>
+<style>body{font:12px Consolas,monospace;background:#1b1d20;color:#cfd2d6}</style></head>
+<body><pre id="out"></pre>
+<script src="../js/bitio.js"></script>
+<script src="../js/doc.js"></script>
+<script src="../js/geom.js"></script>
+<script src="../js/swf.js"></script>
+<script src="../js/trace.js"></script>
+<script src="../js/render.js"></script>
+<script src="../js/vbd.js"></script>
+<script src="../js/fit.js"></script>
+<script src="../js/merge.js"></script>
+<script src="../js/faces.js"></script>
+<script src="../js/normalize.js"></script>
+<script src="../js/bucket.js"></script>
+<script src="../js/swath.js"></script>
+<script src="../js/eraser.js"></script>
+<script src="../js/planarity.js"></script>
+<script src="../js/journal.js"></script>
+<script src="../js/history.js"></script>
+<script src="../js/pencil.js"></script>
+<script>
+(async function () {
+  var out = document.getElementById("out");
+  function log(s) { out.textContent += s + "\n"; }
+
+  var m = location.search.match(/[?&]journal=([^&]+)/);
+  var url = m ? decodeURIComponent(m[1]) : "sample-log.json";
+  var json = await (await fetch(url)).json();
+  var ops = json.ops;
+  log("ops: " + ops.length);
+
+  var GRID = 250; // twips
+  function sample(doc) {
+    var m = new Map();
+    for (var x = GRID / 2; x < doc.width; x += GRID) {
+      for (var y = GRID / 2; y < doc.height; y += GRID) {
+        var f = VB.geom.fillAt(doc, x, y);
+        if (f) m.set(x + "," + y, f);
+      }
+    }
+    return m;
+  }
+
+  var prev = null;
+  var events = [];
+  await VB.replayJournal(ops, {
+    onOp: function (i, op, doc) {
+      var cur = sample(doc);
+      if (prev && op.op === "erase") {
+        var vanished = [];
+        prev.forEach(function (f, key) {
+          if (cur.has(key)) return;
+          var xy = key.split(",");
+          var px = +xy[0], py = +xy[1];
+          var d = VB.distToPath(op.points, px, py);
+          if (d > op.radius + 80) {
+            vanished.push({ x: px, y: py, d: Math.round(d) });
+          }
+        });
+        if (vanished.length) {
+          events.push({ op: i, count: vanished.length, pts: vanished.slice(0, 4) });
+          log("op#" + i + " erase(" + op.points.length + "pts): " + vanished.length +
+              " samples vanished FAR from the path, e.g. " +
+              vanished.slice(0, 4).map(function (v) {
+                return "(" + v.x + "," + v.y + ") d=" + v.d;
+              }).join(" "));
+        }
+      }
+      prev = cur;
+    }
+  });
+  log("total vanish events: " + events.length);
+  document.title = "COVERAGE DONE events=" + events.length;
+})();
+</script>
+</body></html>

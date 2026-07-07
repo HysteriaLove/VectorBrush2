@@ -53,13 +53,13 @@
   }
 
   /**
-   * Builds all faces of the planar map.
-   * Returns { faces } where each face is:
-   *   { outer: [halfEdge], holes: [[halfEdge]], area }
-   * and each halfEdge is { edge: index, forward: bool }.
-   * The infinite face is not returned (its cycles bound no region).
+   * Traces every walk cycle of the planar map — pure geometry, no
+   * orientation classification, no hole grouping. Returns
+   * [{ cycle: [halfEdge], area, pts }] covering every half-edge exactly
+   * once. This is the trustworthy core; everything layered on top of it
+   * (hole assignment in particular) is heuristic.
    */
-  function buildFaces(doc) {
+  function traceCycles(doc) {
     var edges = doc.edges;
 
     // Outgoing half-edges per node, angle-sorted.
@@ -130,6 +130,19 @@
       area /= 2;
       return { cycle: cyc, area: area, pts: pts };
     });
+    return cycleInfo;
+  }
+
+  /**
+   * Builds all faces of the planar map.
+   * Returns { faces } where each face is:
+   *   { outer: [halfEdge], holes: [[halfEdge]], area }
+   * and each halfEdge is { edge: index, forward: bool }.
+   * The infinite face is not returned (its cycles bound no region).
+   */
+  function buildFaces(doc) {
+    var edges = doc.edges;
+    var cycleInfo = traceCycles(doc);
 
     // Positive cycles bound regions; negative ones are holes/infinite.
     var outers = cycleInfo.filter(function (c) { return c.area > 0; });
@@ -176,7 +189,9 @@
     var dx = e.bx - e.ax, dy = e.by - e.ay;
     if (!best.forward) { dx = -dx; dy = -dy; }
     var len = Math.hypot(dx, dy) || 1;
-    return { x: p.x - dy / len, y: p.y + dx / len };
+    // baseX/baseY: the exact on-curve point the probe was nudged from —
+    // callers use it to tell which side of a boundary the face lies on.
+    return { x: p.x - dy / len, y: p.y + dx / len, baseX: p.x, baseY: p.y };
   }
 
   // Parity of a point against one cycle's underlying edges. Each
@@ -250,6 +265,8 @@
 
   window.VB = window.VB || {};
   VB.buildFaces = buildFaces;
+  VB.traceCycles = traceCycles;
+  VB.probeForCycle = probeForCycle;
   VB.faceAt = faceAt;
   VB.edgeRayCrossings = edgeRayCrossings; // exposed for diagnostics/tests
 })();
