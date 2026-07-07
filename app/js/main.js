@@ -22,8 +22,10 @@
     strokeWidth: 20,          // twips (1 px), Flash's default pencil width
     debug: false,
     debugHover: -1,
+    debugPin: -1,
     requestRender: requestRender,
-    setMsg: setMsg
+    setMsg: setMsg,
+    docChanged: docChanged
   };
 
   var tools = {
@@ -42,9 +44,37 @@
       VB.render(ctx, app.doc, app.view);
       var tool = tools[app.tool];
       if (tool && tool.drawOverlay) tool.drawOverlay(ctx);
-      if (app.debug) VB.renderDebug(ctx, app.doc, app.view, app.debugHover);
+      if (app.debug) {
+        VB.renderDebug(ctx, app.doc, app.view,
+          app.debugPin >= 0 ? app.debugPin : app.debugHover);
+      }
       updateStatus();
     });
+  }
+
+  // Called after any document mutation (draw, undo, load): refreshes the
+  // debug panel's style tables and record-stream stats, which are too
+  // costly to rebuild on every pointer move.
+  function docChanged() {
+    app.debugPin = -1;
+    app.debugHover = -1;
+    refreshDebugPanel();
+    requestRender();
+  }
+
+  function refreshDebugPanel() {
+    if (!app.debug) return;
+    document.getElementById("dbg-styles").innerHTML = VB.debugStylesPanelHTML(app.doc);
+    document.getElementById("dbg-stream").innerHTML = VB.debugStreamPanelHTML(app.doc);
+    refreshDebugEdge();
+  }
+
+  function refreshDebugEdge() {
+    if (!app.debug) return;
+    var idx = app.debugPin >= 0 ? app.debugPin : app.debugHover;
+    document.getElementById("dbg-edge").innerHTML =
+      (app.debugPin >= 0 ? '<div class="dim">📌 pinned — Esc to unpin</div>' : "") +
+      VB.debugEdgePanelHTML(app.doc, idx);
   }
 
   function resizeCanvas() {
@@ -143,12 +173,12 @@
       app.fileName = name;
       app.sourceBytes = bytes.length;
       app.history.clear();
-      app.debugHover = -1;
       document.getElementById("drophint").classList.add("hidden");
       document.getElementById("fileinfo").textContent =
         name + " · " + kind + " · " + bytes.length.toLocaleString() + " B";
       var warn = (result.info.warnings || []);
       setMsg(warn.length ? warn[0] : "");
+      docChanged();
       fitView();
       toast("Loaded " + name);
     } catch (err) {
@@ -200,10 +230,10 @@
   // ---- undo / redo -----------------------------------------------------------
 
   function doUndo() {
-    if (app.history.undo(app.doc)) { app.debugHover = -1; setMsg("undo"); requestRender(); }
+    if (app.history.undo(app.doc)) { setMsg("undo"); docChanged(); }
   }
   function doRedo() {
-    if (app.history.redo(app.doc)) { app.debugHover = -1; setMsg("redo"); requestRender(); }
+    if (app.history.redo(app.doc)) { setMsg("redo"); docChanged(); }
   }
   document.getElementById("btn-undo").addEventListener("click", doUndo);
   document.getElementById("btn-redo").addEventListener("click", doRedo);
@@ -239,6 +269,16 @@
       ev.preventDefault();
       return;
     }
+    if (ev.button === 0 && app.debug && app.tool === "select") {
+      // debug pin: click an edge to lock the inspector on it
+      var pt = clientToTwips(ev);
+      var idx = VB.debugPickEdge(app.doc, pt.x, pt.y, 5 * VB.TWIPS / app.view.zoom);
+      app.debugPin = idx;
+      setMsg(idx >= 0 ? VB.debugDescribeEdge(app.doc, idx) : "");
+      refreshDebugEdge();
+      requestRender();
+      return;
+    }
     if (ev.button === 0) {
       var tool = tools[app.tool];
       if (tool && tool.onDown) {
@@ -259,20 +299,23 @@
     } else if (activePointerTool && activePointerTool.onMove) {
       activePointerTool.onMove(clientToTwips(ev));
     } else if (app.debug) {
-      // hover inspector
+      // hover inspector (pin wins)
       var pt = clientToTwips(ev);
       var tol = 5 * VB.TWIPS / app.view.zoom;
       var idx = VB.debugPickEdge(app.doc, pt.x, pt.y, tol);
       if (idx !== app.debugHover) {
         app.debugHover = idx;
-        setMsg(idx >= 0 ? VB.debugDescribeEdge(app.doc, idx) : "");
-        requestRender();
+        if (app.debugPin < 0) {
+          setMsg(idx >= 0 ? VB.debugDescribeEdge(app.doc, idx) : "");
+          refreshDebugEdge();
+          requestRender();
+        }
       }
     }
     var p = clientToStagePx(ev);
     document.getElementById("status-pos").textContent =
-      p.x.toFixed(1) + ", " + p.y.toFixed(1) + " px (" +
-      Math.round(p.x * VB.TWIPS) + ", " + Math.round(p.y * VB.TWIPS) + " twips)";
+      "(" + Math.round(p.x * VB.TWIPS) + ", " + Math.round(p.y * VB.TWIPS) + ") tw · " +
+      p.x.toFixed(1) + ", " + p.y.toFixed(1) + " px";
   });
 
   canvas.addEventListener("pointerup", function (ev) {
@@ -298,9 +341,15 @@
     if ((ev.ctrlKey && ev.key.toLowerCase() === "y") ||
         (ev.ctrlKey && ev.shiftKey && ev.key.toLowerCase() === "z")) { ev.preventDefault(); doRedo(); return; }
     if (ev.ctrlKey && ev.key.toLowerCase() === "o") { ev.preventDefault(); fileInput.click(); return; }
-    if (ev.key === "Escape" && activePointerTool && activePointerTool.cancel) {
-      activePointerTool.cancel();
-      activePointerTool = null;
+    if (ev.key === "Escape") {
+      if (activePointerTool && activePointerTool.cancel) {
+        activePointerTool.cancel();
+        activePointerTool = null;
+      } else if (app.debugPin >= 0) {
+        app.debugPin = -1;
+        refreshDebugEdge();
+        requestRender();
+      }
       return;
     }
     if (ev.ctrlKey || ev.altKey) return;
@@ -318,9 +367,13 @@
   function toggleDebug() {
     app.debug = !app.debug;
     app.debugHover = -1;
+    app.debugPin = -1;
     document.getElementById("btn-debug").classList.toggle("active", app.debug);
+    document.getElementById("debugpanel").classList.toggle("hidden", !app.debug);
     if (!app.debug) setMsg("");
+    refreshDebugPanel();
     requestRender();
+    resizeCanvas(); // panel changes the canvas area width
   }
   document.getElementById("btn-debug").addEventListener("click", toggleDebug);
 
@@ -367,6 +420,28 @@
 
   resizeCanvas();
   fitView();
+
+  // #demo: synthetic document with the debug view on — used by headless
+  // screenshots and handy for demonstrating the record inspector.
+  if (location.hash === "#demo") {
+    var d = app.doc;
+    d.fills.push(VB.solidFill(120, 200, 255));
+    d.edges.push(
+      VB.edge(2000, 1600, null, null, 8000, 1600, 0, 1, 0),
+      VB.edge(8000, 1600, null, null, 8000, 6400, 0, 1, 0),
+      VB.edge(8000, 6400, null, null, 2000, 6400, 0, 1, 0),
+      VB.edge(2000, 6400, null, null, 2000, 1600, 0, 1, 0));
+    var wavePts = [];
+    for (var wv = 0; wv <= 60; wv++) {
+      wavePts.push({ x: 400 + wv * 165, y: 4000 + Math.round(2400 * Math.sin(wv / 6)) });
+    }
+    VB.pencilCommit(d, wavePts, { width: 40, color: { r: 200, g: 40, b: 40, a: 255 } });
+    document.getElementById("drophint").classList.add("hidden");
+    toggleDebug();
+    app.debugPin = Math.min(9, d.edges.length - 1);
+    refreshDebugEdge();
+    fitView();
+  }
 
   // Expose for debugging / tests.
   window.VBApp = app;

@@ -58,8 +58,8 @@
       width: this.app.strokeWidth,
       color: this.app.strokeColor
     });
+    this.app.docChanged();
     this.app.setMsg(added + " edge" + (added === 1 ? "" : "s") + " added");
-    this.app.requestRender();
   };
 
   PencilTool.prototype.cancel = function () {

@@ -229,6 +229,23 @@
     ], style);
     check("self-cross = 5 edges", doc3.edges.length === 5, doc3.edges.length + " edges");
 
+    // merged documents keep the Flash-parity invariant (integers, indices)
+    check("merge keeps invariant (cross)", doc.validate().length === 0, doc.validate()[0]);
+    check("merge keeps invariant (fill)", doc2.validate().length === 0, doc2.validate()[0]);
+    check("merge keeps invariant (self)", doc3.validate().length === 0, doc3.validate()[0]);
+
+    // Flash-record inspector: reports must match the stored geometry
+    var rec = VB.debugEdgeRecord(doc2, doc2.edges.length - 1);
+    var le = doc2.edges[doc2.edges.length - 1];
+    if (le.cx === null) {
+      check("record deltas exact",
+        rec.deltas.dx === le.bx - le.ax && rec.deltas.dy === le.by - le.ay);
+    } else {
+      check("record deltas exact",
+        rec.deltas.cdx === le.cx - le.ax && rec.deltas.adx === le.bx - le.cx);
+    }
+    check("record bit width sane", rec.nbits >= 2 && rec.nbits <= 17, "nbits=" + rec.nbits);
+
     // undo / redo round-trip
     var doc4 = new VB.VBDocument();
     var hist = new VB.History();
@@ -264,6 +281,16 @@
       check("straight edges", s.straight === ex.straight, s.straight + " vs " + ex.straight);
       check("curved edges", s.curved === ex.curved, s.curved + " vs " + ex.curved);
 
+      // Flash-parity invariant: integer twips + valid style indices.
+      var bad = doc.validate();
+      check("integer-twips invariant", bad.length === 0, bad[0]);
+
+      // Encoder stats must agree with the actual uncompressed encoding.
+      var st = VB.vbdStats(doc);
+      check("stats edges match doc",
+        st.straightEdges + st.curvedEdges >= s.edges,   // >= because oversized edges may split
+        st.straightEdges + st.curvedEdges + " vs " + s.edges);
+
       // Fill/stroke tracing sanity: every fill style with edges must yield
       // at least one closed loop.
       var fillPaths = VB.buildFillPaths(doc);
@@ -278,6 +305,8 @@
 
       // VBD round-trip, uncompressed.
       var rawVbd = await VB.encodeVBD(doc, { compress: false });
+      check("stats bytes match encoding", st.fileBytes === rawVbd.length,
+        st.fileBytes + " vs " + rawVbd.length);
       var dec1 = await VB.decodeVBD(rawVbd);
       var diff1 = sameStringArrays(edgeKeySet(doc), edgeKeySet(dec1.doc));
       check("vbd roundtrip edges", diff1 === null, diff1);

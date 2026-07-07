@@ -127,7 +127,14 @@
     return order;
   }
 
-  function encodeBody(doc) {
+  // stats (optional) is filled with Flash-grammar record counts so the
+  // debug panel can show exactly what the document costs on the wire.
+  function encodeBody(doc, stats) {
+    stats = stats || {};
+    stats.styleChanges = 0;
+    stats.moveTos = 0;
+    stats.straightEdges = 0;
+    stats.curvedEdges = 0;
     var w = new VB.BitWriter();
     w.u8(1); // version
     w.rect({ xmin: 0, xmax: doc.width, ymin: 0, ymax: doc.height });
@@ -170,6 +177,8 @@
       var needLn = e.line !== curLn;
 
       if (needMove || needF0 || needF1 || needLn) {
+        stats.styleChanges++;
+        if (needMove) stats.moveTos++;
         w.ub(1, 0); // non-edge record
         w.ub(5, (needLn ? 8 : 0) | (needF1 ? 4 : 0) | (needF0 ? 2 : 0) | (needMove ? 1 : 0));
         if (needMove) {
@@ -185,6 +194,7 @@
       }
 
       if (e.cx === null) {
+        stats.straightEdges++;
         var dx = e.bx - e.ax, dy = e.by - e.ay;
         var nb = Math.max(2, VB.sbitsAll([dx, dy]));
         w.ub(1, 1); w.ub(1, 1);        // edge, straight
@@ -200,6 +210,7 @@
           w.sb(nb, dx);
         }
       } else {
+        stats.curvedEdges++;
         var cdx = e.cx - e.ax, cdy = e.cy - e.ay;
         var adx = e.bx - e.cx, ady = e.by - e.cy;
         var nb2 = Math.max(2, VB.sbitsAll([cdx, cdy, adx, ady]));
@@ -310,8 +321,19 @@
     return { doc: doc, info: { version: version, compressed: !!(flags & 1) } };
   }
 
+  // Wire-cost introspection for the debug panel: encodes (uncompressed)
+  // and reports Flash-grammar record counts + byte size.
+  function vbdStats(doc) {
+    var stats = {};
+    var body = encodeBody(doc, stats);
+    stats.bodyBytes = body.length;
+    stats.fileBytes = body.length + 5; // + magic/flags header
+    return stats;
+  }
+
   window.VB = window.VB || {};
   VB.encodeVBD = encodeVBD;
   VB.decodeVBD = decodeVBD;
   VB.isVBD = isVBD;
+  VB.vbdStats = vbdStats;
 })();

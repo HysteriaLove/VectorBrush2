@@ -18,8 +18,14 @@ Drop a `.swf` or `.vbd` onto the canvas, or use **Open…**.
   split, fills inherited) exactly like Flash
 - `Ctrl+Z` / `Ctrl+Y` (or `Ctrl+Shift+Z`): undo / redo
 - `D` or **Debug**: vector debug view — edge wires (cyan straight, magenta
-  quad), anchors, control points, direction chevrons, fill-side ticks;
-  hovering an edge shows its indices and coordinates in the status bar
+  quad), anchors, control points, direction chevrons, fill-side ticks, and
+  a side panel showing Flash-accurate record data: the hovered/pinned edge
+  as its record grammar (start anchor, delta coordinates, nbits, bits on
+  wire), both faces (fill0 = left of travel, fill1 = right) with resolved
+  styles, the style tables, and the live record-stream cost (record counts,
+  encoded bytes, bits/edge). With the select tool active, click pins an
+  edge; Esc unpins. All coordinates are integer twips. Open
+  `index.html#demo` for a synthetic document with the panel pre-opened.
 - **Save .vbd**: exports the document in the compact format
 
 ## Architecture
@@ -63,10 +69,13 @@ msedge --headless --disable-gpu --user-data-dir=%TEMP%\vbtest ^
 ```
 
 The `<title>`/final line reads `VBTEST DONE pass=N fail=M`.
-Current status: 163 checks, 0 failures — the SWF/VBD pipeline suite plus
+Current status: 198 checks, 0 failures — the SWF/VBD pipeline suite plus
 unit tests for intersections, splitting, point-in-fill parity, stroke
-fitting, planar merge (crossing, fill inheritance, self-crossing), and
-undo/redo. `.vbd` output is ≤ the source SWF size on all 10 reference files.
+fitting, planar merge (crossing, fill inheritance, self-crossing),
+undo/redo, and the Flash-parity invariant (`doc.validate()`: integer twips
+everywhere, valid style indices) checked on every loaded file and after
+every merge. `.vbd` output is ≤ the source SWF size on all 10 reference
+files.
 
 ## Roadmap
 

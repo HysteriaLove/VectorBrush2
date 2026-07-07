@@ -121,6 +121,41 @@
     };
   };
 
+  // Data integrity: every coordinate must be an integer twip and every
+  // style index must resolve — the exact invariants that keep the document
+  // bit-packable at Flash density. Returns a list of violation strings
+  // (empty = valid).
+  VBDocument.prototype.validate = function () {
+    var bad = [];
+    function isInt(v) { return typeof v === "number" && Number.isInteger(v); }
+    for (var i = 0; i < this.edges.length; i++) {
+      var e = this.edges[i];
+      if (!isInt(e.ax) || !isInt(e.ay) || !isInt(e.bx) || !isInt(e.by)) {
+        bad.push("edge #" + i + ": non-integer anchor");
+      }
+      if (e.cx !== null && (!isInt(e.cx) || !isInt(e.cy))) {
+        bad.push("edge #" + i + ": non-integer control");
+      }
+      if (!isInt(e.fill0) || e.fill0 < 0 || e.fill0 > this.fills.length) {
+        bad.push("edge #" + i + ": bad fill0 " + e.fill0);
+      }
+      if (!isInt(e.fill1) || e.fill1 < 0 || e.fill1 > this.fills.length) {
+        bad.push("edge #" + i + ": bad fill1 " + e.fill1);
+      }
+      if (!isInt(e.line) || e.line < 0 || e.line > this.lines.length) {
+        bad.push("edge #" + i + ": bad line " + e.line);
+      }
+      if (bad.length > 20) { bad.push("..."); break; }
+    }
+    if (!Number.isInteger(this.width) || !Number.isInteger(this.height)) {
+      bad.push("non-integer stage size");
+    }
+    for (var j = 0; j < this.lines.length; j++) {
+      if (!Number.isInteger(this.lines[j].width)) bad.push("line style " + (j + 1) + ": non-integer width");
+    }
+    return bad;
+  };
+
   // ---- helpers ------------------------------------------------------------
 
   function sameColor(a, b) {
