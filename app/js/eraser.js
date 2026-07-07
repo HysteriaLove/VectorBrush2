@@ -47,6 +47,20 @@
       };
     }, null);
 
+    // Erasing blank space is a true no-op — don't litter the map with
+    // 0|0 fences that normalize would immediately dissolve. "Blank" means
+    // no edge nearby AND not inside a fill (a swath wholly inside a big
+    // fill overlaps no edge bboxes but is very much an erase).
+    var touches = doc.edges.some(function (e) {
+      return VB.geom.bboxOverlap(VB.geom.edgeBBox(e), swathBBox);
+    });
+    if (!touches &&
+        VB.geom.fillAt(doc, swath.path[0].x, swath.path[0].y) === 0 &&
+        VB.geom.fillAt(doc, swath.path[swath.path.length - 1].x,
+          swath.path[swath.path.length - 1].y) === 0) {
+      return { removed: 0, boundary: 0 };
+    }
+
     // Node the swath boundary into the map (splits existing edges at the
     // swath outline; returns the outline's own pieces, not yet inserted).
     var inserts = loopEdges.map(function (e) {
@@ -83,9 +97,15 @@
       var ox = rightInside ? mid.x + dy * probe : mid.x - dy * probe;
       var oy = rightInside ? mid.y - dx * probe : mid.y + dx * probe;
       var f = VB.geom.fillAt(doc, ox, oy);
-      if (f === 0) continue; // nothing outside — no boundary needed
 
-      // fill1 = right face, fill0 = left face; the inside face stays 0.
+      // Keep the piece even when the outside is empty (f === 0): a fence
+      // between the erased inside and an adjacent empty region still
+      // defines the face structure. Dropping it once let an erased
+      // channel merge through a thin strip into the whole drawing, and
+      // the fill-consensus pass then dissolved the channel's REAL
+      // boundary (total document wipe-out). Redundant 0|0 fences are
+      // dissolved by normalizeFills AFTER the face vote, when they have
+      // already done their job.
       e.fill0 = rightInside ? f : 0;
       e.fill1 = rightInside ? 0 : f;
       e.line = 0;
@@ -115,7 +135,63 @@
     // crossing without a shared node — split them now or faces leak.
     VB.repairPlanar(doc);
 
+    // Re-derive every fill claim from face-level consensus: overlapping
+    // erases can strand boundary fragments asserting fills that are no
+    // longer there (thin slivers defeat any probe-based classification),
+    // and one stale claim renders as fill wedges.
+    VB.normalizeFills(doc);
+
+    // The consensus vote can still be won by a long stale boundary when
+    // channels merge — but any face containing a point of the erase path
+    // is empty BY DEFINITION. Enforce that directly. (Called through the
+    // namespace so tests can instrument it.)
+    VB.zeroErasedFaces(doc, swath.path);
+
     return { removed: removed, boundary: kept.length };
+  }
+
+  // Stamp fill 0 onto every face that contains a sample of the erase path,
+  // then dissolve boundaries that became invisible.
+  function zeroErasedFaces(doc, path) {
+    if (doc.edges.length === 0) return;
+    var samples = [];
+    var step = Math.max(1, Math.floor(path.length / 6));
+    for (var i = 0; i < path.length; i += step) samples.push(path[i]);
+    if (samples[samples.length - 1] !== path[path.length - 1]) {
+      samples.push(path[path.length - 1]);
+    }
+
+    var built = VB.buildFaces(doc);
+    var changed = false;
+    for (var f = 0; f < built.faces.length; f++) {
+      var face = built.faces[f];
+      var cycles = [face.outer].concat(face.holes);
+      var contains = false;
+      for (var s = 0; s < samples.length && !contains; s++) {
+        var crossings = 0;
+        for (var c = 0; c < cycles.length; c++) {
+          for (var h = 0; h < cycles[c].length; h++) {
+            crossings += VB.edgeRayCrossings(
+              doc.edges[cycles[c][h].edge], samples[s].x, samples[s].y);
+          }
+        }
+        contains = (crossings & 1) === 1;
+      }
+      if (!contains) continue;
+      for (var c2 = 0; c2 < cycles.length; c2++) {
+        for (var h2 = 0; h2 < cycles[c2].length; h2++) {
+          var he = cycles[c2][h2];
+          var e = doc.edges[he.edge];
+          if (he.forward) { if (e.fill1 !== 0) { e.fill1 = 0; changed = true; } }
+          else { if (e.fill0 !== 0) { e.fill0 = 0; changed = true; } }
+        }
+      }
+    }
+    if (changed) {
+      doc.edges = doc.edges.filter(function (e) {
+        return !(e.fill0 === e.fill1 && e.line === 0);
+      });
+    }
   }
 
   // ---- interactive tool ------------------------------------------------------
@@ -208,4 +284,5 @@
   window.VB = window.VB || {};
   VB.EraserTool = EraserTool;
   VB.eraseStroke = eraseStroke;
+  VB.zeroErasedFaces = zeroErasedFaces; // exposed for diagnostics/tests
 })();

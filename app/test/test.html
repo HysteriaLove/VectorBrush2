@@ -29,6 +29,7 @@
 <script src="../js/fit.js"></script>
 <script src="../js/merge.js"></script>
 <script src="../js/faces.js"></script>
+<script src="../js/normalize.js"></script>
 <script src="../js/bucket.js"></script>
 <script src="../js/swath.js"></script>
 <script src="../js/eraser.js"></script>
@@ -514,6 +515,63 @@
       }
     }
     check("storm: fill chains closed", stormOpen === 0, stormOpen + " open chains");
+  })();
+
+  // =============== unit tests: fill normalization ==========================
+  log("fill normalization:");
+  (function () {
+    // A stale lineless claim inside a filled region is outvoted and healed.
+    var doc = new VB.VBDocument();
+    doc.fills.push(VB.solidFill(60, 200, 60));
+    doc.edges.push(
+      VB.edge(0, 0, null, null, 8000, 0, 0, 1, 0),
+      VB.edge(8000, 0, null, null, 8000, 8000, 0, 1, 0),
+      VB.edge(8000, 8000, null, null, 0, 8000, 0, 1, 0),
+      VB.edge(0, 8000, null, null, 0, 0, 0, 1, 0),
+      // stranded fragment claiming green on one side only
+      VB.edge(2000, 2000, null, null, 3000, 2000, 0, 1, 0));
+    var rn = VB.normalizeFills(doc);
+    check("stale claim dissolved", doc.edges.length === 4, doc.edges.length + " edges");
+    check("region intact after heal", VB.geom.fillAt(doc, 4000, 4000) === 1);
+    check("normalize reported work", rn.restamped + rn.dissolved > 0);
+
+    // Idempotence: a consistent document is untouched.
+    var before = JSON.stringify(doc.edges);
+    var rn2 = VB.normalizeFills(doc);
+    check("normalize idempotent", JSON.stringify(doc.edges) === before && rn2.restamped === 0);
+
+    // Overlapping erases leaving a sub-probe sliver must still yield a
+    // consistent document (the stranded-claim wedge bug).
+    var doc2 = new VB.VBDocument();
+    doc2.fills.push(VB.solidFill(60, 200, 60));
+    doc2.edges.push(
+      VB.edge(0, 0, null, null, 8000, 0, 0, 1, 0),
+      VB.edge(8000, 0, null, null, 8000, 8000, 0, 1, 0),
+      VB.edge(8000, 8000, null, null, 0, 8000, 0, 1, 0),
+      VB.edge(0, 8000, null, null, 0, 0, 0, 1, 0));
+    VB.eraseStroke(doc2, [{ x: 1000, y: 3000 }, { x: 7000, y: 3000 }], 400);
+    // second channel: boundaries ~1tw apart from the first channel's
+    VB.eraseStroke(doc2, [{ x: 1000, y: 3801 }, { x: 7000, y: 3801 }], 400);
+    var probs = VB.integrityReport(doc2);
+    check("sliver channels consistent", probs.length === 0, probs[0]);
+    check("sliver: top still green", VB.geom.fillAt(doc2, 4000, 1500) === 1);
+    check("sliver: bottom still green", VB.geom.fillAt(doc2, 4000, 6000) === 1);
+    check("sliver: channels empty", VB.geom.fillAt(doc2, 4000, 3000) === 0 &&
+      VB.geom.fillAt(doc2, 4000, 3801) === 0);
+
+    // Cross-channel scrub over a previous channel at an angle.
+    var doc3 = new VB.VBDocument();
+    doc3.fills.push(VB.solidFill(60, 200, 60));
+    doc3.edges.push(
+      VB.edge(0, 0, null, null, 8000, 0, 0, 1, 0),
+      VB.edge(8000, 0, null, null, 8000, 8000, 0, 1, 0),
+      VB.edge(8000, 8000, null, null, 0, 8000, 0, 1, 0),
+      VB.edge(0, 8000, null, null, 0, 0, 0, 1, 0));
+    VB.eraseStroke(doc3, [{ x: 1000, y: 4000 }, { x: 7000, y: 4000 }], 300);
+    VB.eraseStroke(doc3, [{ x: 2000, y: 6000 }, { x: 6000, y: 2200 }], 300);
+    VB.eraseStroke(doc3, [{ x: 1500, y: 4100 }, { x: 6800, y: 3900 }], 350);
+    var probs3 = VB.integrityReport(doc3);
+    check("cross-scrub consistent", probs3.length === 0, probs3[0]);
   })();
 
   // =================== unit tests: journal replay ==========================

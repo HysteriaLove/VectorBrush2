@@ -16,6 +16,7 @@
 <script src="../js/fit.js"></script>
 <script src="../js/merge.js"></script>
 <script src="../js/faces.js"></script>
+<script src="../js/normalize.js"></script>
 <script src="../js/bucket.js"></script>
 <script src="../js/swath.js"></script>
 <script src="../js/eraser.js"></script>
@@ -306,18 +307,48 @@
         style: stroke, tolerance: null, snapTol: 55
       });
     }
-    for (var b = 0; b < 8; b++) {
+    // interleaved like a real session: fill, erase, fill again (clicks can
+    // land in regions bounded by erase channels), scrub OVER previous
+    // erases (near-coincident lineless boundaries), fill once more
+    var green = { r: 60, g: 200, b: 60, a: 255 };
+    var blue = { r: 102, g: 204, b: 255, a: 255 };
+    for (var b = 0; b < 6; b++) {
       ops.push({
         op: "bucket", x: 3000 + rnd() * 10000, y: 2500 + rnd() * 7000,
-        color: { r: 102, g: 204, b: 255, a: 255 }
+        color: b % 2 ? green : blue
       });
     }
+    var eraseSpots = [];
     for (var e = 0; e < 3; e++) {
+      var ex = 3000 + rnd() * 10000, ey = 2500 + rnd() * 7000;
+      eraseSpots.push({ x: ex, y: ey });
       ops.push({
         op: "erase",
-        points: scrub(3000 + rnd() * 10000, 2500 + rnd() * 7000,
-          60 + Math.floor(rnd() * 80), 500 + rnd() * 900, 40),
+        points: scrub(ex, ey, 60 + Math.floor(rnd() * 80), 500 + rnd() * 900, 40),
         radius: 200
+      });
+    }
+    for (var b2 = 0; b2 < 6; b2++) {
+      var spot = eraseSpots[b2 % eraseSpots.length];
+      ops.push({
+        op: "bucket",
+        x: spot.x + (rnd() - 0.5) * 1500, y: spot.y + (rnd() - 0.5) * 1500,
+        color: b2 % 2 ? blue : green
+      });
+    }
+    for (var e2 = 0; e2 < 2; e2++) {
+      var spot2 = eraseSpots[e2];
+      ops.push({
+        op: "erase",
+        points: scrub(spot2.x + (rnd() - 0.5) * 400, spot2.y + (rnd() - 0.5) * 400,
+          50 + Math.floor(rnd() * 60), 400 + rnd() * 700, 40),
+        radius: 200
+      });
+    }
+    for (var b3 = 0; b3 < 4; b3++) {
+      ops.push({
+        op: "bucket", x: 3000 + rnd() * 10000, y: 2500 + rnd() * 7000,
+        color: b3 % 2 ? green : blue
       });
     }
 
