@@ -67,7 +67,11 @@
           for (var h = 0; h < hits.length; h++) {
             var p = hits[h].point;
             if (nearAnchor(edges[i2], p.x, p.y) || nearAnchor(edges[j2], p.x, p.y)) continue;
-            violations.push({ i: i2, j: j2, point: { x: p.x, y: p.y } });
+            violations.push({
+              i: i2, j: j2,
+              t: hits[h].t, u: hits[h].u,
+              point: { x: p.x, y: p.y }
+            });
             if (violations.length >= cap) return;
           }
         }
@@ -76,6 +80,55 @@
     return violations;
   }
 
+  /**
+   * Restores the planar invariant by splitting every residual transversal
+   * crossing at a shared rounded point. Such crossings slip through the
+   * primary noding when two curves merely graze pre-rounding and become
+   * real crossings after integer quantization — the fragments here are a
+   * twip or two long, invisible, but without a shared node they leak
+   * faces. Returns the number of crossings repaired.
+   */
+  function repairPlanar(doc, maxPasses) {
+    var total = 0;
+    for (var pass = 0; pass < (maxPasses || 3); pass++) {
+      var violations = validatePlanar(doc, 200);
+      if (violations.length === 0) break;
+      total += violations.length;
+
+      var splits = new Map(); // edge index -> [{t, point}]
+      for (var v = 0; v < violations.length; v++) {
+        var p = {
+          x: Math.round(violations[v].point.x),
+          y: Math.round(violations[v].point.y)
+        };
+        addSplit(splits, violations[v].i, violations[v].t, p);
+        addSplit(splits, violations[v].j, violations[v].u, p);
+      }
+
+      var rebuilt = [];
+      for (var e = 0; e < doc.edges.length; e++) {
+        var list = splits.get(e);
+        if (!list) { rebuilt.push(doc.edges[e]); continue; }
+        list.sort(function (a, b) { return a.t - b.t; });
+        var pieces = VB.geom.splitEdge(doc.edges[e], list);
+        for (var k = 0; k < pieces.length; k++) rebuilt.push(pieces[k]);
+      }
+      doc.edges = rebuilt;
+    }
+    return total;
+  }
+
+  function addSplit(map, key, t, point) {
+    var arr = map.get(key);
+    if (!arr) { arr = []; map.set(key, arr); }
+    for (var i = 0; i < arr.length; i++) {
+      if (arr[i].point.x === point.x && arr[i].point.y === point.y) return;
+      if (Math.abs(arr[i].t - t) < 1e-6) return;
+    }
+    arr.push({ t: t, point: point });
+  }
+
   window.VB = window.VB || {};
   VB.validatePlanar = validatePlanar;
+  VB.repairPlanar = repairPlanar;
 })();

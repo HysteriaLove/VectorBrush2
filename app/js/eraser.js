@@ -51,7 +51,10 @@
     var pieces = VB.nodeEdges(doc, inserts);
 
     // Classify the swath boundary pieces BEFORE deleting anything: the
-    // outside fill query needs the regions intact.
+    // outside fill query needs the regions intact. Multiply-split pieces
+    // are rounded copies that can drift ~1.5tw off the pristine loop, so
+    // the side probes escalate until the two sides actually disagree.
+    var probeLadder = [SIDE_PROBE, 4, 10];
     var kept = [];
     for (var i = 0; i < pieces.length; i++) {
       var e = pieces[i];
@@ -62,13 +65,19 @@
       if (len === 0) continue;
       dx /= len; dy /= len;
       // visual right of travel = (-dy, dx); left = (dy, -dx)
-      var wRight = winding(mid.x - dy * SIDE_PROBE, mid.y + dx * SIDE_PROBE);
-      var wLeft = winding(mid.x + dy * SIDE_PROBE, mid.y - dx * SIDE_PROBE);
-      var rightInside = wRight !== 0, leftInside = wLeft !== 0;
-      if (rightInside === leftInside) continue; // interior lobe or stray
+      var rightInside = false, leftInside = false, decided = false, probe = 0;
+      for (var pl = 0; pl < probeLadder.length && !decided; pl++) {
+        probe = Math.min(probeLadder[pl], radius * 0.4);
+        var wRight = winding(mid.x - dy * probe, mid.y + dx * probe);
+        var wLeft = winding(mid.x + dy * probe, mid.y - dx * probe);
+        rightInside = wRight !== 0;
+        leftInside = wLeft !== 0;
+        decided = rightInside !== leftInside;
+      }
+      if (!decided) continue; // interior lobe or stray
 
-      var ox = rightInside ? mid.x + dy * SIDE_PROBE : mid.x - dy * SIDE_PROBE;
-      var oy = rightInside ? mid.y - dx * SIDE_PROBE : mid.y + dx * SIDE_PROBE;
+      var ox = rightInside ? mid.x + dy * probe : mid.x - dy * probe;
+      var oy = rightInside ? mid.y - dx * probe : mid.y + dx * probe;
       var f = VB.geom.fillAt(doc, ox, oy);
       if (f === 0) continue; // nothing outside — no boundary needed
 
@@ -94,6 +103,11 @@
     doc.edges = survivors;
 
     for (var k = 0; k < kept.length; k++) doc.edges.push(kept[k]);
+
+    // Grazing crossings that only became real after rounding leave edges
+    // crossing without a shared node — split them now or faces leak.
+    VB.repairPlanar(doc);
+
     return { removed: removed, boundary: kept.length };
   }
 

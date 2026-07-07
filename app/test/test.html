@@ -471,6 +471,48 @@
     check("corner: corner erased", VB.geom.fillAt(doc5, 100, 100) === 0);
     check("corner: invariant", doc5.validate().length === 0, doc5.validate()[0]);
     check("corner: planar", VB.validatePlanar(doc5).length === 0);
+
+    // 6. Erase storm (regression: big swipes over dense curved geometry
+    //    once left un-noded crossings and open fill chains). Seed chosen
+    //    because it failed before grazing-crossing repair existed.
+    var lcg = 424242;
+    function rnd() { lcg = (lcg * 1103515245 + 12345) & 0x7fffffff; return lcg / 0x7fffffff; }
+    var storm = new VB.VBDocument();
+    storm.width = 16000; storm.height = 12000;
+    for (var st = 0; st < 12; st++) {
+      var pts = [];
+      var sx = 2000 + rnd() * 12000, sy = 2000 + rnd() * 8000;
+      var hd = rnd() * Math.PI * 2;
+      for (var si = 0; si < 35; si++) {
+        pts.push({ x: sx, y: sy });
+        hd += (rnd() - 0.5) * 1.3;
+        sx += Math.cos(hd) * (100 + rnd() * 350);
+        sy += Math.sin(hd) * (100 + rnd() * 350);
+      }
+      VB.pencilCommit(storm, pts, stroke);
+    }
+    for (var sf = 0, sfilled = 0; sf < 40 && sfilled < 6; sf++) {
+      if (VB.bucketFill(storm, 4000 + rnd() * 8000, 3000 + rnd() * 6000,
+        { color: { r: 220, g: 180, b: 60, a: 255 } }).stamped > 0) sfilled++;
+    }
+    VB.eraseStroke(storm, [
+      { x: 1500, y: 3000 }, { x: 5000, y: 5500 }, { x: 9000, y: 5000 },
+      { x: 12000, y: 7500 }, { x: 14500, y: 6500 }
+    ], 600);
+    VB.eraseStroke(storm, [
+      { x: 3000, y: 9000 }, { x: 6000, y: 4000 }, { x: 9000, y: 8000 },
+      { x: 7000, y: 9500 }, { x: 5500, y: 6000 }
+    ], 600);
+    check("storm: planar after erases", VB.validatePlanar(storm).length === 0);
+    check("storm: invariant", storm.validate().length === 0, storm.validate()[0]);
+    var stormFills = VB.buildFillPaths(storm);
+    var stormOpen = 0;
+    for (var sp = 1; sp < stormFills.length; sp++) {
+      for (var sc = 0; sc < stormFills[sp].length; sc++) {
+        if (!stormFills[sp][sc].closed) stormOpen++;
+      }
+    }
+    check("storm: fill chains closed", stormOpen === 0, stormOpen + " open chains");
   })();
 
   // ======================= fixture pipeline tests ==========================

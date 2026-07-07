@@ -17,6 +17,8 @@
 <script src="../js/merge.js"></script>
 <script src="../js/faces.js"></script>
 <script src="../js/bucket.js"></script>
+<script src="../js/swath.js"></script>
+<script src="../js/eraser.js"></script>
 <script src="../js/planarity.js"></script>
 <script src="../js/pencil.js"></script>
 <script>
@@ -180,6 +182,83 @@
     ["loop fill contained", VB.geom.fillAt(doc4, 6000, 4000) === 0]
   ];
   loopChecks.forEach(function (c) { if (!c[1]) { fails++; } log((c[1] ? "  ok  " : "  FAIL ") + c[0]); });
+
+  // Big-erase corruption scenario: dense scribbles + fills, then a large
+  // erase swipe. Detector: every fill boundary chain must still CLOSE —
+  // open chains render as straight-edged fill wedges (the reported bug).
+  function openFillChains(doc) {
+    var perFill = VB.buildFillPaths(doc);
+    var open = 0, total = 0;
+    for (var f = 1; f < perFill.length; f++) {
+      for (var c = 0; c < perFill[f].length; c++) {
+        total++;
+        if (!perFill[f][c].closed) open++;
+      }
+    }
+    return { open: open, total: total };
+  }
+
+  var eraseFails = 0;
+  [12345, 777, 424242].forEach(function (sd) {
+    seed = sd;
+    var doc5 = new VB.VBDocument();
+    doc5.width = 16000; doc5.height = 12000;
+    for (var s5 = 0; s5 < 20; s5++) {
+      var pts5 = [];
+      var x5 = 2000 + rnd() * 12000, y5 = 2000 + rnd() * 8000;
+      var h5 = rnd() * Math.PI * 2;
+      var n5 = 25 + Math.floor(rnd() * 40);
+      for (var i5 = 0; i5 < n5; i5++) {
+        pts5.push({ x: x5, y: y5 });
+        h5 += (rnd() - 0.5) * 1.3;
+        var st5 = 100 + rnd() * 350;
+        x5 += Math.cos(h5) * st5;
+        y5 += Math.sin(h5) * st5;
+      }
+      VB.pencilCommit(doc5, pts5, stroke);
+    }
+    var filled = 0;
+    for (var fb = 0; fb < 60 && filled < 10; fb++) {
+      var fx = 4000 + rnd() * 8000, fy = 3000 + rnd() * 6000;
+      var rr = VB.bucketFill(doc5, fx, fy, {
+        color: { r: 100 + Math.floor(rnd() * 155), g: 100 + Math.floor(rnd() * 155), b: 60, a: 255 }
+      });
+      if (rr.stamped > 0) filled++;
+    }
+    var pre5 = openFillChains(doc5);
+    log("seed " + sd + ": " + doc5.edges.length + " edges, " + filled +
+        " fills, chains " + pre5.total + " (open " + pre5.open + ")");
+    if (pre5.open > 0) { eraseFails++; log("  FAIL pre-erase open chains", "fail"); }
+
+    // three big swipes, one with a self-crossing loop-back
+    var swipes = [
+      [{ x: 1500, y: 3000 }, { x: 5000, y: 5500 }, { x: 9000, y: 5000 },
+       { x: 12000, y: 7500 }, { x: 14500, y: 6500 }],
+      [{ x: 3000, y: 9000 }, { x: 6000, y: 4000 }, { x: 9000, y: 8000 },
+       { x: 7000, y: 9500 }, { x: 5500, y: 6000 }],  // loops back over itself
+      [{ x: 12000, y: 2000 }, { x: 10000, y: 4500 }, { x: 12500, y: 6000 },
+       { x: 13500, y: 3500 }, { x: 11000, y: 2500 }] // tight hook
+    ];
+    for (var sw = 0; sw < swipes.length; sw++) {
+      var er5;
+      try {
+        er5 = VB.eraseStroke(doc5, swipes[sw], 600);
+      } catch (err) {
+        log("  ERASE EXCEPTION: " + (err && err.stack || err));
+        eraseFails++;
+        continue;
+      }
+      var post5 = openFillChains(doc5);
+      var v5 = VB.validatePlanar(doc5, 20);
+      var inv = doc5.validate();
+      var ok5 = post5.open === 0 && v5.length === 0 && inv.length === 0;
+      log("  swipe " + sw + ": removed=" + er5.removed + " boundary=" + er5.boundary +
+          " chains " + post5.total + " open=" + post5.open +
+          " planarity=" + v5.length + (ok5 ? "  ok" : "  FAIL"));
+      if (!ok5) eraseFails++;
+    }
+  });
+  fails += eraseFails;
 
   if (!euler1) fails++;
   if (!euler2) fails++;

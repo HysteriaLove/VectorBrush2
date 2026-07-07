@@ -10,7 +10,9 @@
   "use strict";
 
   var T_EPS = 1e-6;      // parameter-space epsilon
-  var FLAT_TW = 0.25;    // subdivision flatness threshold (quarter twip)
+  var FLAT_TW = 0.08;    // subdivision flatness threshold (twips) — tight,
+                         // because near-tangent crossings missed here become
+                         // real crossings after integer rounding
 
   // ---- evaluation ----------------------------------------------------------
 
