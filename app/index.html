@@ -52,6 +52,16 @@
   button:disabled { opacity: .45; cursor: default; }
   .sep { width: 1px; align-self: stretch; background: var(--panel-edge); margin: 0 4px; }
   .spacer { flex: 1; }
+  .ctl { display: flex; align-items: center; gap: 4px; color: var(--text-dim); font-size: 12px; }
+  .ctl input[type="color"] {
+    width: 28px; height: 24px; padding: 0; border: 1px solid #24262a;
+    border-radius: 4px; background: #3c4046; cursor: pointer;
+  }
+  .ctl input[type="number"] {
+    width: 52px; font: inherit; color: var(--text);
+    background: #3c4046; border: 1px solid #24262a; border-radius: 4px; padding: 3px 6px;
+  }
+  #topbar button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
   #fileinfo { color: var(--text-dim); font-size: 12px; }
 
   #middle { flex: 1; display: flex; min-height: 0; }
@@ -126,10 +136,22 @@
     <button id="btn-open" title="Open .swf or .vbd (Ctrl+O)">Open…</button>
     <button id="btn-save" title="Save as compact .vbd">Save .vbd</button>
     <div class="sep"></div>
+    <button id="btn-undo" title="Undo (Ctrl+Z)" disabled>↶</button>
+    <button id="btn-redo" title="Redo (Ctrl+Y)" disabled>↷</button>
+    <div class="sep"></div>
+    <label class="ctl" title="Stroke color">
+      <input type="color" id="stroke-color" value="#000000">
+    </label>
+    <label class="ctl" title="Stroke width (px)">
+      <input type="number" id="stroke-width" value="1" min="0.05" max="10" step="0.25">px
+    </label>
+    <div class="sep"></div>
     <button id="btn-zoom-out" title="Zoom out">−</button>
     <button id="btn-zoom-100" title="Zoom to 100%">100%</button>
     <button id="btn-zoom-in" title="Zoom in">+</button>
     <button id="btn-fit" title="Fit stage in window">Fit</button>
+    <div class="sep"></div>
+    <button id="btn-debug" title="Vector debug view (D)">Debug</button>
     <div class="spacer"></div>
     <div id="fileinfo">no file loaded</div>
   </div>
@@ -137,7 +159,7 @@
   <div id="middle">
     <div id="tools">
       <button data-tool="select" class="active" title="Selection tool (V)">➤</button>
-      <button data-tool="pencil" title="Pencil tool (P) — next milestone">✎</button>
+      <button data-tool="pencil" title="Pencil tool (P)">✎</button>
       <button data-tool="bucket" title="Bucket fill (B) — next milestone">🪣</button>
       <button data-tool="eraser" title="Eraser (E) — next milestone">🧽</button>
     </div>
@@ -160,10 +182,16 @@
 
   <script src="js/bitio.js"></script>
   <script src="js/doc.js"></script>
+  <script src="js/geom.js"></script>
   <script src="js/swf.js"></script>
   <script src="js/trace.js"></script>
   <script src="js/render.js"></script>
   <script src="js/vbd.js"></script>
+  <script src="js/fit.js"></script>
+  <script src="js/merge.js"></script>
+  <script src="js/history.js"></script>
+  <script src="js/debug.js"></script>
+  <script src="js/pencil.js"></script>
   <script src="js/main.js"></script>
 </body>
 </html>

@@ -21,10 +21,16 @@
 
 <script src="../js/bitio.js"></script>
 <script src="../js/doc.js"></script>
+<script src="../js/geom.js"></script>
 <script src="../js/swf.js"></script>
 <script src="../js/trace.js"></script>
 <script src="../js/render.js"></script>
 <script src="../js/vbd.js"></script>
+<script src="../js/fit.js"></script>
+<script src="../js/merge.js"></script>
+<script src="../js/history.js"></script>
+<script src="../js/debug.js"></script>
+<script src="../js/pencil.js"></script>
 <script src="fixtures.js"></script>
 <script>
 (async function () {
@@ -76,6 +82,168 @@
     return null;
   }
 
+  // ======================= unit tests: geometry ============================
+  log("geometry:");
+  (function () {
+    var G = VB.geom;
+
+    // line × line cross
+    var a = VB.edge(-1000, 0, null, null, 1000, 0, 0, 0, 1);
+    var b = VB.edge(0, -1000, null, null, 0, 1000, 0, 0, 1);
+    var hits = G.edgeIntersections(a, b);
+    check("lineLine 1 hit", hits.length === 1, "got " + hits.length);
+    if (hits.length) {
+      check("lineLine at origin",
+        Math.abs(hits[0].point.x) < 1 && Math.abs(hits[0].point.y) < 1,
+        JSON.stringify(hits[0].point));
+      check("lineLine t=u=0.5", Math.abs(hits[0].t - 0.5) < 1e-6 && Math.abs(hits[0].u - 0.5) < 1e-6);
+    }
+
+    // line × quad: horizontal line through an arch hits twice
+    var arch = VB.edge(-1000, 0, 0, -2000, 1000, 0, 0, 0, 1);   // apex y=-1000
+    var cut = VB.edge(-2000, -500, null, null, 2000, -500, 0, 0, 1);
+    var h2 = G.edgeIntersections(cut, arch);
+    check("lineQuad 2 hits", h2.length === 2, "got " + h2.length);
+    for (var i = 0; i < h2.length; i++) {
+      check("lineQuad hit on line y=-500", Math.abs(h2[i].point.y + 500) < 1, "y=" + h2[i].point.y);
+    }
+
+    // quad × quad: arch and inverted arch cross twice
+    var arch2 = VB.edge(-1000, -1000, 0, 1000, 1000, -1000, 0, 0, 1); // sags down
+    var h3 = G.edgeIntersections(arch, arch2);
+    check("quadQuad 2 hits", h3.length === 2, "got " + h3.length);
+    for (var j = 0; j < h3.length; j++) {
+      var pa = G.evalEdge(arch, h3[j].t), pb = G.evalEdge(arch2, h3[j].u);
+      check("quadQuad points agree", Math.hypot(pa.x - pb.x, pa.y - pb.y) < 1,
+        Math.hypot(pa.x - pb.x, pa.y - pb.y).toFixed(2) + " twips apart");
+    }
+
+    // split a quad at t=0.5: two welded pieces, ends preserved
+    var pieces = G.splitEdge(arch, [{ t: 0.5 }]);
+    check("splitEdge 2 pieces", pieces.length === 2, "got " + pieces.length);
+    if (pieces.length === 2) {
+      check("splitEdge welded", pieces[0].bx === pieces[1].ax && pieces[0].by === pieces[1].ay);
+      check("splitEdge ends kept",
+        pieces[0].ax === arch.ax && pieces[0].ay === arch.ay &&
+        pieces[1].bx === arch.bx && pieces[1].by === arch.by);
+      check("splitEdge styles kept", pieces[0].line === 1 && pieces[1].line === 1);
+    }
+
+    // point-in-fill on a unit square
+    var doc = new VB.VBDocument();
+    doc.fills.push(VB.solidFill(255, 0, 0));
+    doc.edges.push(
+      VB.edge(0, 0, null, null, 4000, 0, 0, 1, 0),
+      VB.edge(4000, 0, null, null, 4000, 4000, 0, 1, 0),
+      VB.edge(4000, 4000, null, null, 0, 4000, 0, 1, 0),
+      VB.edge(0, 4000, null, null, 0, 0, 0, 1, 0));
+    check("fillAt inside", G.fillAt(doc, 2000, 2000) === 1);
+    check("fillAt outside", G.fillAt(doc, 5000, 2000) === 0);
+    check("fillAt left of square", G.fillAt(doc, -500, 2000) === 0);
+  })();
+
+  // ======================= unit tests: fitting =============================
+  log("fitting:");
+  (function () {
+    // straight run → exactly one straight edge
+    var line = [];
+    for (var i = 0; i <= 10; i++) line.push({ x: i * 400, y: 0 });
+    var g1 = VB.fitStroke(line);
+    check("fit straight = 1 line", g1.length === 1 && g1[0].cx === null,
+      g1.length + " pieces");
+
+    // semicircle → few quads, all samples near the fit, pieces welded
+    var pts = [];
+    for (var k = 0; k <= 40; k++) {
+      var th = Math.PI * k / 40;
+      pts.push({ x: Math.round(2000 * Math.cos(th)), y: Math.round(2000 * Math.sin(th)) });
+    }
+    var g2 = VB.fitStroke(pts);
+    check("fit arc is compact", g2.length >= 2 && g2.length <= 8, g2.length + " pieces");
+    var welded = true;
+    for (var w = 1; w < g2.length; w++) {
+      if (g2[w].ax !== g2[w - 1].bx || g2[w].ay !== g2[w - 1].by) welded = false;
+    }
+    check("fit pieces welded", welded);
+    var worst = 0;
+    for (var s = 0; s < pts.length; s++) {
+      var best = Infinity;
+      for (var e2 = 0; e2 < g2.length; e2++) {
+        var ge = g2[e2];
+        best = Math.min(best, VB.geom.distToEdge(
+          VB.edge(ge.ax, ge.ay, ge.cx, ge.cy, ge.bx, ge.by, 0, 0, 0), pts[s].x, pts[s].y));
+      }
+      worst = Math.max(worst, best);
+    }
+    check("fit error bound", worst <= VB.FIT_TOLERANCE * 1.5, worst.toFixed(1) + " twips");
+  })();
+
+  // ======================= unit tests: planar merge ========================
+  log("planar merge:");
+  (function () {
+    var style = { width: 20, color: { r: 0, g: 0, b: 0, a: 255 } };
+
+    // two crossing pencil strokes → both split at the shared node
+    var doc = new VB.VBDocument();
+    VB.pencilCommit(doc, [{ x: 0, y: 0 }, { x: 2000, y: 0 }, { x: 4000, y: 0 }], style);
+    check("first stroke = 1 edge", doc.edges.length === 1, doc.edges.length + " edges");
+    VB.pencilCommit(doc, [{ x: 2000, y: -2000 }, { x: 2000, y: 0 }, { x: 2000, y: 2000 }], style);
+    check("cross = 4 edges", doc.edges.length === 4, doc.edges.length + " edges");
+    var nodeShared = doc.edges.every(function (e) {
+      return (e.ax === 2000 && e.ay === 0) || (e.bx === 2000 && e.by === 0);
+    });
+    check("cross node shared by all 4", nodeShared);
+    check("line styles deduped", doc.lines.length === 1, doc.lines.length + " styles");
+
+    // stroke across a filled square inherits the fill on both sides
+    var doc2 = new VB.VBDocument();
+    doc2.fills.push(VB.solidFill(0, 160, 60));
+    doc2.edges.push(
+      VB.edge(0, 0, null, null, 4000, 0, 0, 1, 0),
+      VB.edge(4000, 0, null, null, 4000, 4000, 0, 1, 0),
+      VB.edge(4000, 4000, null, null, 0, 4000, 0, 1, 0),
+      VB.edge(0, 4000, null, null, 0, 0, 0, 1, 0));
+    VB.pencilCommit(doc2, [
+      { x: -1000, y: 2000 }, { x: 1000, y: 2000 }, { x: 3000, y: 2000 }, { x: 5000, y: 2000 }
+    ], style);
+    check("square+stroke = 9 edges", doc2.edges.length === 9, doc2.edges.length + " edges");
+    var inside = doc2.edges.filter(function (e) {
+      return e.line === 1 && e.fill0 === 1 && e.fill1 === 1;
+    });
+    var outside = doc2.edges.filter(function (e) {
+      return e.line === 1 && e.fill0 === 0 && e.fill1 === 0;
+    });
+    check("inside piece inherits fill", inside.length === 1, inside.length + " inside pieces");
+    check("outside pieces stay unfilled", outside.length === 2, outside.length + " outside pieces");
+    if (inside.length === 1) {
+      check("inside piece spans the square",
+        inside[0].ax === 0 && inside[0].bx === 4000 ||
+        inside[0].ax === 4000 && inside[0].bx === 0,
+        "(" + inside[0].ax + "→" + inside[0].bx + ")");
+    }
+
+    // self-crossing stroke splits itself
+    var doc3 = new VB.VBDocument();
+    VB.pencilCommit(doc3, [
+      { x: 0, y: 0 }, { x: 2000, y: 2000 }, { x: 2000, y: 0 }, { x: 0, y: 2000 }
+    ], style);
+    check("self-cross = 5 edges", doc3.edges.length === 5, doc3.edges.length + " edges");
+
+    // undo / redo round-trip
+    var doc4 = new VB.VBDocument();
+    var hist = new VB.History();
+    VB.pencilCommit(doc4, [{ x: 0, y: 0 }, { x: 1000, y: 0 }, { x: 2000, y: 0 }], style);
+    var before = doc4.edges.length;
+    hist.push(doc4);
+    VB.pencilCommit(doc4, [{ x: 0, y: 500 }, { x: 1000, y: 500 }, { x: 2000, y: 500 }], style);
+    var after = doc4.edges.length;
+    hist.undo(doc4);
+    check("undo restores", doc4.edges.length === before, doc4.edges.length + " vs " + before);
+    hist.redo(doc4);
+    check("redo restores", doc4.edges.length === after, doc4.edges.length + " vs " + after);
+  })();
+
+  // ======================= fixture pipeline tests ==========================
   for (var fi = 0; fi < window.VBTestFixtures.length; fi++) {
     var fx = window.VBTestFixtures[fi];
     log(fx.name + ":");
@@ -143,6 +311,62 @@
       fail++;
       log("  EXCEPTION: " + (err && err.stack || err), "fail");
     }
+  }
+
+  // ================== visual: debug overlay + synthetic pencil ==============
+  try {
+    // Debug view over a real two-fill drawing (fill-side tick check).
+    var fxB = window.VBTestFixtures.find(function (f) { return f.name.indexOf("Brush003") >= 0; });
+    var resB = await VB.parseSWF(b64ToBuf(fxB.b64));
+    var cellD = document.createElement("div");
+    cellD.className = "cell";
+    var labD = document.createElement("div");
+    labD.textContent = "DEBUG VIEW: " + fxB.name;
+    var cvD = document.createElement("canvas");
+    var zD = 520 / (resB.doc.width / VB.TWIPS);
+    cvD.width = 520;
+    cvD.height = Math.round(resB.doc.height / VB.TWIPS * zD);
+    cellD.appendChild(labD);
+    cellD.appendChild(cvD);
+    document.getElementById("grid").appendChild(cellD);
+    var ctxD = cvD.getContext("2d");
+    VB.render(ctxD, resB.doc, { zoom: zD, panX: 0, panY: 0, dpr: 1 });
+    VB.renderDebug(ctxD, resB.doc, { zoom: zD, panX: 0, panY: 0, dpr: 1 }, -1);
+
+    // Synthetic pencil drawing: wavy stroke + crossing stroke over a square.
+    var docP = new VB.VBDocument();
+    docP.width = 8000; docP.height = 6000;
+    docP.fills.push(VB.solidFill(120, 200, 255));
+    docP.edges.push(
+      VB.edge(1000, 1000, null, null, 5000, 1000, 0, 1, 0),
+      VB.edge(5000, 1000, null, null, 5000, 5000, 0, 1, 0),
+      VB.edge(5000, 5000, null, null, 1000, 5000, 0, 1, 0),
+      VB.edge(1000, 5000, null, null, 1000, 1000, 0, 1, 0));
+    var wave = [];
+    for (var wv = 0; wv <= 60; wv++) {
+      wave.push({ x: 200 + wv * 125, y: 3000 + Math.round(1800 * Math.sin(wv / 6)) });
+    }
+    VB.pencilCommit(docP, wave, { width: 40, color: { r: 200, g: 40, b: 40, a: 255 } });
+    var cellP = document.createElement("div");
+    cellP.className = "cell";
+    var labP = document.createElement("div");
+    labP.textContent = "SYNTHETIC PENCIL over fill (+debug)";
+    var cvP = document.createElement("canvas");
+    cvP.width = 520; cvP.height = 390;
+    cellP.appendChild(labP);
+    cellP.appendChild(cvP);
+    document.getElementById("grid").appendChild(cellP);
+    var vP = { zoom: 520 / 400, panX: 0, panY: 0, dpr: 1 };
+    VB.render(cvP.getContext("2d"), docP, vP);
+    VB.renderDebug(cvP.getContext("2d"), docP, vP, -1);
+
+    // sanity: the wave was merged into the square's planar map
+    var waveInside = docP.edges.filter(function (e) { return e.line === 1 && e.fill0 === 1; }).length;
+    check("wave inherits fill inside square", waveInside > 0, "0 inside pieces");
+    check("wave split against square", docP.edges.length > 4 + 8, docP.edges.length + " edges");
+  } catch (err) {
+    fail++;
+    log("  VISUAL EXCEPTION: " + (err && err.stack || err), "fail");
   }
 
   var summary = "VBTEST DONE pass=" + pass + " fail=" + fail;

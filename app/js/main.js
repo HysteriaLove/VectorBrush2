@@ -1,8 +1,9 @@
-/* main.js — GUI shell: canvas viewport, toolbar, file I/O.
+/* main.js — GUI shell: canvas viewport, toolbar, tools, file I/O.
  *
- * Tools other than Select are palette placeholders for the next
- * milestones (pencil, bucket, eraser); the document/view plumbing they
- * will need (twips<->screen mapping, re-render loop) is all here.
+ * Pointer routing: middle-drag (or Space+drag) always pans; otherwise the
+ * active tool's onDown/onMove/onUp receive positions in stage twips.
+ * The render loop draws the document, then the active tool's overlay,
+ * then the vector debug overlay when enabled (D).
  */
 (function () {
   "use strict";
@@ -15,7 +16,19 @@
     fileName: null,
     sourceBytes: 0,
     tool: "select",
-    view: { zoom: 1, panX: 40, panY: 40, dpr: window.devicePixelRatio || 1 }
+    view: { zoom: 1, panX: 40, panY: 40, dpr: window.devicePixelRatio || 1 },
+    history: new VB.History(),
+    strokeColor: { r: 0, g: 0, b: 0, a: 255 },
+    strokeWidth: 20,          // twips (1 px), Flash's default pencil width
+    debug: false,
+    debugHover: -1,
+    requestRender: requestRender,
+    setMsg: setMsg
+  };
+
+  var tools = {
+    pencil: new VB.PencilTool(app)
+    // bucket, eraser: next milestones
   };
 
   // ---- rendering loop ------------------------------------------------------
@@ -27,6 +40,10 @@
     requestAnimationFrame(function () {
       renderQueued = false;
       VB.render(ctx, app.doc, app.view);
+      var tool = tools[app.tool];
+      if (tool && tool.drawOverlay) tool.drawOverlay(ctx);
+      if (app.debug) VB.renderDebug(ctx, app.doc, app.view, app.debugHover);
+      updateStatus();
     });
   }
 
@@ -51,6 +68,11 @@
     };
   }
 
+  function clientToTwips(ev) {
+    var p = clientToStagePx(ev);
+    return { x: p.x * VB.TWIPS, y: p.y * VB.TWIPS };
+  }
+
   function setZoom(zoom, cx, cy) {
     zoom = Math.min(64, Math.max(0.02, zoom));
     if (cx === undefined) {
@@ -58,12 +80,11 @@
       cx = r.width / 2; cy = r.height / 2;
     }
     var v = app.view;
-    var sx = (cx - v.panX) / v.zoom;   // stage px under the anchor
+    var sx = (cx - v.panX) / v.zoom;
     var sy = (cy - v.panY) / v.zoom;
     v.zoom = zoom;
     v.panX = cx - sx * zoom;
     v.panY = cy - sy * zoom;
-    updateStatus();
     requestRender();
   }
 
@@ -75,7 +96,6 @@
     app.view.zoom = zoom;
     app.view.panX = (r.width - stageW * zoom) / 2;
     app.view.panY = (r.height - stageH * zoom) / 2;
-    updateStatus();
     requestRender();
   }
 
@@ -88,7 +108,9 @@
       s.edges + " edges (" + s.straight + " straight, " + s.curved + " curved) · " +
       s.fills + " fills · " + s.lines + " line styles";
     document.getElementById("status-zoom").textContent =
-      "zoom " + Math.round(app.view.zoom * 100) + "%";
+      "zoom " + Math.round(app.view.zoom * 100) + "%" + (app.debug ? " · DEBUG" : "");
+    document.getElementById("btn-undo").disabled = !app.history.canUndo();
+    document.getElementById("btn-redo").disabled = !app.history.canRedo();
   }
 
   var toastTimer = null;
@@ -120,6 +142,8 @@
       app.doc = result.doc;
       app.fileName = name;
       app.sourceBytes = bytes.length;
+      app.history.clear();
+      app.debugHover = -1;
       document.getElementById("drophint").classList.add("hidden");
       document.getElementById("fileinfo").textContent =
         name + " · " + kind + " · " + bytes.length.toLocaleString() + " B";
@@ -166,7 +190,6 @@
     }
   });
 
-  // Drag & drop.
   var wrap = document.getElementById("canvaswrap");
   wrap.addEventListener("dragover", function (ev) { ev.preventDefault(); });
   wrap.addEventListener("drop", function (ev) {
@@ -174,7 +197,18 @@
     if (ev.dataTransfer.files.length) openFile(ev.dataTransfer.files[0]);
   });
 
-  // ---- zoom / pan ----------------------------------------------------------
+  // ---- undo / redo -----------------------------------------------------------
+
+  function doUndo() {
+    if (app.history.undo(app.doc)) { app.debugHover = -1; setMsg("undo"); requestRender(); }
+  }
+  function doRedo() {
+    if (app.history.redo(app.doc)) { app.debugHover = -1; setMsg("redo"); requestRender(); }
+  }
+  document.getElementById("btn-undo").addEventListener("click", doUndo);
+  document.getElementById("btn-redo").addEventListener("click", doRedo);
+
+  // ---- zoom / pan / pointer routing ------------------------------------------
 
   document.getElementById("btn-zoom-in").addEventListener("click", function () {
     setZoom(app.view.zoom * 1.25);
@@ -196,65 +230,143 @@
 
   var panning = null;
   var spaceDown = false;
+  var activePointerTool = null;
 
   canvas.addEventListener("pointerdown", function (ev) {
     if (ev.button === 1 || (ev.button === 0 && spaceDown)) {
       panning = { x: ev.clientX, y: ev.clientY };
       canvas.setPointerCapture(ev.pointerId);
       ev.preventDefault();
+      return;
+    }
+    if (ev.button === 0) {
+      var tool = tools[app.tool];
+      if (tool && tool.onDown) {
+        activePointerTool = tool;
+        canvas.setPointerCapture(ev.pointerId);
+        tool.onDown(clientToTwips(ev));
+        ev.preventDefault();
+      }
     }
   });
+
   canvas.addEventListener("pointermove", function (ev) {
     if (panning) {
       app.view.panX += ev.clientX - panning.x;
       app.view.panY += ev.clientY - panning.y;
       panning = { x: ev.clientX, y: ev.clientY };
       requestRender();
+    } else if (activePointerTool && activePointerTool.onMove) {
+      activePointerTool.onMove(clientToTwips(ev));
+    } else if (app.debug) {
+      // hover inspector
+      var pt = clientToTwips(ev);
+      var tol = 5 * VB.TWIPS / app.view.zoom;
+      var idx = VB.debugPickEdge(app.doc, pt.x, pt.y, tol);
+      if (idx !== app.debugHover) {
+        app.debugHover = idx;
+        setMsg(idx >= 0 ? VB.debugDescribeEdge(app.doc, idx) : "");
+        requestRender();
+      }
     }
     var p = clientToStagePx(ev);
     document.getElementById("status-pos").textContent =
       p.x.toFixed(1) + ", " + p.y.toFixed(1) + " px (" +
       Math.round(p.x * VB.TWIPS) + ", " + Math.round(p.y * VB.TWIPS) + " twips)";
   });
-  canvas.addEventListener("pointerup", function () { panning = null; });
+
+  canvas.addEventListener("pointerup", function (ev) {
+    if (panning) { panning = null; return; }
+    if (activePointerTool) {
+      var tool = activePointerTool;
+      activePointerTool = null;
+      if (tool.onUp) tool.onUp(clientToTwips(ev));
+    }
+  });
+
+  canvas.addEventListener("pointercancel", function () {
+    panning = null;
+    if (activePointerTool && activePointerTool.cancel) activePointerTool.cancel();
+    activePointerTool = null;
+  });
+
+  // ---- keyboard ---------------------------------------------------------------
 
   window.addEventListener("keydown", function (ev) {
     if (ev.code === "Space") { spaceDown = true; }
-    if (ev.ctrlKey && ev.key.toLowerCase() === "o") {
-      ev.preventDefault();
-      fileInput.click();
+    if (ev.ctrlKey && !ev.shiftKey && ev.key.toLowerCase() === "z") { ev.preventDefault(); doUndo(); return; }
+    if ((ev.ctrlKey && ev.key.toLowerCase() === "y") ||
+        (ev.ctrlKey && ev.shiftKey && ev.key.toLowerCase() === "z")) { ev.preventDefault(); doRedo(); return; }
+    if (ev.ctrlKey && ev.key.toLowerCase() === "o") { ev.preventDefault(); fileInput.click(); return; }
+    if (ev.key === "Escape" && activePointerTool && activePointerTool.cancel) {
+      activePointerTool.cancel();
+      activePointerTool = null;
+      return;
     }
+    if (ev.ctrlKey || ev.altKey) return;
+    var k = ev.key.toLowerCase();
+    if (k === "d") { toggleDebug(); return; }
     var toolKeys = { v: "select", p: "pencil", b: "bucket", e: "eraser" };
-    if (!ev.ctrlKey && !ev.altKey && toolKeys[ev.key.toLowerCase()]) {
-      selectTool(toolKeys[ev.key.toLowerCase()]);
-    }
+    if (toolKeys[k]) selectTool(toolKeys[k]);
   });
   window.addEventListener("keyup", function (ev) {
     if (ev.code === "Space") spaceDown = false;
   });
 
-  // ---- tool palette (placeholders for the tool milestones) ------------------
+  // ---- debug toggle -------------------------------------------------------------
+
+  function toggleDebug() {
+    app.debug = !app.debug;
+    app.debugHover = -1;
+    document.getElementById("btn-debug").classList.toggle("active", app.debug);
+    if (!app.debug) setMsg("");
+    requestRender();
+  }
+  document.getElementById("btn-debug").addEventListener("click", toggleDebug);
+
+  // ---- stroke style controls ------------------------------------------------------
+
+  var colorInput = document.getElementById("stroke-color");
+  colorInput.addEventListener("input", function () {
+    var v = colorInput.value;
+    app.strokeColor = {
+      r: parseInt(v.slice(1, 3), 16),
+      g: parseInt(v.slice(3, 5), 16),
+      b: parseInt(v.slice(5, 7), 16),
+      a: 255
+    };
+  });
+
+  var widthInput = document.getElementById("stroke-width");
+  widthInput.addEventListener("input", function () {
+    var px = parseFloat(widthInput.value);
+    if (isFinite(px) && px > 0) app.strokeWidth = Math.round(px * VB.TWIPS);
+  });
+
+  // ---- tool palette -----------------------------------------------------------------
 
   function selectTool(tool) {
+    if (activePointerTool && activePointerTool.cancel) activePointerTool.cancel();
+    activePointerTool = null;
     app.tool = tool;
     document.querySelectorAll("#tools button").forEach(function (b) {
       b.classList.toggle("active", b.dataset.tool === tool);
     });
-    if (tool !== "select") {
+    if (tool !== "select" && !tools[tool]) {
       setMsg(tool + " tool is scheduled for the next milestone");
     } else {
       setMsg("");
     }
+    requestRender();
   }
   document.querySelectorAll("#tools button").forEach(function (b) {
     b.addEventListener("click", function () { selectTool(b.dataset.tool); });
   });
 
-  // ---- boot ----------------------------------------------------------------
+  // ---- boot ------------------------------------------------------------------------
 
   resizeCanvas();
   fitView();
-  updateStatus();
 
   // Expose for debugging / tests.
   window.VBApp = app;

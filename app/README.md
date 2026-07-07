@@ -12,7 +12,14 @@ Drop a `.swf` or `.vbd` onto the canvas, or use **Open…**.
 
 - Mouse wheel: zoom around the cursor
 - Middle-drag or Space+drag: pan
-- `V`/`P`/`B`/`E`: tool shortcuts (pencil, bucket, eraser land in the next milestones)
+- `V`/`P`/`B`/`E`: tool shortcuts (bucket and eraser land in the next milestones)
+- **Pencil** (`P`): draw; stroke color/width in the toolbar; strokes are
+  smoothed to lines+quads and merged into the planar map (crossed edges
+  split, fills inherited) exactly like Flash
+- `Ctrl+Z` / `Ctrl+Y` (or `Ctrl+Shift+Z`): undo / redo
+- `D` or **Debug**: vector debug view — edge wires (cyan straight, magenta
+  quad), anchors, control points, direction chevrons, fill-side ticks;
+  hovering an edge shows its indices and coordinates in the status bar
 - **Save .vbd**: exports the document in the compact format
 
 ## Architecture
@@ -29,7 +36,13 @@ no epsilons.
 | `js/trace.js` | Resolves dual-sided edges into closed fill loops (fill1 forward, fill0 reversed, exact endpoint welding) and stroke chains |
 | `js/render.js` | Canvas2D renderer: fills first (even-odd), strokes on top (round/round, 1px hairline floor). Uses only `moveTo`/`lineTo`/`quadraticCurveTo`/`fill`/`stroke` so it ports 1:1 to `PIXI.Graphics` |
 | `js/vbd.js` | `.vbd` encoder/decoder — pen-continuity edge ordering, delta bit-packing, optional deflate |
-| `js/main.js` | GUI shell: viewport, toolbar, file I/O |
+| `js/geom.js` | Edge geometry: line/quad/quad-quad intersections, de Casteljau splitting with shared rounded junctions, point-in-fill parity, distance queries |
+| `js/fit.js` | Pencil smoothing: corner segmentation + least-squares quad fitting with recursive split (Schneider-style, emits lines+quads) |
+| `js/merge.js` | Planar merge: re-nodes new strokes against the map (both sides split at crossings) and inherits region fills onto stroke pieces |
+| `js/history.js` | Snapshot undo/redo |
+| `js/debug.js` | Vector debug overlay + hover edge inspector |
+| `js/pencil.js` | Pencil tool: capture → fit → merge, with raw-trail preview |
+| `js/main.js` | GUI shell: viewport, toolbar, tool routing, file I/O |
 
 The document model is deliberately **not** an object/layer scene graph: like
 Flash's stage drawing layer, the whole document is one planar map. The pencil,
@@ -50,13 +63,15 @@ msedge --headless --disable-gpu --user-data-dir=%TEMP%\vbtest ^
 ```
 
 The `<title>`/final line reads `VBTEST DONE pass=N fail=M`.
-Current status: 130 checks, 0 failures; `.vbd` output is ≤ the source SWF
-size on all 10 reference files.
+Current status: 163 checks, 0 failures — the SWF/VBD pipeline suite plus
+unit tests for intersections, splitting, point-in-fill parity, stroke
+fitting, planar merge (crossing, fill inheritance, self-crossing), and
+undo/redo. `.vbd` output is ≤ the source SWF size on all 10 reference files.
 
 ## Roadmap
 
 1. ~~Canvas milestone: SWF loading, planar-map document, rendering, `.vbd`~~
-2. Pencil tool (point capture → curve fit → edge insertion with intersection splitting)
+2. ~~Pencil tool (capture → curve fit → planar merge), undo/redo, vector debug view~~
 3. Bucket fill (region tracing in the planar map, edge re-siding, border dissolution)
 4. Eraser (boolean subtraction against fills, stroke trimming)
 5. Pixi.js rendering backend
