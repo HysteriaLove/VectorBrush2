@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>REPRO RUNNING</title>
+<style>body{font:12px Consolas,monospace;background:#1b1d20;color:#cfd2d6;margin:16px}</style>
+</head>
+<body>
+<pre id="out"></pre>
+<canvas id="cv" width="800" height="600" style="background:#fff"></canvas>
+
+<script src="../js/bitio.js"></script>
+<script src="../js/doc.js"></script>
+<script src="../js/geom.js"></script>
+<script src="../js/trace.js"></script>
+<script src="../js/render.js"></script>
+<script src="../js/vbd.js"></script>
+<script src="../js/fit.js"></script>
+<script src="../js/merge.js"></script>
+<script src="../js/faces.js"></script>
+<script src="../js/bucket.js"></script>
+<script src="../js/planarity.js"></script>
+<script src="../js/pencil.js"></script>
+<script>
+(function () {
+  var out = document.getElementById("out");
+  function log(s) { out.textContent += s + "\n"; }
+
+  // Deterministic LCG so runs are reproducible.
+  var seed = 12345;
+  function rnd() { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }
+
+  var stroke = { width: 40, color: { r: 0, g: 0, b: 0, a: 255 } };
+
+  // Euler check: in a properly noded planar subdivision,
+  // bounded faces = E - V + C (C = connected components).
+  function eulerCheck(doc, label) {
+    var edges = doc.edges.filter(function (e) { return !VB.edgeIsDegenerate(e); });
+    var nodeIds = new Map();
+    function nid(x, y) {
+      var k = x + "," + y;
+      if (!nodeIds.has(k)) nodeIds.set(k, nodeIds.size);
+      return nodeIds.get(k);
+    }
+    var parent = [];
+    function find(a) { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; }
+    edges.forEach(function (e) {
+      var a = nid(e.ax, e.ay), b = nid(e.bx, e.by);
+      while (parent.length < nodeIds.size) parent.push(parent.length);
+      parent[find(a)] = find(b);
+    });
+    var comps = new Set();
+    for (var n = 0; n < parent.length; n++) comps.add(find(n));
+    var V = nodeIds.size, E = edges.length, C = comps.size;
+    var expected = E - V + C;
+    var got = VB.buildFaces(doc).faces.length;
+    log(label + ": V=" + V + " E=" + E + " C=" + C +
+        " -> expect " + expected + " bounded faces, walk found " + got +
+        (expected === got ? "  OK" : "  *** LEAK ***"));
+    return expected === got;
+  }
+
+  // Dense freehand-ish random-walk scribbles, like the user's drawing.
+  var doc = new VB.VBDocument();
+  doc.width = 16000; doc.height = 12000;
+  var strokes = 0;
+  for (var s = 0; s < 20; s++) {
+    var pts = [];
+    var x = 1000 + rnd() * 14000, y = 1000 + rnd() * 10000;
+    var heading = rnd() * Math.PI * 2;
+    var n = 20 + Math.floor(rnd() * 60);
+    for (var i = 0; i < n; i++) {
+      pts.push({ x: x, y: y });
+      heading += (rnd() - 0.5) * 1.4;
+      var step = 80 + rnd() * 400;
+      x += Math.cos(heading) * step;
+      y += Math.sin(heading) * step;
+    }
+    VB.pencilCommit(doc, pts, stroke);
+    strokes++;
+  }
+  log("strokes: " + strokes + ", edges: " + doc.edges.length);
+
+  var t0 = performance.now();
+  var v = VB.validatePlanar(doc, 50);
+  log("planarity check: " + v.length + " violations (" + (performance.now() - t0).toFixed(0) + "ms)");
+  for (var k = 0; k < Math.min(v.length, 12); k++) {
+    var ei = doc.edges[v[k].i], ej = doc.edges[v[k].j];
+    log("  X at (" + v[k].point.x.toFixed(1) + "," + v[k].point.y.toFixed(1) + ") edges #" +
+      v[k].i + (ei.cx === null ? "L" : "Q") + " #" + v[k].j + (ej.cx === null ? "L" : "Q"));
+  }
+  var euler1 = eulerCheck(doc, "scribble euler");
+
+  // Wavy 3x3 grid: bucket the center cell, neighbors must stay empty.
+  var doc2 = new VB.VBDocument();
+  doc2.width = 16000; doc2.height = 16000;
+  function wavyLine(vertical, offset) {
+    var pts = [];
+    for (var i = 0; i <= 40; i++) {
+      var t = i * 400;
+      var wob = Math.sin(i / 3 + offset) * 500;
+      pts.push(vertical ? { x: offset + wob, y: t } : { x: t, y: offset + wob });
+    }
+    VB.pencilCommit(doc2, pts, stroke);
+  }
+  wavyLine(false, 4000); wavyLine(false, 8000); wavyLine(false, 12000);
+  wavyLine(true, 4000); wavyLine(true, 8000); wavyLine(true, 12000);
+  var v2 = VB.validatePlanar(doc2, 50);
+  log("grid planarity: " + v2.length + " violations, edges: " + doc2.edges.length);
+  var euler2 = eulerCheck(doc2, "grid euler");
+
+  var r = VB.bucketFill(doc2, 6000, 6000, { color: { r: 100, g: 180, b: 255, a: 255 } });
+  log("bucket center cell: stamped=" + r.stamped + " dissolved=" + r.dissolved);
+  var checks = [
+    ["center cell filled", VB.geom.fillAt(doc2, 6000, 6000) !== 0],
+    ["right neighbor empty", VB.geom.fillAt(doc2, 10000, 6000) === 0],
+    ["below neighbor empty", VB.geom.fillAt(doc2, 6000, 10000) === 0],
+    ["diag neighbor empty", VB.geom.fillAt(doc2, 10000, 10000) === 0]
+  ];
+  var fails = 0;
+  checks.forEach(function (c) { if (!c[1]) { fails++; } log((c[1] ? "  ok  " : "  FAIL ") + c[0]); });
+
+  // render doc2 for eyeballing
+  VB.render(document.getElementById("cv").getContext("2d"),
+    doc2, { zoom: 800 / (doc2.width / 20), panX: 0, panY: 0, dpr: 1 });
+
+  // Casual-drawing scenario: an outline drawn as an ALMOST-closed loop
+  // (endpoints ~2px apart) with an almost-closed island inside, plus a
+  // divider stroke stopping just short of the outline on both ends.
+  var doc3 = new VB.VBDocument();
+  doc3.width = 16000; doc3.height = 12000;
+  function arcPts(cx, cy, r, gapTw, n) {
+    var pts = [];
+    var to = Math.PI * 2 - gapTw / r; // leave a gap of ~gapTw twips
+    for (var i = 0; i <= n; i++) {
+      var a = to * (i / n);
+      pts.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r });
+    }
+    return pts;
+  }
+  // outer loop: circle with a ~40tw (2px) closure gap
+  VB.pencilCommit(doc3, arcPts(6000, 6000, 4000, 40, 60), stroke);
+  // island loop inside with the same near-closure
+  VB.pencilCommit(doc3, arcPts(4800, 6000, 900, 40, 30), stroke);
+  // divider stroke stopping ~60tw short of the outline at both ends
+  // (circle x=8300 -> y = 6000 ± 3272)
+  VB.pencilCommit(doc3, [
+    { x: 8300, y: 2790 }, { x: 8350, y: 4500 }, { x: 8400, y: 6000 },
+    { x: 8350, y: 7500 }, { x: 8300, y: 9210 }
+  ], stroke);
+  var r3 = VB.bucketFill(doc3, 7000, 6000, { color: { r: 100, g: 220, b: 120, a: 255 } });
+  log("gap scenario: bucket stamped=" + r3.stamped);
+  var gapChecks = [
+    ["clicked lobe filled", VB.geom.fillAt(doc3, 7000, 6000) !== 0],
+    ["island interior NOT filled", VB.geom.fillAt(doc3, 4800, 6000) === 0],
+    ["beyond divider NOT filled", VB.geom.fillAt(doc3, 9200, 6000) === 0],
+    ["outside NOT filled", VB.geom.fillAt(doc3, 500, 500) === 0]
+  ];
+  gapChecks.forEach(function (c) { if (!c[1]) { fails++; } log((c[1] ? "  ok  " : "  FAIL ") + c[0]); });
+
+  // Focused: a single near-closed pencil loop must become a real loop.
+  var doc4 = new VB.VBDocument();
+  doc4.width = 16000; doc4.height = 12000;
+  var loopPts = arcPts(4000, 4000, 900, 40, 30);
+  log("loop raw gap: " + Math.hypot(
+    loopPts[0].x - loopPts[loopPts.length - 1].x,
+    loopPts[0].y - loopPts[loopPts.length - 1].y).toFixed(1) + "tw");
+  VB.pencilCommit(doc4, loopPts, stroke);
+  var e0 = doc4.edges[0], eN = doc4.edges[doc4.edges.length - 1];
+  log("loop edges: " + doc4.edges.length +
+      " first.a=(" + e0.ax + "," + e0.ay + ") last.b=(" + eN.bx + "," + eN.by + ")" +
+      " welded=" + (e0.ax === eN.bx && e0.ay === eN.by));
+  var built4 = VB.buildFaces(doc4);
+  log("loop faces: " + built4.faces.length +
+      " areas=" + built4.faces.map(function (f) { return Math.round(f.area / 1000) + "k"; }).join(","));
+  var eu4 = eulerCheck(doc4, "loop euler");
+  var r4b = VB.bucketFill(doc4, 4000, 4000, { color: { r: 255, g: 0, b: 200, a: 255 } });
+  log("loop bucket: stamped=" + r4b.stamped + " dissolved=" + r4b.dissolved);
+  var loopChecks = [
+    ["loop euler", eu4],
+    ["loop fill inside", VB.geom.fillAt(doc4, 4000, 4000) !== 0],
+    ["loop fill contained", VB.geom.fillAt(doc4, 6000, 4000) === 0]
+  ];
+  loopChecks.forEach(function (c) { if (!c[1]) { fails++; } log((c[1] ? "  ok  " : "  FAIL ") + c[0]); });
+
+  if (!euler1) fails++;
+  if (!euler2) fails++;
+  document.title = "REPRO DONE violations=" + (v.length + v2.length) + " fails=" + fails;
+  log("REPRO DONE violations=" + (v.length + v2.length) + " fails=" + fails);
+})();
+</script>
+</body>
+</html>

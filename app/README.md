@@ -15,7 +15,11 @@ Drop a `.swf` or `.vbd` onto the canvas, or use **Open…**.
 - `V`/`P`/`B`/`E`: tool shortcuts (eraser lands in the next milestone)
 - **Pencil** (`P`): draw; stroke color/width in the toolbar; strokes are
   smoothed to lines+quads and merged into the planar map (crossed edges
-  split, fills inherited) exactly like Flash
+  split, fills inherited) exactly like Flash. Stroke endpoints snap
+  (~4 screen px, zoom-aware) onto nearby anchors and edges — nearly-closed
+  loops close, ends that stop just short of a line weld onto it as a
+  T-junction. Without this, casual drawings are full of invisible twip
+  gaps and fills flood through them (Flash snaps for the same reason)
 - **Bucket** (`B`): click a region to fill it with the toolbar fill color.
   Finds the planar-map face under the cursor (half-edge walk with hole
   assignment, so islands keep their fill), stamps the facing side of every
@@ -51,6 +55,7 @@ no epsilons.
 | `js/fit.js` | Pencil smoothing: corner segmentation + least-squares quad fitting with recursive split (Schneider-style, emits lines+quads) |
 | `js/merge.js` | Planar merge: re-nodes new strokes against the map (both sides split at crossings) and inherits region fills onto stroke pieces |
 | `js/faces.js` | Face traversal: half-edge cycles via angular ordering at nodes, orientation classification, hole-to-face assignment, point-to-face lookup |
+| `js/planarity.js` | Integrity checker: finds transversal crossings without a shared node (the invariant everything else relies on) |
 | `js/bucket.js` | Bucket tool: stamp the clicked face's boundary sides, dissolve redundant borders |
 | `js/history.js` | Snapshot undo/redo |
 | `js/debug.js` | Vector debug overlay + hover edge inspector |
@@ -76,7 +81,11 @@ msedge --headless --disable-gpu --user-data-dir=%TEMP%\vbtest ^
 ```
 
 The `<title>`/final line reads `VBTEST DONE pass=N fail=M`.
-Current status: 222 checks, 0 failures — the SWF/VBD pipeline suite plus
+`test/repro.html` is a stress page: dense random scribbles with Euler-count
+verification (bounded faces must equal E − V + C), wavy-grid bucket
+containment, and the casual-drawing gap scenarios.
+
+Current status: 231 checks, 0 failures — the SWF/VBD pipeline suite plus
 bucket-fill unit tests (outline fill, outside no-op, split-region fills,
 border dissolution, island/annulus hole assignment, style dedup) and
 unit tests for intersections, splitting, point-in-fill parity, stroke

@@ -30,6 +30,7 @@
 <script src="../js/merge.js"></script>
 <script src="../js/faces.js"></script>
 <script src="../js/bucket.js"></script>
+<script src="../js/planarity.js"></script>
 <script src="../js/history.js"></script>
 <script src="../js/debug.js"></script>
 <script src="../js/pencil.js"></script>
@@ -355,6 +356,48 @@
     VB.bucketFill(doc3, 1000, 1000, { color: { r: 255, g: 200, b: 0, a: 255 } });
     check("refill dedupes style", doc3.fills.length === stylesBefore);
     check("refill keeps fill", VB.geom.fillAt(doc3, 1000, 1000) === 2);
+  })();
+
+  // =============== unit tests: gap snapping & curved islands ===============
+  // Regression for the flood-fill bug: casually drawn strokes leave twip
+  // gaps; endpoint snapping must close them or fills leak everywhere.
+  log("gap snapping:");
+  (function () {
+    var stroke = { width: 20, color: { r: 0, g: 0, b: 0, a: 255 } };
+    function arc(cx, cy, r, gapTw, n) {
+      var pts = [];
+      var to = Math.PI * 2 - gapTw / r;
+      for (var i = 0; i <= n; i++) {
+        var a = to * (i / n);
+        pts.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r });
+      }
+      return pts;
+    }
+
+    // near-closed pencil loop auto-closes and fills like a circle
+    var doc = new VB.VBDocument();
+    VB.pencilCommit(doc, arc(4000, 4000, 900, 40, 30), stroke);
+    var e0 = doc.edges[0], eN = doc.edges[doc.edges.length - 1];
+    check("loop auto-closed", e0.ax === eN.bx && e0.ay === eN.by);
+    var rl = VB.bucketFill(doc, 4000, 4000, { color: { r: 255, g: 0, b: 200, a: 255 } });
+    check("loop fills inside", rl.stamped > 0 && VB.geom.fillAt(doc, 4000, 4000) !== 0);
+    check("loop fill contained", VB.geom.fillAt(doc, 6000, 4000) === 0);
+    check("loop planar", VB.validatePlanar(doc).length === 0);
+
+    // outline + curved island + short divider: fill one lobe only
+    var doc2 = new VB.VBDocument();
+    VB.pencilCommit(doc2, arc(6000, 6000, 4000, 40, 60), stroke);
+    VB.pencilCommit(doc2, arc(4800, 6000, 900, 40, 30), stroke);
+    VB.pencilCommit(doc2, [
+      { x: 8300, y: 2790 }, { x: 8350, y: 4500 }, { x: 8400, y: 6000 },
+      { x: 8350, y: 7500 }, { x: 8300, y: 9210 }
+    ], stroke); // stops ~60tw short of the outline: must T-weld
+    var rg = VB.bucketFill(doc2, 7000, 6000, { color: { r: 100, g: 220, b: 120, a: 255 } });
+    check("lobe fill works", rg.stamped > 0);
+    check("curved island blocks fill", VB.geom.fillAt(doc2, 4800, 6000) === 0);
+    check("divider T-weld blocks fill", VB.geom.fillAt(doc2, 9200, 6000) === 0);
+    check("outside stays empty", VB.geom.fillAt(doc2, 500, 500) === 0);
+    check("gap doc planar", VB.validatePlanar(doc2).length === 0);
   })();
 
   // ======================= fixture pipeline tests ==========================

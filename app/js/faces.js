@@ -21,19 +21,25 @@
 
   function key(x, y) { return x + "," + y; }
 
-  // Departure angle of a half-edge at its origin (y-down atan2).
-  function departureAngle(e, forward) {
-    var ox, oy, tx, ty;
+  // Departure angle of a half-edge at its origin (y-down atan2), plus a
+  // secondary angle toward the far end. Short split pieces have heavily
+  // quantized control points, so ties on the primary angle are broken by
+  // where the edge ultimately goes.
+  function departureAngles(e, forward) {
+    var ox, oy, tx, ty, fx, fy;
     if (forward) {
-      ox = e.ax; oy = e.ay;
+      ox = e.ax; oy = e.ay; fx = e.bx; fy = e.by;
       tx = (e.cx !== null && (e.cx !== e.ax || e.cy !== e.ay)) ? e.cx : e.bx;
       ty = (e.cx !== null && (e.cx !== e.ax || e.cy !== e.ay)) ? e.cy : e.by;
     } else {
-      ox = e.bx; oy = e.by;
+      ox = e.bx; oy = e.by; fx = e.ax; fy = e.ay;
       tx = (e.cx !== null && (e.cx !== e.bx || e.cy !== e.by)) ? e.cx : e.ax;
       ty = (e.cx !== null && (e.cx !== e.bx || e.cy !== e.by)) ? e.cy : e.ay;
     }
-    return Math.atan2(ty - oy, tx - ox);
+    return {
+      angle: Math.atan2(ty - oy, tx - ox),
+      angle2: Math.atan2(fy - oy, fx - ox)
+    };
   }
 
   // Flattened polyline of a half-edge (for cycle areas / hole probes).
@@ -63,7 +69,8 @@
       var k = forward ? key(e.ax, e.ay) : key(e.bx, e.by);
       var list = nodes.get(k);
       if (!list) { list = []; nodes.set(k, list); }
-      list.push({ edge: i, forward: forward, angle: departureAngle(e, forward) });
+      var ang = departureAngles(e, forward);
+      list.push({ edge: i, forward: forward, angle: ang.angle, angle2: ang.angle2 });
     }
     for (var i = 0; i < edges.length; i++) {
       if (VB.edgeIsDegenerate(edges[i])) continue;
@@ -71,7 +78,7 @@
       addOutgoing(i, false);
     }
     nodes.forEach(function (list) {
-      list.sort(function (a, b) { return a.angle - b.angle; });
+      list.sort(function (a, b) { return (a.angle - b.angle) || (a.angle2 - b.angle2); });
     });
 
     // next(h): at h's target node, take the reverse half-edge's rotational
@@ -135,11 +142,8 @@
 
     // Assign each hole to the smallest containing outer cycle.
     for (var hIdx = 0; hIdx < inners.length; hIdx++) {
-      var probe = pointOnCycle(inners[hIdx]);
+      var probe = probeForCycle(edges, inners[hIdx].cycle);
       for (var f = 0; f < faces.length; f++) {
-        // A hole's own edges may coincide with the outer cycle's edge set
-        // (dangling stubs); skip self-assignment by identity.
-        if (faces[f]._info === inners[hIdx]) continue;
         if (cycleContains(edges, faces[f].outer, probe.x, probe.y)) {
           faces[f].holes.push(inners[hIdx].cycle);
           break; // faces are sorted smallest-first: first hit = tightest
@@ -152,19 +156,27 @@
     return { faces: faces };
   }
 
-  // Containment probe for a hole cycle: the midpoint of its first
-  // flattened segment nudged half a twip to the RIGHT of travel — the
-  // side the cycle's face lies on — so the probe sits strictly inside
-  // the face the hole belongs to, never exactly on a boundary.
-  function pointOnCycle(info) {
-    var pts = info.pts;
-    var a = pts[0], b = pts[1] || pts[0];
-    var dx = b.x - a.x, dy = b.y - a.y;
+  // Containment probe for a hole cycle: a point exactly ON the true curve
+  // (longest half-edge, evaluated at t=0.5) nudged one twip to the RIGHT
+  // of travel — the side the cycle's face lies on. Must NOT be derived
+  // from flattened chords: a chord midpoint sags into the curve's belly
+  // by far more than any nudge, landing the probe in the wrong region
+  // (that was the "every island fills" bug).
+  function probeForCycle(edges, cycle) {
+    var best = cycle[0], bestLen = -1;
+    for (var i = 0; i < cycle.length; i++) {
+      var ee = edges[cycle[i].edge];
+      var l = (ee.bx - ee.ax) * (ee.bx - ee.ax) + (ee.by - ee.ay) * (ee.by - ee.ay);
+      if (l > bestLen) { bestLen = l; best = cycle[i]; }
+    }
+    var e = edges[best.edge];
+    var p = VB.geom.evalEdge(e, 0.5);
+    // At t=0.5 a quad's tangent is parallel to its chord, so the chord
+    // direction is the exact travel direction for lines and quads alike.
+    var dx = e.bx - e.ax, dy = e.by - e.ay;
+    if (!best.forward) { dx = -dx; dy = -dy; }
     var len = Math.hypot(dx, dy) || 1;
-    return {
-      x: (a.x + b.x) / 2 - dy / len * 0.5,
-      y: (a.y + b.y) / 2 + dx / len * 0.5
-    };
+    return { x: p.x - dy / len, y: p.y + dx / len };
   }
 
   // Parity of a point against one cycle's underlying edges. Each
@@ -239,4 +251,5 @@
   window.VB = window.VB || {};
   VB.buildFaces = buildFaces;
   VB.faceAt = faceAt;
+  VB.edgeRayCrossings = edgeRayCrossings; // exposed for diagnostics/tests
 })();

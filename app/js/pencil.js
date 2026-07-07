@@ -14,14 +14,15 @@
   var MIN_SAMPLE_CSS_PX = 2;
 
   // Programmatic stroke: returns number of edges added.
-  function pencilCommit(doc, points, style, tolerance) {
+  // snapTol (twips) controls endpoint magnetism; defaults inside mergeStroke.
+  function pencilCommit(doc, points, style, tolerance, snapTol) {
     var geoms = VB.fitStroke(points, tolerance);
     if (geoms.length === 0) return 0;
     var idx = doc.addLineStyle({
       width: style.width,
       color: { r: style.color.r, g: style.color.g, b: style.color.b, a: style.color.a }
     });
-    return VB.mergeStroke(doc, geoms, idx);
+    return VB.mergeStroke(doc, geoms, idx, snapTol);
   }
 
   // ---- interactive tool ------------------------------------------------------
@@ -54,10 +55,14 @@
     if (pts.length < 2) { this.app.requestRender(); return; }
 
     this.app.history.push(this.app.doc);
+    // Endpoint snap distance tracks the screen (~4 CSS px), like Flash:
+    // zoomed in = precise, zoomed out = forgiving.
+    var snapTol = Math.min(200, Math.max(20,
+      Math.round(4 * VB.TWIPS / this.app.view.zoom)));
     var added = pencilCommit(this.app.doc, pts, {
       width: this.app.strokeWidth,
       color: this.app.strokeColor
-    });
+    }, undefined, snapTol);
     this.app.docChanged();
     this.app.setMsg(added + " edge" + (added === 1 ? "" : "s") + " added");
   };

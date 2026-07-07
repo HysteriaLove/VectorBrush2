@@ -319,6 +319,38 @@
     return Math.sqrt(best);
   }
 
+  // Closest point on an edge to (px,py): {t, x, y, d}.
+  // Coarse sampling + ternary refinement — used for endpoint snapping and
+  // pointer hit-testing, where sub-twip exactness is not required.
+  function nearestOnEdge(e, px, py) {
+    if (e.cx === null) {
+      var dx = e.bx - e.ax, dy = e.by - e.ay;
+      var lenSq = dx * dx + dy * dy;
+      var t0 = lenSq === 0 ? 0 : ((px - e.ax) * dx + (py - e.ay) * dy) / lenSq;
+      t0 = clamp01(t0);
+      var qx = e.ax + dx * t0, qy = e.ay + dy * t0;
+      return { t: t0, x: qx, y: qy, d: Math.hypot(qx - px, qy - py) };
+    }
+    var bt = 0, best = Infinity;
+    for (var i = 0; i <= 16; i++) {
+      var t = i / 16;
+      var p = evalEdge(e, t);
+      var d = (p.x - px) * (p.x - px) + (p.y - py) * (p.y - py);
+      if (d < best) { best = d; bt = t; }
+    }
+    var lo = Math.max(0, bt - 1 / 16), hi = Math.min(1, bt + 1 / 16);
+    for (var k = 0; k < 24; k++) {
+      var m1 = lo + (hi - lo) / 3, m2 = hi - (hi - lo) / 3;
+      var p1 = evalEdge(e, m1), p2 = evalEdge(e, m2);
+      var d1 = (p1.x - px) * (p1.x - px) + (p1.y - py) * (p1.y - py);
+      var d2 = (p2.x - px) * (p2.x - px) + (p2.y - py) * (p2.y - py);
+      if (d1 < d2) hi = m2; else lo = m1;
+    }
+    var tf = (lo + hi) / 2;
+    var pf = evalEdge(e, tf);
+    return { t: tf, x: pf.x, y: pf.y, d: Math.hypot(pf.x - px, pf.y - py) };
+  }
+
   function distToSegment(px, py, x1, y1, x2, y2) {
     var dx = x2 - x1, dy = y2 - y1;
     var lenSq = dx * dx + dy * dy;
@@ -341,6 +373,7 @@
     fillParity: fillParity,
     fillAt: fillAt,
     distToEdge: distToEdge,
-    distToSegment: distToSegment
+    distToSegment: distToSegment,
+    nearestOnEdge: nearestOnEdge
   };
 })();
