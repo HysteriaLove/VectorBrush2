@@ -111,32 +111,77 @@
     return kids[0];
   }
 
-  // Closed loops of a path item as point lists (integer twips), sampled
-  // by arclength. Degenerate slivers are dropped.
-  // KNOWN LIMIT (log11 op#58): on boolean output containing degenerate
-  // curves, path.getPointAt can walk unreliably and the sampled ring
-  // distorts (an outer ring measured 2.5x its source child's area, and
-  // the fit-faithfulness guard cannot see it because the guard compares
-  // against these same samples). A per-curve parameter-space sampler
-  // fixes that case but perturbs fitted straight walls enough to break
-  // integer-exact same-color coincidence (union test) — needs a sampler
-  // that keeps straight runs exact before it can land.
+  // Closed loops of a path item as point lists (integer twips).
+  //
+  // PRIMARY sampler: by arclength — byte-identical behavior for every
+  // healthy loop (fitted straight walls stay integer-exact, which the
+  // same-color coincidence handling depends on).
+  //
+  // FALLBACK sampler: per-curve in parameter space — used ONLY when the
+  // arclength ring provably distorted. On boolean output containing
+  // degenerate curves, path.getPointAt can walk unreliably and the
+  // sampled ring inflates (an outer ring measured 2.5x its true area,
+  // swallowing pocket holes). The detector is one-sided and exact: the
+  // sampled ring's shoelace area must agree with the paper child's own
+  // analytically computed .area, which does not depend on getPointAt.
+  function ringAreaPts(pts) {
+    var a = 0;
+    for (var i = 0; i < pts.length; i++) {
+      var q = pts[(i + 1) % pts.length];
+      a += pts[i].x * q.y - q.x * pts[i].y;
+    }
+    return a / 2;
+  }
+  function sampleArclength(p, step) {
+    var n = Math.max(8, Math.ceil(p.length / step));
+    var pts = [];
+    for (var k = 0; k < n; k++) {
+      var pt = p.getPointAt(p.length * k / n);
+      if (pt) pts.push({ x: pt.x, y: pt.y });
+    }
+    return pts;
+  }
+  function sampleParametric(p, step) {
+    var pts = [];
+    p.curves.forEach(function (curve) {
+      var v = curve.getValues();
+      if (isFinite(v[0]) && isFinite(v[1])) pts.push({ x: v[0], y: v[1] });
+      var len = curve.length;
+      if (!isFinite(len) || len <= 0) return;
+      var steps = Math.max(1, Math.min(24, Math.ceil(len / step)));
+      for (var k = 1; k < steps; k++) {
+        var pt = curve.getPointAtTime(k / steps);
+        if (pt && isFinite(pt.x) && isFinite(pt.y)) pts.push({ x: pt.x, y: pt.y });
+      }
+    });
+    return pts;
+  }
   function itemLoops(item, step) {
     var paths = item.children ? item.children : [item];
     var loops = [];
+    var resampled = 0;
     for (var i = 0; i < paths.length; i++) {
       var p = paths[i];
       if (!p.length || p.length < 4 * step) {
         if (Math.abs(p.area || 0) < 64) continue; // sub-8tw² sliver
       }
-      var n = Math.max(8, Math.ceil(p.length / step));
-      var pts = [];
-      for (var k = 0; k < n; k++) {
-        var pt = p.getPointAt(p.length * k / n);
-        if (pt) pts.push({ x: pt.x, y: pt.y });
+      var pts = sampleArclength(p, step);
+      var trueArea = Math.abs(p.area || 0);
+      if (pts.length >= 3 && trueArea > 0) {
+        var sampledArea = Math.abs(ringAreaPts(pts));
+        if (Math.abs(sampledArea - trueArea) > Math.max(30000, trueArea * 0.2)) {
+          var pts2 = sampleParametric(p, step);
+          if (pts2.length >= 3 &&
+              Math.abs(Math.abs(ringAreaPts(pts2)) - trueArea) <
+              Math.abs(sampledArea - trueArea)) {
+            pts = pts2;
+            resampled++;
+          }
+        }
       }
       if (pts.length >= 3) loops.push(pts);
     }
+    VB._loopResamples = resampled;
     return loops;
   }
 
@@ -160,31 +205,55 @@
     //   2. any straggler joints get a slightly fat bridge capsule
     //      (+2tw, 0.1 px, invisible).
     var s = ensureScope();
-    function firstUncovered(reg) {
-      for (var pi = 0; pi < pathPts.length; pi++) {
+    function firstUncovered(reg, from) {
+      for (var pi = from || 0; pi < pathPts.length; pi++) {
         if (!reg.contains(new s.Point(pathPts[pi].x, pathPts[pi].y))) return pi;
       }
       return -1;
     }
+    // Bridge carved joints LOCALLY first: a bridge is one small convex
+    // capsule united over the gap — it cannot swallow a distant pocket.
+    // (The previous ladder rebuilt the whole union linearly before
+    // bridging; on log11 op#58 that rebuild absorbed a real 1.5M-tw²
+    // pocket hole — the union traded carved notches for a flooded
+    // pocket. Local repair first, wholesale rebuild only as a last
+    // resort.)
+    function bridgeGaps(reg, budget) {
+      var used = 0;
+      var pi = firstUncovered(reg, 0);
+      while (pi >= 0 && used < budget) {
+        used++;
+        var a = pathPts[Math.max(0, pi - 1)];
+        var b = pathPts[Math.min(pathPts.length - 1, pi + 1)];
+        var bridge = capsule(a, b, radius + 2);
+        var u = reg.unite(bridge, { insert: false });
+        bridge.remove();
+        reg.remove();
+        reg = u;
+        // resume scanning at the same index: if the bridge worked the
+        // scan moves past it, if not we stop burning budget on it
+        var again = firstUncovered(reg, pi);
+        if (again === pi) break;
+        pi = again;
+      }
+      return { region: reg, used: used, uncovered: firstUncovered(reg, 0) };
+    }
     VB._sweptLinear = false;
-    if (firstUncovered(region) >= 0) {
-      VB._sweptLinear = true;
-      region.remove();
-      region = sweptRegionLinear(pathPts, radius);
+    VB._sweptBridges = 0;
+    if (firstUncovered(region, 0) >= 0) {
+      var b1 = bridgeGaps(region, 64);
+      region = b1.region;
+      VB._sweptBridges = b1.used;
+      if (b1.uncovered >= 0) {
+        // last resort: wholesale linear rebuild, then bridge again
+        VB._sweptLinear = true;
+        region.remove();
+        region = sweptRegionLinear(pathPts, radius);
+        var b2 = bridgeGaps(region, 16);
+        region = b2.region;
+        VB._sweptBridges += b2.used;
+      }
     }
-    var repaired = 0;
-    for (var pi2 = firstUncovered(region); pi2 >= 0 && repaired < 8;
-         pi2 = firstUncovered(region)) {
-      repaired++;
-      var a = pathPts[Math.max(0, pi2 - 1)];
-      var b = pathPts[Math.min(pathPts.length - 1, pi2 + 1)];
-      var bridge = capsule(a, b, radius + 2);
-      var u = region.unite(bridge, { insert: false });
-      bridge.remove();
-      region.remove();
-      region = u;
-    }
-    VB._sweptBridges = repaired;
     // Drop ILLEGITIMATE holes. A true pocket lies wholly OUTSIDE the
     // swept distance field (no capsule covers it), so a hole child whose
     // interior point is within the radius is a paper.js boolean artifact
