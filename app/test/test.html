@@ -1194,6 +1194,64 @@
       movedStrokes14.length + " records");
     check("stroke-lift consistent",
       VB.integrityReport(doc14).length === 0, VB.integrityReport(doc14)[0]);
+
+    // 15. free-transform SESSION: the tool stays live between gestures
+    //     and the doc is untouched until the selection is clicked away —
+    //     then the composed matrix lands as ONE journal op
+    var doc15 = new VB.VBDocument();
+    doc15.width = 11000; doc15.height = 8000;
+    VB.shapeCommit(doc15, VB.rectLoop(2000, 2000, 5000, 4000), red, null);
+    var edges15 = doc15.edges.length;
+    var journal15 = [], tool15;
+    var app15 = {
+      doc: doc15,
+      view: { zoom: 1 },
+      record: function (op) { journal15.push(op); },
+      history: { push: function () {} },
+      docChanged: function () { tool15.discard(); },
+      requestRender: function () {},
+      setMsg: function () {}
+    };
+    tool15 = VB.FreeTransformTool(app15);
+    function gesture15(dx, dy) {
+      var b = tool15.box;
+      var c = { x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 };
+      tool15.onDown(c, {});
+      tool15.onMove({ x: c.x + dx, y: c.y + dy });
+      tool15.onUp({ x: c.x + dx, y: c.y + dy });
+    }
+    tool15.adopt({ fills: [{ x: 3500, y: 3000 }], edgeKeys: [] });
+    gesture15(1000, 0);
+    gesture15(0, 500);
+    check("session gestures keep the box live", !!tool15.box);
+    check("session gestures journal nothing", journal15.length === 0,
+      journal15.length + " ops");
+    check("session gestures leave the doc alone",
+      doc15.edges.length === edges15 && VB.geom.fillAt(doc15, 2500, 2200) === 1);
+    check("session undo pops one gesture",
+      tool15.undoPending() === true &&
+      Math.abs(tool15.box.y0 - 2000) < 2, "y0=" + (tool15.box && tool15.box.y0));
+    gesture15(0, 500);
+    tool15.onDown({ x: 10500, y: 7500 }, {}); // click away
+    check("click-away lands ONE composed op",
+      journal15.length === 1 && journal15[0].op === "transformSel" &&
+      Math.abs(journal15[0].m[4] - 1000) < 2 && Math.abs(journal15[0].m[5] - 500) < 2,
+      JSON.stringify(journal15.map(function (o) { return o.op; })));
+    check("session commit moved the fill",
+      VB.geom.fillAt(doc15, 2500, 2200) === 0 &&
+      VB.geom.fillAt(doc15, 5500, 4200) === 1);
+    check("session commit consistent",
+      VB.integrityReport(doc15).length === 0, VB.integrityReport(doc15)[0]);
+    check("session commit deselects", tool15.items === null && tool15.box === null);
+    // Escape abandons the pending gestures without committing
+    tool15.adopt({ fills: [{ x: 4500, y: 3500 }], edgeKeys: [] });
+    gesture15(800, 0);
+    check("session revert restores the box",
+      tool15.revertPending() === true && Math.abs(tool15.box.x0 - 3000) < 2,
+      "x0=" + (tool15.box && tool15.box.x0));
+    tool15.onDown({ x: 10500, y: 7500 }, {});
+    check("session revert commits nothing", journal15.length === 1,
+      journal15.length + " ops");
   })();
 
   // ======================= SWF export round-trip ===========================

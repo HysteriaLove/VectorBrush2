@@ -3,10 +3,13 @@
  * Operates on a selection (adopted from the arrow tool on activation,
  * or picked directly): draws the transform box with eight scale
  * handles, rotates when grabbed just outside a corner, moves when
- * dragged from inside. The whole gesture accumulates one affine matrix
- * applied on release through arrowTransformSel — affine maps take quad
- * records to quad records exactly, and the re-merge runs the same
- * lift/paint-over pipeline as the arrow's move.
+ * dragged from inside. The tool stays live between gestures: each
+ * release accumulates its matrix and the box follows, so the user can
+ * scale, rotate and move in any order. Nothing touches the document
+ * until the selection is clicked away (or the tool switches) — then
+ * the composed matrix lands as ONE transform op through the same
+ * lift/paint-over pipeline as the arrow's move. Affine maps take quad
+ * records to quad records exactly, so records stay records.
  */
 (function () {
   "use strict";
@@ -14,9 +17,11 @@
   function FreeTransformTool(app) {
     var self = {
       app: app,
-      items: null,   // {fills:[{x,y}], edgeKeys:[]}
-      ghosts: null,  // pristine edge copies of the selection (for preview/bbox)
-      box: null,     // {x0,y0,x1,y1} of ghosts
+      items: null,    // {fills:[{x,y}], edgeKeys:[]} or {region:[pts]}
+      pristine: null, // untransformed edge copies of the selection
+      gestures: [],   // accumulated per-gesture matrices (uncommitted)
+      ghosts: null,   // pristine mapped through the composed matrix
+      box: null,      // {x0,y0,x1,y1} of ghosts
       drag: null
     };
 
@@ -59,18 +64,103 @@
       return { x0: x0, y0: y0, x1: x1, y1: y1 };
     }
 
+    function matMul(m2, m1) { // apply m1 first, then m2
+      return [
+        m2[0] * m1[0] + m2[2] * m1[1],
+        m2[1] * m1[0] + m2[3] * m1[1],
+        m2[0] * m1[2] + m2[2] * m1[3],
+        m2[1] * m1[2] + m2[3] * m1[3],
+        m2[0] * m1[4] + m2[2] * m1[5] + m2[4],
+        m2[1] * m1[4] + m2[3] * m1[5] + m2[5]
+      ];
+    }
+    function composedM() {
+      var m = [1, 0, 0, 1, 0, 0];
+      self.gestures.forEach(function (g) { m = matMul(g, m); });
+      return m;
+    }
+    function isIdentity(m) {
+      return Math.abs(m[0] - 1) < 1e-6 && Math.abs(m[1]) < 1e-6 &&
+             Math.abs(m[2]) < 1e-6 && Math.abs(m[3] - 1) < 1e-6 &&
+             Math.abs(m[4]) < 1 && Math.abs(m[5]) < 1;
+    }
+    function applyPt(m, x, y) {
+      return { x: m[0] * x + m[2] * y + m[4], y: m[1] * x + m[3] * y + m[5] };
+    }
+    function refreshGhosts() {
+      if (!self.pristine) { self.ghosts = null; self.box = null; return; }
+      var m = composedM();
+      self.ghosts = self.pristine.map(function (e) {
+        var a = applyPt(m, e.ax, e.ay), b = applyPt(m, e.bx, e.by);
+        var c = e.cx === null ? null : applyPt(m, e.cx, e.cy);
+        return VB.edge(a.x, a.y, c === null ? null : c.x,
+                       c === null ? null : c.y, b.x, b.y, 0, 0, 0);
+      });
+      self.box = bboxOf(self.ghosts);
+    }
+
+    /** Land the accumulated session on the document as ONE journal op. */
+    self.commitPending = function () {
+      if (!self.items || !self.gestures.length) { self.gestures = []; return false; }
+      var m = composedM();
+      self.gestures = []; // before mutating: docChanged() discards us
+      if (isIdentity(m)) return false;
+      if (self.items.region) {
+        app.record({ op: "regionTransform", points: self.items.region, m: m });
+        app.history.push(app.doc);
+        VB.regionTransform(app.doc, self.items.region, m);
+      } else {
+        app.record({ op: "transformSel", fills: self.items.fills,
+                     edgeKeys: self.items.edgeKeys, m: m });
+        app.history.push(app.doc);
+        VB.arrowTransformSel(app.doc, self.items.fills, self.items.edgeKeys, m);
+      }
+      app.docChanged();
+      app.setMsg("selection transformed");
+      return true;
+    };
+
+    /** Drop the session without committing — the document changed under
+     *  us (load, undo/redo, another tool), so the picks are stale. */
+    self.discard = function () {
+      self.items = null; self.pristine = null; self.gestures = [];
+      self.ghosts = null; self.box = null; self.drag = null;
+    };
+
+    /** Ctrl+Z during a session: step back ONE gesture (nothing was
+     *  journaled, so nothing reaches the history). */
+    self.undoPending = function () {
+      if (!self.gestures.length) return false;
+      self.gestures.pop();
+      refreshGhosts();
+      app.requestRender();
+      app.setMsg(self.gestures.length ? "transform step undone" : "transform reverted");
+      return true;
+    };
+
+    /** Escape: abandon ALL pending gestures, keep the selection. */
+    self.revertPending = function () {
+      if (!self.gestures.length) return false;
+      self.gestures = [];
+      refreshGhosts();
+      app.requestRender();
+      app.setMsg("transform reverted");
+      return true;
+    };
+
     self.adopt = function (items) {
+      self.commitPending();
+      self.gestures = [];
       if (items && items.region) {
         self.items = { region: items.region };
-        self.ghosts = VB.regionPolyLoop(items.region);
-        self.box = bboxOf(self.ghosts);
+        self.pristine = VB.regionPolyLoop(items.region);
       } else if (items && (items.fills.length || items.edgeKeys.length)) {
         self.items = items;
-        self.ghosts = ghostsOf(items);
-        self.box = bboxOf(self.ghosts);
+        self.pristine = ghostsOf(items);
       } else {
-        self.items = null; self.ghosts = null; self.box = null;
+        self.items = null; self.pristine = null;
       }
+      refreshGhosts();
       app.requestRender();
     };
 
@@ -122,6 +212,10 @@
           return;
         }
       }
+      // clicked away from the selection: the accumulated session lands
+      // as ONE op FIRST, so the pick below sees the post-commit document
+      // (the originals only now leave their old location)
+      self.commitPending();
       // (re)pick a selection: fill or attached-stroke chain under cursor
       var fillIdx = VB.geom.fillAt(app.doc, pos.x, pos.y);
       if (fillIdx > 0) {
@@ -177,27 +271,13 @@
       if (pos) d.cur = pos;
       var mFinal = currentMatrix();
       self.drag = null;
-      if (!mFinal) { app.requestRender(); return; }
-      // identity? skip
-      if (Math.abs(mFinal[0] - 1) < 1e-6 && Math.abs(mFinal[1]) < 1e-6 &&
-          Math.abs(mFinal[2]) < 1e-6 && Math.abs(mFinal[3] - 1) < 1e-6 &&
-          Math.abs(mFinal[4]) < 1 && Math.abs(mFinal[5]) < 1) {
-        app.requestRender();
-        return;
-      }
-      if (self.items.region) {
-        app.record({ op: "regionTransform", points: self.items.region, m: mFinal });
-        app.history.push(app.doc);
-        VB.regionTransform(app.doc, self.items.region, mFinal);
-      } else {
-        app.record({ op: "transformSel", fills: self.items.fills,
-                     edgeKeys: self.items.edgeKeys, m: mFinal });
-        app.history.push(app.doc);
-        VB.arrowTransformSel(app.doc, self.items.fills, self.items.edgeKeys, mFinal);
-      }
-      self.adopt(null);
-      app.docChanged();
-      app.setMsg("selection transformed");
+      if (!mFinal || isIdentity(mFinal)) { app.requestRender(); return; }
+      // accumulate — the box stays live for the next gesture; the doc
+      // is untouched until the selection is clicked away
+      self.gestures.push(mFinal);
+      refreshGhosts();
+      app.requestRender();
+      app.setMsg("transform pending — click away to apply");
     };
 
     self.cancel = function () { self.drag = null; app.requestRender(); };

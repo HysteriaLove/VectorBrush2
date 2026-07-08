@@ -83,6 +83,9 @@
   // costly to rebuild on every pointer move.
   function docChanged() {
     if (tools.select && tools.select.clearSelection) tools.select.clearSelection();
+    // a pending free-transform session's picks are stale now — drop it
+    // WITHOUT committing (its own commit calls docChanged after landing)
+    if (tools.transform && tools.transform.discard) tools.transform.discard();
     app.debugPin = -1;
     app.debugHover = -1;
     refreshDebugPanel();
@@ -317,6 +320,8 @@
     // a floating (uncommitted) selection undoes by restoration, without
     // a journal record — its lift was never journaled either
     if (tools.select && tools.select.undoFloat && tools.select.undoFloat()) return;
+    // likewise a pending free-transform: step back one gesture, no record
+    if (tools.transform && tools.transform.undoPending && tools.transform.undoPending()) return;
     if (app.history.undo(app.doc)) { app.record({ op: "undo" }); setMsg("undo"); docChanged(); }
   }
   function doRedo() {
@@ -436,6 +441,9 @@
       if (activePointerTool && activePointerTool.cancel) {
         activePointerTool.cancel();
         activePointerTool = null;
+      } else if (app.tool === "transform" && tools.transform &&
+                 tools.transform.revertPending && tools.transform.revertPending()) {
+        // pending free-transform abandoned, selection kept
       } else if (app.debugPin >= 0) {
         app.debugPin = -1;
         refreshDebugEdge();
