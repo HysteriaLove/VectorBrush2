@@ -60,3 +60,16 @@ implementation. All files CWS (zlib), v7, 550×400 stage.
 Two stages, both journal-worthy ops:
 1. text → single-character text blocks (deduped definitions).
 2. characters → geometry merged into the depth-1 planar-map shape.
+
+## Conversion fidelity (ttf.js)
+
+MX2004 converts from HINTED outlines (GDI-era rasterizer state we do
+not replicate — it would take a TrueType instruction interpreter).
+ttf.js converts the raw glyf data with the rules above; verified
+against Font001: identical contour/segment structure and coordinates
+within ±1/1024 EM (~0.02 px at render sizes), except where MX's
+hinted source made different collinear-collapse decisions. Neither
+hinted nor unhinted GDI GetGlyphOutline reproduces MX byte-for-byte
+(tested); semantic fidelity is the achievable and sufficient bar —
+imported SWF text keeps its embedded glyphs verbatim, so round-trips
+of existing files are unaffected.

@@ -47,7 +47,9 @@
 <script src="../js/arrow.js"></script>
 <script src="../js/transform.js"></script>
 <script src="../js/lasso.js"></script>
+<script src="../js/ttf.js"></script>
 <script src="fixtures.js"></script>
+<script src="ttffixture.js"></script>
 <script src="userlog.js"></script>
 <script src="userlog2.js"></script>
 <script src="userlog3.js"></script>
@@ -1374,6 +1376,60 @@
     tool15.onUp({ x: 10500, y: 7500 });
     check("band sessions committed nothing", journal15.length === 1,
       journal15.length + " ops");
+  })();
+
+  // ========================= unit tests: TTF parser =========================
+  // The mini fixture font exercises every DefineFont2 conversion rule
+  // reverse-engineered from SWFExamples/Font001 (see NOTES.md there):
+  // half-up rounding into the 1024 EM y-down space, implied quad
+  // anchors from ROUNDED controls, collinear-quad collapse, composite
+  // flattening, kerning.
+  log("ttf parser:");
+  (function () {
+    var font = VB.parseTTF(window.VBTTFFixture.bytes());
+    check("ttf header", font.unitsPerEm === 2048 && font.numGlyphs === 5 &&
+      font.family === "VBTest" && font.ascent === 1638 && font.descent === -410,
+      font.unitsPerEm + "/" + font.numGlyphs + "/" + font.family);
+    check("ttf cmap", font.glyphIndex(65) === 1 && font.glyphIndex(68) === 4 &&
+      font.glyphIndex(90) === 0,
+      [font.glyphIndex(65), font.glyphIndex(68), font.glyphIndex(90)].join(","));
+    check("ttf advances", font.advance(1) === 2048 && font.advance(2) === 1638 &&
+      font.advance(4) === 1000);
+    check("ttf kerning", font.kern(1, 2) === -164 && font.kern(2, 1) === 0,
+      font.kern(1, 2) + "/" + font.kern(2, 1));
+    function segsEq(got, want) {
+      if (got.length !== want.length) return false;
+      for (var i = 0; i < got.length; i++) {
+        var g = got[i], w = want[i];
+        if ((g.cx === undefined) !== (w.cx === undefined)) return false;
+        if (g.x !== w.x || g.y !== w.y) return false;
+        if (w.cx !== undefined && (g.cx !== w.cx || g.cy !== w.cy)) return false;
+      }
+      return true;
+    }
+    var a = font.emGlyph(1);
+    check("ttf glyph A: half-up rounding into EM y-down",
+      a.length === 1 && a[0].mx === 0 && a[0].my === 0 &&
+      segsEq(a[0].segs, [{ x: 512, y: -682 }, { x: 1024, y: 0 }, { x: 0, y: 0 }]),
+      JSON.stringify(a));
+    var b = font.emGlyph(2);
+    check("ttf glyph B: implied anchor from ROUNDED controls",
+      b.length === 1 &&
+      segsEq(b[0].segs, [{ cx: 205, cy: -409, x: 410, y: -409 },
+                         { cx: 615, cy: -409, x: 819, y: 0 }, { x: 0, y: 0 }]),
+      JSON.stringify(b));
+    var c = font.emGlyph(3);
+    check("ttf glyph C: composite offset flattened",
+      c.length === 1 && c[0].mx === 51 && c[0].my === -25 &&
+      segsEq(c[0].segs, [{ x: 562, y: -708 }, { x: 1074, y: -26 },
+                         { x: 51, y: -25 }]),
+      JSON.stringify(c));
+    var d = font.emGlyph(4);
+    check("ttf glyph D: collinear quad collapses to a line",
+      d.length === 1 &&
+      segsEq(d[0].segs, [{ x: 500, y: -500 }, { x: 0, y: 0 }]),
+      JSON.stringify(d));
+    check("ttf .notdef is empty", font.emGlyph(0).length === 0);
   })();
 
   // ======================= SWF export round-trip ===========================
