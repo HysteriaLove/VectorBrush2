@@ -142,8 +142,18 @@
     color: var(--text);
   }
   #debugpanel.hidden { display: none; }
-  #text-opts { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-  #text-opts.hidden { display: none; }
+  /* The properties row keeps a CONSTANT height (controls gray out
+     instead of hiding) so the canvas below never jumps. */
+  #propbar {
+    flex: none; height: 34px;
+    display: flex; align-items: center; gap: 10px;
+    padding: 0 10px; overflow: hidden;
+    background: var(--panel);
+    border-bottom: 1px solid var(--panel-edge);
+    font-size: 12px; color: var(--text);
+  }
+  #text-opts { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  #text-opts.inactive { opacity: 0.35; pointer-events: none; }
   #text-opts .txtstyle {
     width: 24px; height: 22px; padding: 0;
     background: #2b2d31; color: var(--text);
@@ -243,7 +253,19 @@
     <label class="ctl" title="Eraser size (px)">
       🧽<input type="number" id="eraser-size" value="20" min="2" max="100" step="2">px
     </label>
-    <span id="text-opts" class="hidden">
+    <div class="sep"></div>
+    <button id="btn-zoom-out" title="Zoom out">−</button>
+    <button id="btn-zoom-100" title="Zoom to 100%">100%</button>
+    <button id="btn-zoom-in" title="Zoom in">+</button>
+    <button id="btn-fit" title="Fit stage in window">Fit</button>
+    <div class="sep"></div>
+    <button id="btn-debug" title="Vector debug view (D)">Debug</button>
+    <div class="spacer"></div>
+    <div id="fileinfo">no file loaded</div>
+  </div>
+
+  <div id="propbar">
+    <span id="text-opts" class="inactive">
       <label class="ctl" title="Font family">
         <select id="text-font" style="max-width:130px"></select>
       </label>
@@ -264,21 +286,12 @@
       <label class="ctl" title="X (px)">X<input type="number" id="text-x" step="1" style="width:56px"></label>
       <label class="ctl" title="Y (px)">Y<input type="number" id="text-y" step="1" style="width:56px"></label>
       <label class="ctl" title="Box width (px) — text re-wraps">W<input type="number" id="text-w" step="1" min="10" style="width:56px"></label>
-      <label class="ctl" title="Box height (px) — scales the text">H<input type="number" id="text-h" step="1" min="1" style="width:56px"></label>
+      <label class="ctl" title="Box height (px) — grows the box">H<input type="number" id="text-h" step="1" min="1" style="width:56px"></label>
       <button id="btn-fonts" title="List the system's fonts (or drop a .ttf on the canvas)">Fonts…</button>
     </span>
     <label class="ctl" title="Selection rotation (degrees) — type 0 to snap upright">
       ⟳<input type="number" id="sel-rotation" value="0" step="1" style="width:56px" disabled>°
     </label>
-    <div class="sep"></div>
-    <button id="btn-zoom-out" title="Zoom out">−</button>
-    <button id="btn-zoom-100" title="Zoom to 100%">100%</button>
-    <button id="btn-zoom-in" title="Zoom in">+</button>
-    <button id="btn-fit" title="Fit stage in window">Fit</button>
-    <div class="sep"></div>
-    <button id="btn-debug" title="Vector debug view (D)">Debug</button>
-    <div class="spacer"></div>
-    <div id="fileinfo">no file loaded</div>
   </div>
 
   <div id="middle">

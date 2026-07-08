@@ -816,7 +816,9 @@
     var panel = document.getElementById("text-opts");
     var target = textPropsTarget();
     var show = app.tool === "text" || !!target;
-    panel.classList.toggle("hidden", !show);
+    // the properties row keeps its height; controls only gray out —
+    // hiding it resized the toolbar and made the canvas jump
+    panel.classList.toggle("inactive", !show);
     if (!show) return;
     function setVal(id, v) {
       var el = document.getElementById(id);
