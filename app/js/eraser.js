@@ -17,33 +17,21 @@
 (function () {
   "use strict";
 
-  var SIDE_PROBE = 1.5; // twips: how far off a boundary piece to sample
+  var SIDE_PROBE = 1.5; // twips: probe distance (legacy deriveFills below)
+  var FIT_TOL = 12;     // twips: outline curve-fit tolerance (0.6 px)
 
   function eraseStroke(doc, points, radius) {
     var swath = VB.buildSwath(points, radius);
-    var loop = swath.loop;
-    if (loop.length === 0) return { removed: 0, boundary: 0 };
+    if (!swath.path || swath.path.length === 0) return { removed: 0, boundary: 0 };
 
-    var loopEdges = loop.map(function (g) {
-      return VB.edge(g.ax, g.ay, g.cx, g.cy, g.bx, g.by, 0, 0, 0);
-    }).filter(function (e) { return !VB.edgeIsDegenerate(e); });
-    if (loopEdges.length === 0) return { removed: 0, boundary: 0 };
-
-    // The exact swept region: within `radius` of the drag path. This must
-    // NOT be a winding test on the outline loop — concave joins give the
-    // loop tiny backward lobes where the nonzero winding cancels to zero,
-    // which once misclassified flap fragments as boundary (open fill
-    // chains rendered as wedges).
-    function inside(x, y, slack) {
-      return VB.distToPath(swath.path, x, y) <= radius + (slack || 0);
-    }
-
-    var swathBBox = loopEdges.reduce(function (bb, e) {
-      var b = VB.geom.edgeBBox(e);
-      if (!bb) return b;
+    var swathBBox = swath.path.reduce(function (bb, p) {
+      if (!bb) {
+        return { xmin: p.x - radius, xmax: p.x + radius,
+                 ymin: p.y - radius, ymax: p.y + radius };
+      }
       return {
-        xmin: Math.min(bb.xmin, b.xmin), xmax: Math.max(bb.xmax, b.xmax),
-        ymin: Math.min(bb.ymin, b.ymin), ymax: Math.max(bb.ymax, b.ymax)
+        xmin: Math.min(bb.xmin, p.x - radius), xmax: Math.max(bb.xmax, p.x + radius),
+        ymin: Math.min(bb.ymin, p.y - radius), ymax: Math.max(bb.ymax, p.y + radius)
       };
     }, null);
 
@@ -61,9 +49,26 @@
       return { removed: 0, boundary: 0 };
     }
 
-    // Ground truth for the re-derivation at the end: the pre-op document
-    // is consistent (claims agree with faces — verified after every op),
-    // so region queries against this snapshot are exact.
+    // The eraser shares the brush's boolean core: exact swept region from
+    // paper.js capsule union, fitted to Flash-lean quad loops, noded in,
+    // then the face-walk mask (mask.js) regenerates all claims — with the
+    // region resolving to EMPTINESS instead of a paint fill.
+    var loops = VB.sweptOutline(swath.path, radius, FIT_TOL);
+    var fitted = [];
+    loops.forEach(function (loop) {
+      loop.forEach(function (e) { fitted.push(e); });
+    });
+    if (fitted.length === 0) return { removed: 0, boundary: 0 };
+
+    var windingLoops = fitted.map(function (e) {
+      return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, 0, 0, 0);
+    });
+    function insideSwept(x, y) {
+      return VB.geom.windingNumber(windingLoops, x, y) !== 0;
+    }
+
+    // Ground truth for faces outside the swath: the pre-op document is
+    // consistent, so region queries against this snapshot are exact.
     var preOp = new VB.VBDocument();
     preOp.width = doc.width; preOp.height = doc.height;
     preOp.fills = doc.fills; preOp.lines = doc.lines;
@@ -71,91 +76,12 @@
       return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, e.fill0, e.fill1, e.line);
     });
 
-    // Node the swath boundary into the map (splits existing edges at the
-    // swath outline; returns the outline's own pieces, not yet inserted).
-    var inserts = loopEdges.map(function (e) {
-      return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, 0, 0, 0);
-    });
-    var pieces = VB.nodeEdges(doc, inserts);
+    var pieces = VB.nodeEdges(doc, fitted);
+    for (var k = 0; k < pieces.length; k++) doc.edges.push(pieces[k]);
 
-    // Classify the swath boundary pieces BEFORE deleting anything: the
-    // outside fill query needs the regions intact. Boundary pieces sit at
-    // distance ≈ radius from the path (± rounding and arc-approximation
-    // error, ~1-2tw), so the side probes escalate until the two sides of
-    // a piece actually disagree; flap fragments from concave joins are
-    // fully inside the swept region and never decide — dropped.
-    var probeLadder = [SIDE_PROBE, 4, 10];
-    var kept = [];
-    for (var i = 0; i < pieces.length; i++) {
-      var e = pieces[i];
-      var mid = VB.geom.evalEdge(e, 0.5);
-      var ahead = VB.geom.evalEdge(e, 0.55);
-      var dx = ahead.x - mid.x, dy = ahead.y - mid.y;
-      var len = Math.hypot(dx, dy);
-      if (len === 0) continue;
-      dx /= len; dy /= len;
-      // visual right of travel = (-dy, dx); left = (dy, -dx)
-      var rightInside = false, leftInside = false, decided = false, probe = 0;
-      for (var pl = 0; pl < probeLadder.length && !decided; pl++) {
-        probe = Math.min(probeLadder[pl], radius * 0.4);
-        rightInside = inside(mid.x - dy * probe, mid.y + dx * probe);
-        leftInside = inside(mid.x + dy * probe, mid.y - dx * probe);
-        decided = rightInside !== leftInside;
-      }
-      if (!decided) continue; // flap lobe or stray — inside on both sides
+    var removed = VB.applyRegionMask(doc, preOp, insideSwept, 0, pieces);
 
-      var ox = rightInside ? mid.x + dy * probe : mid.x - dy * probe;
-      var oy = rightInside ? mid.y - dx * probe : mid.y + dx * probe;
-      var f = VB.geom.fillAt(doc, ox, oy);
-
-      // Keep the piece even when the outside is empty (f === 0): a fence
-      // between the erased inside and an adjacent empty region still
-      // defines the face structure. Dropping it once let an erased
-      // channel merge through a thin strip into the whole drawing, and
-      // the fill-consensus pass then dissolved the channel's REAL
-      // boundary (total document wipe-out). Redundant 0|0 fences are
-      // dissolved by normalizeFills AFTER the face vote, when they have
-      // already done their job.
-      e.fill0 = rightInside ? f : 0;
-      e.fill1 = rightInside ? 0 : f;
-      e.line = 0;
-      kept.push(e);
-    }
-
-    // Delete existing edges swallowed by the swath. Old edges were split
-    // exactly at the constructed outline, which wobbles ~2tw around the
-    // true radius — the small negative slack keeps sliver pieces in that
-    // band alive rather than eating geometry just outside the eraser.
-    var removed = 0;
-    var survivors = [];
-    for (var j = 0; j < doc.edges.length; j++) {
-      var de = doc.edges[j];
-      var bb = VB.geom.edgeBBox(de);
-      if (VB.geom.bboxOverlap(bb, swathBBox)) {
-        var m = VB.geom.evalEdge(de, 0.5);
-        if (inside(m.x, m.y, -2)) { removed++; continue; }
-      }
-      survivors.push(de);
-    }
-    doc.edges = survivors;
-
-    for (var k = 0; k < kept.length; k++) doc.edges.push(kept[k]);
-
-    // Grazing crossings that only became real after rounding leave edges
-    // crossing without a shared node — split them now or faces leak.
-    VB.repairPlanar(doc);
-
-    deriveFills(doc, preOp, swath.path, radius, 0);
-
-    // Terminal self-heal: old-fence × new-fence grazings can leave a fill
-    // boundary topologically open at twip precision even when everything
-    // above did its job. The renderer closes open chains with a straight
-    // chord anyway — so make that chord REAL geometry (lineless, fill on
-    // the chain's fill side, noded into the map). No visual change, but
-    // the closed-boundary invariant holds for the bucket and later ops.
-    stitchOpenChains(doc);
-
-    return { removed: removed, boundary: kept.length };
+    return { removed: removed, boundary: fitted.length };
   }
 
   function stitchOpenChains(doc) {

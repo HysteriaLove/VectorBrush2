@@ -112,7 +112,7 @@ The `<title>`/final line reads `VBTEST DONE pass=N fail=M`.
 verification (bounded faces must equal E − V + C), wavy-grid bucket
 containment, and the casual-drawing gap scenarios.
 
-Current status: 259 checks, 0 failures — the SWF/VBD pipeline suite plus
+Current status: 311 checks, 0 failures — the SWF/VBD pipeline suite plus
 the journal-replay regression (pencil square → bucket fill → erase across
 it, the case that exposed the concave-join bowtie bug) and
 eraser unit tests (band erase splitting a fill, dab holes with
@@ -134,7 +134,16 @@ files.
 3. ~~Bucket fill (face tracing, edge re-siding, border dissolution)~~
 4. ~~Eraser (swath subtraction, stroke trimming, boundary re-siding)~~
 5. ~~Brush tool (paint the swath as a fill)~~
-6. Region-boolean erase/brush core (Flash-style `region ∓ swath` per
-   affected fill, regenerating boundary records wholesale — retires the
-   remaining sliver-concession cases)
-7. Pixi.js rendering backend
+6. ~~Region-boolean erase/brush core~~ — done, powered by paper.js
+   (vendored checkout; prebuilt v0.12.18 in `lib/paper-core.min.js`):
+   the swept region is the paper.js union of per-segment capsules
+   (`js/paperglue.js`), curve-fit to Flash-lean quad loops (the Brush*.swf
+   references store a whole stroke as 14-26 fitted quads), noded into the
+   map, and reconciled by the boolean mask face walk (`js/mask.js`):
+   one probe per face — inside the mask → the mask fill, outside → the
+   pre-op snapshot — and every edge claim regenerated from its two faces.
+   Consistency is by construction; all four captured user-session logs
+   replay with zero phantom chords and zero integrity problems.
+7. Use paper.js `getIntersections`/`divide` for planar noding in
+   `merge.js` (replacing the hand-rolled quad-quad intersector)
+8. Pixi.js rendering backend

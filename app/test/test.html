@@ -32,6 +32,9 @@
 <script src="../js/normalize.js"></script>
 <script src="../js/bucket.js"></script>
 <script src="../js/swath.js"></script>
+<script src="../lib/paper-core.min.js"></script>
+<script src="../js/paperglue.js"></script>
+<script src="../js/mask.js"></script>
 <script src="../js/eraser.js"></script>
 <script src="../js/brush.js"></script>
 <script src="../js/planarity.js"></script>
@@ -42,6 +45,8 @@
 <script src="fixtures.js"></script>
 <script src="userlog.js"></script>
 <script src="userlog2.js"></script>
+<script src="userlog3.js"></script>
+<script src="userlog4.js"></script>
 <script>
 (async function () {
   "use strict";
@@ -446,7 +451,9 @@
     var oneSided = doc2.edges.filter(function (e) {
       return (e.fill0 === 1) !== (e.fill1 === 1);
     });
-    check("dab boundary one-sided", oneSided.length >= 8 + 4, oneSided.length + " edges");
+    // The boolean-mask core emits a FITTED outline (Flash-lean): a round
+    // hole is ~8-12 quads, not the raw fragment count the old pipeline had.
+    check("dab boundary one-sided", oneSided.length >= 6, oneSided.length + " edges");
     VB.bucketFill(doc2, 2000, 2000, { color: { r: 200, g: 60, b: 60, a: 255 } });
     check("refill heals hole", VB.geom.fillAt(doc2, 2000, 2000) === 1);
     check("refill dissolves boundary", doc2.edges.length === 4, doc2.edges.length + " edges");
@@ -788,29 +795,38 @@
       res.doc.edges.length + " edges");
   })();
 
-  // ============ regression: real brush session (user log 2) ================
-  // Pencil loop + 8 heavy self-crossing brush strokes over it. Replays
-  // clean; the phantom-chord census is the honest wedge tripwire (the
-  // integrity metric can't see stitched chords). Current pipeline leaves
-  // ~50 from the heaviest stroke; the region-boolean core is expected to
-  // drive this to zero — the threshold ratchets DOWN, never up.
-  log("brush session replay:");
+  // ============ regression: real brush sessions (user logs 2-4) ============
+  // Log 2: pencil loop + 8 heavy self-crossing brush strokes over it.
+  // Logs 3-4: pure brush sessions (24 strokes / stress test). All replay
+  // clean on the paper.js boolean-mask core with ZERO phantom chords —
+  // the census is the honest wedge tripwire (the integrity metric can't
+  // see straight lineless chords), and its threshold never goes back up.
+  log("brush session replays:");
   await (async function () {
-    var corruptAt = -1;
-    var res = await VB.replayJournal(window.VBUserLog2.ops, {
-      onOp: function (i, op, d) {
-        if (corruptAt < 0 && VB.integrityReport(d).length) corruptAt = i;
-      }
-    });
-    check("brush session replays clean", corruptAt < 0, "corrupt at op#" + corruptAt);
-    var phantom = res.doc.edges.filter(function (e) {
-      return e.cx === null && e.line === 0 &&
-        Math.hypot(e.bx - e.ax, e.by - e.ay) > 300;
-    });
-    check("brush session phantom chords bounded", phantom.length <= 60,
-      phantom.length + " phantom chords");
-    check("brush session end state sane", res.doc.edges.length > 500,
-      res.doc.edges.length + " edges");
+    var sessions = [
+      { name: "log2", ops: window.VBUserLog2.ops, minEdges: 150 },
+      { name: "log3", ops: window.VBUserLog3.ops, minEdges: 150 },
+      { name: "log4 stress", ops: window.VBUserLog4.ops, minEdges: 300 }
+    ];
+    for (var si = 0; si < sessions.length; si++) {
+      var ses = sessions[si];
+      var corruptAt = -1;
+      var res = await VB.replayJournal(ses.ops, {
+        onOp: function (i, op, d) {
+          if (corruptAt < 0 && VB.integrityReport(d).length) corruptAt = i;
+        }
+      });
+      check("brush session " + ses.name + " replays clean", corruptAt < 0,
+        "corrupt at op#" + corruptAt);
+      var phantom = res.doc.edges.filter(function (e) {
+        return e.cx === null && e.line === 0 &&
+          Math.hypot(e.bx - e.ax, e.by - e.ay) > 300;
+      });
+      check("brush session " + ses.name + " has no phantom chords",
+        phantom.length === 0, phantom.length + " phantom chords");
+      check("brush session " + ses.name + " end state sane",
+        res.doc.edges.length > ses.minEdges, res.doc.edges.length + " edges");
+    }
   })();
 
   // ======================= fixture pipeline tests ==========================
