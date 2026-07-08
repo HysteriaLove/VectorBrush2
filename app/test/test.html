@@ -1096,6 +1096,84 @@
       }));
     check("region replay consistent",
       VB.integrityReport(res11.doc).length === 0, VB.integrityReport(res11.doc)[0]);
+
+    // 12. reshape SWEEPS its lens across a fill island: the swept area
+    //     changes owner and the island's stale boundary inside the lens
+    //     is reconciled (the invisible-overlap bug)
+    var doc12 = new VB.VBDocument();
+    doc12.width = 11000; doc12.height = 8000;
+    VB.shapeCommit(doc12, VB.rectLoop(2000, 2000, 6000, 4000), red, null);
+    VB.regionDelete(doc12, [{ x: 3000, y: 2600 }, { x: 4000, y: 2600 },
+                            { x: 4000, y: 3400 }, { x: 3000, y: 3400 }]);
+    check("island carved", VB.geom.fillAt(doc12, 3500, 3000) === 0);
+    var leftKey = null;
+    doc12.edges.forEach(function (e) {
+      if (e.ax === 2000 && e.bx === 2000 && e.line === 0 &&
+          Math.abs(e.ay - e.by) > 1000) leftKey = VB.arrowEdgeKey(e);
+    });
+    check("left boundary found", !!leftKey);
+    // drag the left boundary INWARD past the island: the lens empties,
+    // consuming the island and its boundary
+    VB.arrowReshape(doc12, leftKey, 0.5, 4500, 3000);
+    check("swept lens emptied", VB.geom.fillAt(doc12, 2500, 3000) === 0);
+    check("island area clean (no stale overlap)",
+      VB.geom.fillAt(doc12, 3500, 3000) === 0);
+    var staleIsland = doc12.edges.filter(function (e) {
+      var m12 = VB.geom.evalEdge(e, 0.5);
+      return m12.x > 3050 && m12.x < 3950 && m12.y > 2900 && m12.y < 3100;
+    });
+    check("island boundary inside the lens reconciled", staleIsland.length === 0,
+      staleIsland.length + " stale edges");
+    check("rest of rect intact", VB.geom.fillAt(doc12, 5500, 3000) === 1);
+    check("reshape-over-island consistent",
+      VB.integrityReport(doc12).length === 0, VB.integrityReport(doc12)[0]);
+
+    // 13. reshaping OUTWARD drags the fill with the boundary
+    var doc13 = new VB.VBDocument();
+    doc13.width = 11000; doc13.height = 8000;
+    VB.shapeCommit(doc13, VB.rectLoop(2000, 2000, 6000, 4000), red, null);
+    var leftKey13 = null;
+    doc13.edges.forEach(function (e) {
+      if (e.ax === 2000 && e.bx === 2000 && e.line === 0) {
+        leftKey13 = VB.arrowEdgeKey(e);
+      }
+    });
+    VB.arrowReshape(doc13, leftKey13, 0.5, 800, 3000);
+    check("outward reshape fills the lens", VB.geom.fillAt(doc13, 1400, 3000) === 1,
+      "fillAt=" + VB.geom.fillAt(doc13, 1400, 3000));
+    check("outward reshape keeps the rest", VB.geom.fillAt(doc13, 5000, 3000) === 1);
+    check("outward reshape consistent",
+      VB.integrityReport(doc13).length === 0, VB.integrityReport(doc13)[0]);
+
+    // 14. moving strokes OFF a bucket-filled region leaves the fill
+    //     behind a lineless boundary (fills don't follow their strokes)
+    var doc14 = new VB.VBDocument();
+    doc14.width = 11000; doc14.height = 8000;
+    VB.shapeCommit(doc14, VB.rectLoop(2000, 2000, 5000, 4000), null, blk);
+    VB.bucketFill(doc14, 3500, 3000, { color: { r: 102, g: 204, b: 255, a: 255 } });
+    check("bucket filled the stroked rect", VB.geom.fillAt(doc14, 3500, 3000) > 0);
+    var strokeKeys14 = [];
+    doc14.edges.forEach(function (e) {
+      if (e.line > 0) strokeKeys14.push(VB.arrowEdgeKey(e));
+    });
+    check("stroked outline found", strokeKeys14.length >= 4,
+      strokeKeys14.length + " records");
+    VB.arrowTransformSel(doc14, [], strokeKeys14, [1, 0, 0, 1, 0, 3200]);
+    check("fill stays when its strokes move away",
+      VB.geom.fillAt(doc14, 3500, 3000) > 0,
+      "fillAt=" + VB.geom.fillAt(doc14, 3500, 3000));
+    var linelessBoundary14 = doc14.edges.some(function (e) {
+      return e.line === 0 && (e.fill0 > 0) !== (e.fill1 > 0) &&
+        VB.geom.evalEdge(e, 0.5).y < 4500;
+    });
+    check("fill boundary became lineless", linelessBoundary14);
+    var movedStrokes14 = doc14.edges.filter(function (e) {
+      return e.line > 0 && VB.geom.evalEdge(e, 0.5).y > 4600;
+    });
+    check("strokes arrived at destination", movedStrokes14.length >= 4,
+      movedStrokes14.length + " records");
+    check("stroke-lift consistent",
+      VB.integrityReport(doc14).length === 0, VB.integrityReport(doc14)[0]);
   })();
 
   // ======================= SWF export round-trip ===========================

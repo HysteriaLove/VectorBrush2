@@ -494,6 +494,7 @@
 
   function selectTool(tool) {
     canvas.style.cursor = "";
+    if (tools.select && tools.select.commitFloat) tools.select.commitFloat();
     if (tool === "transform" && tools.select.exportSelection) {
       tools.transform.adopt(tools.select.exportSelection());
       if (tools.select.clearSelection) tools.select.clearSelection();

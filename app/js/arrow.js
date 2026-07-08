@@ -45,6 +45,15 @@
     var idx = findByKey(doc, key);
     if (idx < 0) return false;
     var e = doc.edges[idx];
+    // snapshot BEFORE any mutation — mask ground truth for faces outside
+    // the swept lens
+    var preOp = new VB.VBDocument();
+    preOp.width = doc.width; preOp.height = doc.height;
+    preOp.fills = doc.fills; preOp.lines = doc.lines;
+    preOp.edges = doc.edges.map(function (pe) {
+      return VB.edge(pe.ax, pe.ay, pe.cx, pe.cy, pe.bx, pe.by, pe.fill0, pe.fill1, pe.line);
+    });
+
     doc.edges.splice(idx, 1);
     t = Math.min(0.8, Math.max(0.2, t));
     var u = 1 - t;
@@ -55,6 +64,44 @@
     var pieces = VB.nodeEdges(doc, [ne]);
     for (var k = 0; k < pieces.length; k++) doc.edges.push(pieces[k]);
     VB.repairPlanar(doc);
+
+    // Reshaping a REGION BOUNDARY drags its fill with it: the lens swept
+    // between the old and new curve changes owner. Each lobe of the lens
+    // (old curve forward + new curve reversed = closed loop; an S-drag
+    // gives lobes of opposite winding) now belongs to the fill on ITS
+    // side of the new curve. Reconciling the lens through the region
+    // mask paints/erases everything the sweep covered — including fill
+    // islands, which used to keep stale claims and render as invisible
+    // overlap regions.
+    if (e.fill0 !== e.fill1) {
+      var lens = [
+        VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, 0, 0, 0),
+        VB.edge(ne.bx, ne.by, ne.cx, ne.cy, ne.ax, ne.ay, 0, 0, 0)
+      ];
+      [1, -1].forEach(function (sign) {
+        // find a probe inside this lobe
+        var probe = null;
+        for (var s5 = 0.08; s5 < 1 && !probe; s5 += 0.07) {
+          var p1 = VB.geom.evalEdge(e, s5);
+          var p2 = VB.geom.evalEdge(ne, s5);
+          var q5 = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+          if (VB.geom.windingNumber(lens, q5.x, q5.y) * sign > 0) probe = q5;
+        }
+        if (!probe) return;
+        // which side of the NEW curve does this lobe lie on?
+        var near = VB.geom.nearestOnEdge(ne, probe.x, probe.y);
+        var t5 = Math.min(0.97, Math.max(0.03, near.t));
+        var ah = VB.geom.evalEdge(ne, Math.min(1, t5 + 0.03));
+        var bh = VB.geom.evalEdge(ne, Math.max(0, t5 - 0.03));
+        var dx5 = ah.x - bh.x, dy5 = ah.y - bh.y;
+        var crossZ = dx5 * (probe.y - near.y) - dy5 * (probe.x - near.x);
+        var growFill = crossZ > 0 ? ne.fill1 : ne.fill0; // right : left
+        VB.applyRegionMask(doc, preOp, function (x5, y5) {
+          var w5 = VB.geom.windingNumber(lens, x5, y5);
+          return sign > 0 ? w5 > 0 : w5 < 0;
+        }, growFill, pieces);
+      });
+    }
     return true;
   }
 
@@ -253,10 +300,20 @@
     });
     if (fills.length === 0 && strokes.length === 0) return false;
 
-    // lift originals
+    // lift originals. Lifting a stroke OFF a fill boundary leaves the
+    // fill intact behind a lineless edge (Flash: fills don't follow
+    // their outline strokes) — only claim-free strokes vanish entirely.
     fillPicks.forEach(function (p) { arrowDeleteFill(doc, p.x, p.y); });
     var strokeSet = new Set(strokes);
-    doc.edges = doc.edges.filter(function (e) { return !strokeSet.has(e); });
+    var rebuilt = [];
+    doc.edges.forEach(function (e) {
+      if (!strokeSet.has(e)) { rebuilt.push(e); return; }
+      if (e.fill0 !== e.fill1) {
+        rebuilt.push(VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by,
+                             e.fill0, e.fill1, 0));
+      }
+    });
+    doc.edges = rebuilt;
 
     function txEdge(e, f0, f1, ln) {
       var a = applyM(m, e.ax, e.ay);
@@ -404,7 +461,11 @@
     var lifted = regionLift(doc, points);
     if (lifted.edges.length === 0) return false;
     regionDelete(doc, points);
+    return mergeLifted(doc, lifted, m);
+  }
 
+  /** Merge a lifted clip (a standalone document) into doc under matrix m. */
+  function mergeLifted(doc, lifted, m) {
     function txEdge(e, f0, f1, ln) {
       var a = applyM(m, e.ax, e.ay);
       var b = applyM(m, e.bx, e.by);
@@ -500,6 +561,7 @@
       // selection: fills as pick points (+loops snapshot for overlay),
       // strokes as record keys
       sel: { fills: [], edgeKeys: [], region: null },
+      float: null, // { origin: points, doc: liftedDoc, dx, dy, points }
       drag: null,
       hoverPos: null
     };
@@ -511,10 +573,30 @@
     }
     self.clearSelection = function () {
       self.sel = { fills: [], edgeKeys: [], region: null };
+      self.float = null;
     };
     self.setRegionSelection = function (points) {
+      self.commitFloat();
       self.sel = { fills: [], edgeKeys: [], region: points };
       app.requestRender();
+    };
+
+    // Commit the floating chunk: merge it into the document at its
+    // accumulated offset. The whole multi-drag gesture is ONE journal op
+    // and ONE undo step (the history snapshot was taken at lift time).
+    self.commitFloat = function () {
+      var fl = self.float;
+      if (!fl) return false;
+      self.float = null;
+      var m = [1, 0, 0, 1, fl.dx, fl.dy];
+      app.record({ op: "regionTransform", points: fl.origin, m: m });
+      VB.regionMergeLifted(app.doc, fl.doc, m);
+      var placed = fl.points;
+      app.docChanged();
+      // keep the committed region selected so Q can adopt it in place
+      self.sel = { fills: [], edgeKeys: [], region: placed };
+      app.setMsg("selection merged");
+      return true;
     };
     self.exportSelection = function () {
       return {
@@ -580,7 +662,18 @@
 
     self.onDown = function (pos, ev) {
       var shift = !!(ev && ev.shiftKey);
-      // press inside an active region selection: move it
+      // press inside the floating chunk: keep dragging it
+      if (self.float) {
+        var floop = polyLoop(self.float.points);
+        if (VB.geom.windingNumber(floop, pos.x, pos.y) !== 0) {
+          self.drag = { kind: "moveFloat", from: pos, cur: pos, moved: false };
+          return;
+        }
+        // clicked away: the move gesture is over — merge, then handle
+        // this press normally
+        self.commitFloat();
+      }
+      // press inside an active region selection: LIFT it (first drag)
       if (insideRegionSel(pos)) {
         self.drag = { kind: "moveRegion", from: pos, cur: pos, moved: false,
                       points: self.sel.region };
@@ -736,15 +829,43 @@
       }
       if (drag.kind === "moveRegion") {
         if (!drag.moved) { app.requestRender(); return; }
+        // FIRST drag of the gesture: lift the clip OUT of the document.
+        // No journal op and no union yet — the chunk floats until the
+        // user clicks away (avoids premature unioning across nudges).
         var rdx = Math.round(pos.x - drag.from.x);
         var rdy = Math.round(pos.y - drag.from.y);
-        var rm = [1, 0, 0, 1, rdx, rdy];
-        app.record({ op: "regionTransform", points: drag.points, m: rm });
-        app.history.push(app.doc);
-        regionTransform(app.doc, drag.points, rm);
-        self.clearSelection();
-        app.docChanged();
-        app.setMsg("region moved");
+        app.history.push(app.doc); // undo point for the whole gesture
+        var lifted = regionLift(app.doc, drag.points);
+        if (lifted.edges.length === 0) {
+          app.history.undoStack.pop();
+          self.clearSelection();
+          app.requestRender();
+          return;
+        }
+        regionDelete(app.doc, drag.points);
+        self.float = {
+          origin: drag.points,
+          doc: lifted,
+          dx: rdx, dy: rdy,
+          points: drag.points.map(function (q) {
+            return { x: q.x + rdx, y: q.y + rdy };
+          })
+        };
+        self.sel = { fills: [], edgeKeys: [], region: null };
+        app.requestRender();
+        app.setMsg("selection floating — drag to keep moving, click away to merge, Delete to discard");
+        return;
+      }
+      if (drag.kind === "moveFloat") {
+        if (!drag.moved || !self.float) { app.requestRender(); return; }
+        var fdx = Math.round(pos.x - drag.from.x);
+        var fdy = Math.round(pos.y - drag.from.y);
+        self.float.dx += fdx;
+        self.float.dy += fdy;
+        self.float.points = self.float.points.map(function (q) {
+          return { x: q.x + fdx, y: q.y + fdy };
+        });
+        app.requestRender();
         return;
       }
       if (drag.kind === "moveSel") {
@@ -763,6 +884,17 @@
     };
 
     self.onDeleteKey = function () {
+      if (self.float) {
+        // the content is already lifted out of the doc; recording the
+        // deletion of the ORIGIN reproduces this state on replay
+        var fl = self.float;
+        self.float = null;
+        app.record({ op: "regionDelete", points: fl.origin });
+        self.clearSelection();
+        app.docChanged();
+        app.setMsg("floating selection discarded");
+        return true;
+      }
       if (selEmpty()) return false;
       if (self.sel.region) {
         var pts = self.sel.region;
@@ -839,6 +971,56 @@
         });
         strokeEdges(ctx, edges, 0, 0);
       }
+      if (self.float) {
+        // the floating chunk renders here (it no longer exists in the doc)
+        var fl = self.float;
+        var extraX = 0, extraY = 0;
+        if (self.drag && self.drag.kind === "moveFloat" && self.drag.moved) {
+          extraX = self.drag.cur.x - self.drag.from.x;
+          extraY = self.drag.cur.y - self.drag.from.y;
+        }
+        ctx.save();
+        ctx.translate(fl.dx + extraX, fl.dy + extraY);
+        var fillPaths = VB.buildFillPaths(fl.doc);
+        for (var fi2 = 1; fi2 < fillPaths.length; fi2++) {
+          var st = fl.doc.fills[fi2 - 1];
+          if (!st) continue;
+          ctx.beginPath();
+          fillPaths[fi2].forEach(function (chain) {
+            ctx.moveTo(chain.sx, chain.sy);
+            chain.pts.forEach(function (q) { ctx.lineTo(q.x, q.y); });
+            ctx.closePath();
+          });
+          ctx.fillStyle = "rgba(" + st.color.r + "," + st.color.g + "," +
+            st.color.b + "," + (st.color.a / 255) + ")";
+          ctx.fill("evenodd");
+        }
+        fl.doc.edges.forEach(function (e) {
+          if (e.line === 0) return;
+          var ls = fl.doc.lines[e.line - 1];
+          ctx.beginPath();
+          ctx.moveTo(e.ax, e.ay);
+          if (e.cx === null) ctx.lineTo(e.bx, e.by);
+          else ctx.quadraticCurveTo(e.cx, e.cy, e.bx, e.by);
+          ctx.strokeStyle = "rgba(" + ls.color.r + "," + ls.color.g + "," +
+            ls.color.b + "," + (ls.color.a / 255) + ")";
+          ctx.lineWidth = Math.max(ls.width, hair);
+          ctx.lineCap = "round";
+          ctx.stroke();
+        });
+        ctx.restore();
+        ctx.strokeStyle = "rgba(0,160,255,0.9)";
+        ctx.lineWidth = 1.5 * hair;
+        ctx.setLineDash([6 * hair, 4 * hair]);
+        ctx.beginPath();
+        fl.points.forEach(function (p, i2) {
+          var px2 = p.x + extraX, py2 = p.y + extraY;
+          if (i2 === 0) ctx.moveTo(px2, py2); else ctx.lineTo(px2, py2);
+        });
+        ctx.closePath();
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
       if (self.sel.region) {
         ctx.strokeStyle = "rgba(0,160,255,0.9)";
         ctx.lineWidth = 1.5 * hair;
@@ -909,5 +1091,6 @@
   VB.regionDelete = regionDelete;
   VB.regionTransform = regionTransform;
   VB.regionPolyLoop = polyLoop;
+  VB.regionMergeLifted = mergeLifted;
   VB.arrowEdgeKey = edgeKey;
 })();
