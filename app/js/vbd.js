@@ -239,7 +239,7 @@
   function writeTextSection(w, doc) {
     var fonts = doc.fonts || [], texts = doc.texts || [];
     w.u16(TEXT_SECTION_SENTINEL);
-    w.u8(3); // section format (3 adds per-block align + letter spacing)
+    w.u8(4); // section format (3: align/spacing; 4: box height)
     w.u16(fonts.length);
     fonts.forEach(function (f) {
       var name = unescape(encodeURIComponent(f.name)); // utf8 bytes
@@ -269,6 +269,7 @@
       s32w(w, t.pitch || 0);
       w.u8(t.align || 0);
       s16w(w, t.spacing || 0);
+      s32w(w, t.boxHeight || -1);
       w.u16(t.records.length);
       t.records.forEach(function (rec) {
         w.u16(rec.font);
@@ -319,7 +320,7 @@
       var matrix = [s32r(r) / 65536, s32r(r) / 65536, s32r(r) / 65536,
                     s32r(r) / 65536, s32r(r), s32r(r)];
       var text = { matrix: matrix, records: [], wrapWidth: null, pitch: null,
-                   align: 0, spacing: 0 };
+                   align: 0, spacing: 0, boxHeight: null };
       if (fmt >= 2) {
         var ww = s32r(r);
         text.wrapWidth = ww > 0 ? ww : null;
@@ -329,6 +330,10 @@
       if (fmt >= 3) {
         text.align = r.u8();
         text.spacing = s16r(r);
+      }
+      if (fmt >= 4) {
+        var bh = s32r(r);
+        text.boxHeight = bh > 0 ? bh : null;
       }
       var nr = r.u16();
       for (var k = 0; k < nr; k++) {

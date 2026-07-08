@@ -1993,7 +1993,7 @@
       alDoc.texts[0].spacing === 80,
       JSON.stringify(alDoc.texts[0].records[0]));
 
-    // ---- arrow vertical tab = point size ----
+    // ---- arrow vertical tab = BOX HEIGHT (container only) ----
     var vDoc = new VB.VBDocument();
     vDoc.width = 11000; vDoc.height = 8000;
     VB.textApplyOp(vDoc, VB.buildTextOp(ttf, { name: "VBTest" }, "AB", 400, red, 2000, 3000));
@@ -2008,24 +2008,34 @@
     toolV = VB.ArrowTool(appV);
     toolV.onDown({ x: 2300, y: 3100 }, {});
     toolV.onUp({ x: 2300, y: 3100 });
-    var bbV = VB.textBlockBounds(vDoc, vDoc.texts[0]);
+    var bbV = VB.textBoxBounds(vDoc, vDoc.texts[0]); // y -80..320
     var midXV = (bbV.x0 + bbV.x1) / 2;
     toolV.onDown({ x: 2000 + midXV, y: 3000 + bbV.y1 }, {}); // bottom tab
-    check("vertical tab arms a size drag",
-      toolV.drag && toolV.drag.kind === "sizeText",
+    check("vertical tab arms a box-height drag",
+      toolV.drag && toolV.drag.kind === "boxText",
       toolV.drag && toolV.drag.kind);
-    // drag down to double the box height
-    var hV = bbV.y1 - bbV.y0;
-    toolV.onMove({ x: 2000 + midXV, y: 3000 + bbV.y0 + hV * 2 });
-    toolV.onUp({ x: 2000 + midXV, y: 3000 + bbV.y0 + hV * 2 });
-    check("vertical tab drag commits ONE textSize op",
-      journalV.length === 1 && journalV[0].op === "textSize" &&
+    // drag down: the ENTRY AREA doubles, the glyphs don't
+    toolV.onMove({ x: 2000 + midXV, y: 3000 + bbV.y0 + 800 });
+    toolV.onUp({ x: 2000 + midXV, y: 3000 + bbV.y0 + 800 });
+    check("vertical tab drag commits ONE textBoxH op",
+      journalV.length === 1 && journalV[0].op === "textBoxH" &&
       journalV[0].height === 800,
       JSON.stringify(journalV));
-    check("size drag scales records, matrix rotation-free parts intact",
-      vDoc.texts[0].records[0].height === 800 &&
-      vDoc.texts[0].matrix[0] === 1 && vDoc.texts[0].matrix[3] === 1,
-      JSON.stringify(vDoc.texts[0].matrix));
+    var recV = vDoc.texts[0].records[0];
+    check("box height grows the container, never the glyphs",
+      vDoc.texts[0].boxHeight === 800 &&
+      recV.height === 400 && recV.glyphs[0].adv === 368 &&
+      JSON.stringify(vDoc.texts[0].matrix) === JSON.stringify([1, 0, 0, 1, 2000, 3000]),
+      JSON.stringify({ boxH: vDoc.texts[0].boxHeight, h: recV.height }));
+    var bbV2 = VB.textBoxBounds(vDoc, vDoc.texts[0]);
+    check("frame bounds show the grown box",
+      bbV2.y1 === bbV2.y0 + 800, JSON.stringify(bbV2));
+    check("the grown box is grabbable",
+      VB.textHit(vDoc, 2300, 3000 + 600) === 0);
+    // vbd carries the box height (section format 4)
+    var vBack = await VB.decodeVBD(await VB.encodeVBD(vDoc, { compress: true }));
+    check("vbd round-trips box height",
+      JSON.stringify(vBack.doc.texts) === JSON.stringify(vDoc.texts));
 
     // ---- transform text session: mid tabs are BOX TABS now ----
     var toolT2 = VB.FreeTransformTool(appA);
@@ -2038,14 +2048,26 @@
       toolT2.drag && toolT2.drag.kind);
     toolT2.onMove({ x: 2900, y: 3000 + (bbT.y0 + bbT.y1) / 2 });
     toolT2.onUp({ x: 2900, y: 3000 + (bbT.y0 + bbT.y1) / 2 });
+    // and the BOTTOM tab grows the box height in the same session
+    var bbT2 = toolT2.box;
+    toolT2.onDown({ x: 2000 + (bbT2.x0 + bbT2.x1) / 2, y: 3000 + bbT2.y1 }, {});
+    check("transform bottom tab arms a box drag",
+      toolT2.drag && toolT2.drag.kind === "boxtab",
+      toolT2.drag && toolT2.drag.kind);
+    toolT2.onMove({ x: 2000 + (bbT2.x0 + bbT2.x1) / 2, y: 3000 + bbT2.y0 + 2000 });
+    toolT2.onUp({ x: 2000 + (bbT2.x0 + bbT2.x1) / 2, y: 3000 + bbT2.y0 + 2000 });
     var beforeOps = journalA.length;
     toolT2.onDown({ x: 10500, y: 7500 }, {}); // click away commits
     toolT2.onUp({ x: 10500, y: 7500 });
-    check("transform box tab commits a textWrap op",
-      journalA.length === beforeOps + 1 &&
-      journalA[journalA.length - 1].op === "textWrap" &&
-      journalA[journalA.length - 1].width === 900 &&
-      adoc.texts[0].records.length === 2,
+    check("transform box tabs commit textWrap + textBoxH ops",
+      journalA.length === beforeOps + 2 &&
+      journalA[beforeOps].op === "textWrap" &&
+      journalA[beforeOps].width === 900 &&
+      journalA[beforeOps + 1].op === "textBoxH" &&
+      journalA[beforeOps + 1].height === 2000 &&
+      adoc.texts[0].records.length === 2 &&
+      adoc.texts[0].boxHeight === 2000 &&
+      adoc.texts[0].records[0].height === 400, // glyphs untouched
       JSON.stringify(journalA.slice(beforeOps)));
 
     // ---- corner handles DRAG on a rotated text frame (user report) ----

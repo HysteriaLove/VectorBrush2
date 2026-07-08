@@ -495,7 +495,7 @@
         if (ok) {
           doc.texts.push({ matrix: total, records: records,
                            wrapWidth: null, pitch: null,
-                           align: 0, spacing: 0 });
+                           align: 0, spacing: 0, boxHeight: null });
           textsPlaced++;
         } else warnings.push("text block references a missing font — skipped");
       }

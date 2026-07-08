@@ -202,9 +202,9 @@
                          width: bop.width, dx: bop.dx });
             VB.textWrapApply(app.doc, fl.textIndex, bop.width, bop.dx);
           } else {
-            app.record({ op: "textSize", index: fl.textIndex,
+            app.record({ op: "textBoxH", index: fl.textIndex,
                          height: bop.height, dy: bop.dy });
-            VB.textSizeApply(app.doc, fl.textIndex, bop.height, bop.dy);
+            VB.textBoxHApply(app.doc, fl.textIndex, bop.height, bop.dy);
           }
         });
         if (!isIdentity(m)) {
@@ -281,7 +281,7 @@
         var blk = app.doc.texts[items.textIndex];
         self.items = { textIndex: items.textIndex };
         self.base = blk.matrix.slice();
-        var bb = VB.textBlockBounds(app.doc, blk);
+        var bb = VB.textBoxBounds(app.doc, blk);
         self.pristine = bb ? [
           VB.edge(bb.x0, bb.y0, null, null, bb.x1, bb.y0, 0, 0, 0),
           VB.edge(bb.x1, bb.y0, null, null, bb.x1, bb.y1, 0, 0, 0),
@@ -578,15 +578,15 @@
       } else if (d.hi === 7) {                // left: wrap, right edge planted
         var width = Math.max(MIN, Math.round(d.right - lx));
         d.pending = { op: "textWrap", width: width, dx: d.right - width };
-      } else {                                // top/bottom: point size
-        var boxH = b.y1 - b.y0 || 1;
-        var f = d.hi === 5 ? (ly - b.y0) / boxH : (b.y1 - ly) / boxH;
-        if (!isFinite(f)) return;
-        var height = Math.max(20, Math.round(d.baseHeight * f));
-        f = height / d.baseHeight;
-        d.pending = { op: "textSize", height: height,
-                      dy: d.hi === 5 ? Math.round(b.y0 * (1 - f))
-                                     : Math.round(b.y1 * (1 - f)) };
+      } else {                                // top/bottom: BOX HEIGHT
+        if (d.hi === 5) {                     // bottom tab grows down
+          d.pending = { op: "textBoxH",
+                        height: Math.max(MIN, Math.round(ly - b.y0)), dy: 0 };
+        } else {                              // top tab, bottom planted
+          var height = Math.max(MIN, Math.round(b.y1 - ly));
+          d.pending = { op: "textBoxH", height: height,
+                        dy: b.y1 - height - b.y0 };
+        }
       }
       // live-apply to the floating block via a scratch doc
       var work = JSON.parse(d.stashJson);
@@ -594,7 +594,7 @@
       if (d.pending.op === "textWrap") {
         VB.textWrapApply(scratch, 0, d.pending.width, d.pending.dx);
       } else {
-        VB.textSizeApply(scratch, 0, d.pending.height, d.pending.dy);
+        VB.textBoxHApply(scratch, 0, d.pending.height, d.pending.dy);
       }
       self.float.textBlock = work;
     }
@@ -632,7 +632,7 @@
           self.boxOps = self.boxOps || [];
           self.boxOps.push(d.pending);
           self.base = self.float.textBlock.matrix.slice();
-          var bb = VB.textBlockBounds(app.doc, self.float.textBlock);
+          var bb = VB.textBoxBounds(app.doc, self.float.textBlock);
           if (bb) {
             self.box = bb;
             self.pristine = [

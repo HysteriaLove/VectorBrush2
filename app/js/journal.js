@@ -211,6 +211,10 @@
           history.push(project);
           VB.textSizeApply(doc, op.index, op.height, op.dy);
           break;
+        case "textBoxH":
+          history.push(project);
+          VB.textBoxHApply(doc, op.index, op.height, op.dy);
+          break;
         case "undo":
           history.undo(project);
           sync();

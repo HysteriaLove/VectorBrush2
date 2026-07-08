@@ -855,12 +855,12 @@
     setVal("text-x", Math.round(props.matrix[4] / 20));
     setVal("text-y", Math.round(props.matrix[5] / 20));
     if (block) {
-      var bb = VB.textBlockBounds(app.doc, block);
+      var bb = VB.textBoxBounds(app.doc, block);
       setVal("text-w", Math.round(((props.wrapWidth || (bb ? bb.x1 - Math.min(0, bb.x0) : 0))) / 20));
       setVal("text-h", bb ? Math.round((bb.y1 - bb.y0) / 20) : 0);
     } else {
       setVal("text-w", props.wrapWidth ? Math.round(props.wrapWidth / 20) : "");
-      setVal("text-h", Math.round(props.sizeTw / 20));
+      setVal("text-h", props.boxHeight ? Math.round(props.boxHeight / 20) : "");
     }
   }
 
@@ -877,6 +877,8 @@
       if (change.color) props.color = change.color;
       if (change.align !== undefined) props.align = change.align;
       if (change.spacing !== undefined) props.spacing = change.spacing;
+      if (change.wrapWidth) props.wrapWidth = change.wrapWidth;
+      if (change.boxHeight) props.boxHeight = change.boxHeight;
       if (change.family || change.bold !== undefined || change.italic !== undefined) {
         var fam = change.family || sp.family;
         var bold = change.bold !== undefined ? change.bold : sp.bold;
@@ -906,13 +908,11 @@
       app.history.push();
       VB.textWrapApply(app.doc, index, change.wrapWidth, 0);
     } else if (change.boxHeight) {
-      var bb2 = VB.textBlockBounds(app.doc, block);
-      if (!bb2) return;
-      var f2 = change.boxHeight / (bb2.y1 - bb2.y0);
-      var h2 = Math.max(20, Math.round(block.records[0].height * f2));
-      app.record({ op: "textSize", index: index, height: h2, dy: 0 });
+      // H grows the CONTAINER only — glyphs stay their size
+      app.record({ op: "textBoxH", index: index,
+                   height: change.boxHeight, dy: 0 });
       app.history.push();
-      VB.textSizeApply(app.doc, index, h2, 0);
+      VB.textBoxHApply(app.doc, index, change.boxHeight, 0);
     } else {
       // full restyle via a self-contained textEdit
       var font = app.doc.fonts[block.records[0].font];

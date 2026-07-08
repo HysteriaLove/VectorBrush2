@@ -580,16 +580,16 @@
     // them EXTENDS the text box (the wrap width, reflowing the text) —
     // never scales the glyphs; that's the transform tool's job.
     function textTabs(block) {
-      var b = VB.textBlockBounds(app.doc, block);
+      var b = VB.textBoxBounds(app.doc, block);
       if (!b) return null;
       var my = (b.y0 + b.y1) / 2, mx = (b.x0 + b.x1) / 2;
       return {
         bounds: b,
         tabs: [
-          { x: b.x0, y: my, side: -1 },  // width, right edge planted
-          { x: b.x1, y: my, side: 1 },   // width
-          { x: mx, y: b.y0, vert: -1 },  // point size, bottom planted
-          { x: mx, y: b.y1, vert: 1 }    // point size
+          { x: b.x0, y: my, side: -1 },  // box width, right edge planted
+          { x: b.x1, y: my, side: 1 },   // box width (text re-wraps)
+          { x: mx, y: b.y0, vert: -1 },  // box height, bottom planted
+          { x: mx, y: b.y1, vert: 1 }    // box height (more room, no scaling)
         ]
       };
     }
@@ -615,24 +615,19 @@
       return { width: width, dx: drag.right - width };
     }
 
-    // Pointer -> new point size (and origin shift for the top tab):
-    // the box height scales the text, Flash's H-field semantics.
-    function sizeDragTarget(drag, pos) {
+    // Pointer -> new BOX HEIGHT (and origin shift for the top tab).
+    // Pure container growth: the glyphs are never touched.
+    function boxHDragTarget(drag, pos) {
       var inv = invertM(drag.base);
       if (!inv) return null;
       var ly = inv[1] * pos.x + inv[3] * pos.y + inv[5];
       var b = drag.bounds;
-      var boxH = b.y1 - b.y0 || 1;
-      var f;
-      if (drag.vert === 1) f = (ly - b.y0) / boxH;      // bottom tab
-      else f = (b.y1 - ly) / boxH;                       // top tab
-      if (!isFinite(f)) return null;
-      var height = Math.max(20, Math.round(drag.baseHeight * f));
-      f = height / drag.baseHeight;
-      // keep the opposite edge planted
-      var dy = drag.vert === 1 ? Math.round(b.y0 * (1 - f))
-                               : Math.round(b.y1 * (1 - f));
-      return { height: height, dy: dy };
+      var MIN = 200;
+      if (drag.vert === 1) {                 // bottom tab grows downward
+        return { height: Math.max(MIN, Math.round(ly - b.y0)), dy: 0 };
+      }
+      var height = Math.max(MIN, Math.round(b.y1 - ly)); // top tab
+      return { height: height, dy: b.y1 - height - b.y0 };
     }
 
     function pickTextTab(index, pos) {
@@ -836,7 +831,7 @@
         if (th) {
           var tBlock = app.doc.texts[self.sel.text];
           app.history.push(app.doc);
-          self.drag = { kind: th.vert ? "sizeText" : "wrapText",
+          self.drag = { kind: th.vert ? "boxText" : "wrapText",
                         index: self.sel.text,
                         side: th.side, vert: th.vert,
                         moved: false, from: pos, cur: pos,
@@ -844,7 +839,7 @@
                         baseRecords: JSON.parse(JSON.stringify(tBlock.records)),
                         baseWrap: tBlock.wrapWidth || null,
                         basePitch: tBlock.pitch || null,
-                        baseHeight: tBlock.records[0].height,
+                        baseBoxH: tBlock.boxHeight || null,
                         bounds: th.bounds,
                         right: tBlock.wrapWidth || th.bounds.x1 };
           return;
@@ -980,7 +975,7 @@
         t.matrix[4] = d.base[4] + Math.round(pos.x - d.from.x);
         t.matrix[5] = d.base[5] + Math.round(pos.y - d.from.y);
       }
-      if ((self.drag.kind === "wrapText" || self.drag.kind === "sizeText") &&
+      if ((self.drag.kind === "wrapText" || self.drag.kind === "boxText") &&
           self.drag.moved) {
         // live: back to the drag-start state, then the pending op
         var d2 = self.drag;
@@ -989,12 +984,13 @@
         tb2.matrix = d2.base.slice();
         tb2.wrapWidth = d2.baseWrap;
         tb2.pitch = d2.basePitch;
+        tb2.boxHeight = d2.baseBoxH;
         if (d2.kind === "wrapText") {
           var w2 = wrapDragTarget(d2, pos);
           if (w2) VB.textWrapApply(app.doc, d2.index, w2.width, w2.dx);
         } else {
-          var z2 = sizeDragTarget(d2, pos);
-          if (z2) VB.textSizeApply(app.doc, d2.index, z2.height, z2.dy);
+          var z2 = boxHDragTarget(d2, pos);
+          if (z2) VB.textBoxHApply(app.doc, d2.index, z2.height, z2.dy);
         }
       }
       app.requestRender();
@@ -1035,13 +1031,14 @@
         }
         return;
       }
-      if (drag.kind === "wrapText" || drag.kind === "sizeText") {
+      if (drag.kind === "wrapText" || drag.kind === "boxText") {
         var tb3 = app.doc.texts[drag.index];
         // back to the drag-start state, then apply the recorded op once
         tb3.records = JSON.parse(JSON.stringify(drag.baseRecords));
         tb3.matrix = drag.base.slice();
         tb3.wrapWidth = drag.baseWrap;
         tb3.pitch = drag.basePitch;
+        tb3.boxHeight = drag.baseBoxH;
         if (!drag.moved) {
           app.history.undoStack.pop();
           app.requestRender();
@@ -1055,11 +1052,11 @@
             VB.textWrapApply(app.doc, drag.index, w3.width, w3.dx);
           }
         } else {
-          var z3 = sizeDragTarget(drag, pos);
+          var z3 = boxHDragTarget(drag, pos);
           if (z3) {
-            app.record({ op: "textSize", index: drag.index,
+            app.record({ op: "textBoxH", index: drag.index,
                          height: z3.height, dy: z3.dy });
-            VB.textSizeApply(app.doc, drag.index, z3.height, z3.dy);
+            VB.textBoxHApply(app.doc, drag.index, z3.height, z3.dy);
           }
         }
         var keepIdx = drag.index;
@@ -1067,7 +1064,7 @@
         self.sel.text = keepIdx;
         app.setMsg(drag.kind === "wrapText"
           ? "text box resized — the text re-wrapped"
-          : "text size changed");
+          : "text box height set");
         return;
       }
       if (drag.kind === "moveText") {
@@ -1362,7 +1359,7 @@
         // handles — squares on the corners, FLAT TABS mid-edge for the
         // box dimensions
         var tb = app.doc.texts[self.sel.text];
-        var bb = VB.textBlockBounds(app.doc, tb);
+        var bb = VB.textBoxBounds(app.doc, tb); // the grown entry box
         if (bb) {
           var tm = tb.matrix;
           function tmap(x, y) {

@@ -84,7 +84,8 @@
       wrapWidth: op.wrapWidth || null,
       pitch: op.pitch || null,
       align: op.align || 0,
-      spacing: op.spacing || 0
+      spacing: op.spacing || 0,
+      boxHeight: op.boxHeight || null
     };
     doc.texts.push(block);
     return doc.texts.length - 1;
@@ -128,8 +129,32 @@
     t.pitch = op.pitch || t.pitch || null;
     t.align = op.align || 0;
     t.spacing = op.spacing || 0;
+    if (op.boxHeight !== undefined) t.boxHeight = op.boxHeight || null;
     if (op.matrix) t.matrix = op.matrix.slice(); // box origin moved
     return true;
+  }
+
+  /** Set a block's BOX HEIGHT — pure container growth, the glyphs are
+   *  untouched (a taller entry area for text to flow into). dy shifts
+   *  the origin when the TOP edge is dragged. */
+  function textBoxHApply(doc, index, height, dy) {
+    var t = doc.texts[index];
+    if (!t) return false;
+    t.boxHeight = height > 0 ? Math.round(height) : null;
+    if (dy) t.matrix = matMul(t.matrix, [1, 0, 0, 1, 0, dy]);
+    return true;
+  }
+
+  /** The block's BOX in local space: the content bounds grown to the
+   *  set wrap width and box height — what frames and tabs present. */
+  function textBoxBounds(doc, block) {
+    var b = textBlockBounds(doc, block);
+    if (!b) return null;
+    return {
+      x0: b.x0, y0: b.y0,
+      x1: Math.max(b.x1, block.wrapWidth || b.x1),
+      y1: Math.max(b.y1, b.y0 + (block.boxHeight || 0))
+    };
   }
 
   /** Block-LOCAL bounds (before the matrix) from the actual glyph
@@ -232,11 +257,12 @@
     return true;
   }
 
-  /** Topmost block whose LOCAL bounds contain the stage point, or -1. */
+  /** Topmost block whose BOX contains the stage point, or -1 (the
+   *  grown entry box is grabbable, like a text editor's field). */
   function textHit(doc, x, y) {
     for (var i = doc.texts.length - 1; i >= 0; i--) {
       var t = doc.texts[i];
-      var b = textBlockBounds(doc, t);
+      var b = textBoxBounds(doc, t);
       if (!b) continue;
       var m = t.matrix;
       var det = m[0] * m[3] - m[1] * m[2];
@@ -591,6 +617,7 @@
           box.y1 = Math.max(box.y1, bb.y1);
         }
       }
+      if (s.boxHeight) box.y1 = Math.max(box.y1, box.y0 + s.boxHeight);
       return box;
     }
 
@@ -622,6 +649,7 @@
         stash: null,
         original: "",
         wrapWidth: null,
+        boxHeight: null,
         align: 0,
         spacing: 0,
         ttf: ttf,
@@ -689,6 +717,7 @@
         stash: block,
         original: str,
         wrapWidth: block.wrapWidth || null,
+        boxHeight: block.boxHeight || null,
         align: block.align || 0,
         spacing: block.spacing || 0,
         ttf: ttf,
@@ -714,6 +743,7 @@
         app.doc.texts.splice(s.editIndex, 0, s.stash);
         var unchanged = str === s.original &&
           (s.wrapWidth || null) === (s.stash.wrapWidth || null) &&
+          (s.boxHeight || null) === (s.stash.boxHeight || null) &&
           (s.align || 0) === (s.stash.align || 0) &&
           (s.spacing || 0) === (s.stash.spacing || 0) &&
           s.sizeTw === s.stash.records[0].height &&
@@ -737,7 +767,8 @@
         var edit = { op: "textEdit", index: s.editIndex,
                      font: editOp.font, records: editOp.records,
                      wrapWidth: editOp.wrapWidth, pitch: editOp.pitch,
-                     align: editOp.align, spacing: editOp.spacing };
+                     align: editOp.align, spacing: editOp.spacing,
+                     boxHeight: s.boxHeight || null };
         if (JSON.stringify(s.matrix) !== JSON.stringify(s.stash.matrix)) {
           edit.matrix = s.matrix.slice(); // the left tab moved the origin
         }
@@ -753,6 +784,7 @@
                            s.matrix[4], s.matrix[5], s.wrapWidth,
                            s.align, s.spacing);
       if (!op) { app.requestRender(); return false; }
+      if (s.boxHeight) op.boxHeight = s.boxHeight;
       app.record(op);
       app.history.push(app.doc);
       textApplyOp(app.doc, op);
@@ -771,6 +803,8 @@
       if (props.color) s.color = props.color;
       if (props.align !== undefined) s.align = props.align;
       if (props.spacing !== undefined) s.spacing = props.spacing;
+      if (props.wrapWidth) s.wrapWidth = props.wrapWidth;
+      if (props.boxHeight) s.boxHeight = props.boxHeight;
       if (props.ttf) { s.ttf = props.ttf; s.meta = props.meta; }
       rebuildPreview();
       return true;
@@ -782,38 +816,52 @@
       return { sizeTw: s.sizeTw, color: s.color, align: s.align || 0,
                spacing: s.spacing || 0, family: s.meta.name,
                bold: s.meta.bold, italic: s.meta.italic,
-               wrapWidth: s.wrapWidth, matrix: s.matrix };
+               wrapWidth: s.wrapWidth, boxHeight: s.boxHeight,
+               matrix: s.matrix };
     };
 
-    /** The session box's side-tab positions in stage space. */
+    /** The session box's tab positions in stage space: sides set the
+     *  wrap width, top/bottom the box height. */
     function sessionTabs() {
       var s = self.session;
       var box = sessionBox();
       if (!s || !box) return null;
       var midY = (box.y0 + box.y1) / 2;
+      var midX = (box.x0 + box.x1) / 2;
       var m = s.matrix;
       function mp(x, y) {
         return { x: m[0] * x + m[2] * y + m[4], y: m[1] * x + m[3] * y + m[5] };
       }
-      return { box: box, left: mp(box.x0, midY), right: mp(box.x1, midY), mp: mp };
+      return {
+        box: box, mp: mp,
+        tabs: [
+          { p: mp(box.x0, midY), side: -1 },
+          { p: mp(box.x1, midY), side: 1 },
+          { p: mp(midX, box.y0), vert: -1 },
+          { p: mp(midX, box.y1), vert: 1 }
+        ]
+      };
     }
 
     self.onDown = function (pos, ev) {
       if (self.session) {
-        // side tabs EXTEND the box (wrap width) — glyphs never scale
+        // tabs EXTEND the entry box — width wraps, height grows the
+        // area; glyphs never scale
         var tabs = sessionTabs();
         var tol = 8 * VB.TWIPS / app.view.zoom;
         if (tabs) {
-          var side = 0;
-          if (Math.hypot(pos.x - tabs.right.x, pos.y - tabs.right.y) <= tol * 1.5) side = 1;
-          else if (Math.hypot(pos.x - tabs.left.x, pos.y - tabs.left.y) <= tol * 1.5) side = -1;
-          if (side) {
-            self.boxDrag = {
-              side: side,
-              baseMatrix: self.session.matrix.slice(),
-              right: self.session.wrapWidth || tabs.box.x1
-            };
-            return;
+          for (var ti = 0; ti < tabs.tabs.length; ti++) {
+            var tb = tabs.tabs[ti];
+            if (Math.hypot(pos.x - tb.p.x, pos.y - tb.p.y) <= tol * 1.5) {
+              self.boxDrag = {
+                side: tb.side || 0, vert: tb.vert || 0,
+                baseMatrix: self.session.matrix.slice(),
+                right: self.session.wrapWidth || tabs.box.x1,
+                box0: { x0: tabs.box.x0, y0: tabs.box.y0,
+                        x1: tabs.box.x1, y1: tabs.box.y1 }
+              };
+              return;
+            }
           }
         }
         endSession(true); // click-away lands the block
@@ -838,16 +886,26 @@
       var det = m[0] * m[3] - m[1] * m[2];
       if (Math.abs(det) < 1e-9) return;
       var lx = (m[3] * (pos.x - m[4]) - m[2] * (pos.y - m[5])) / det;
+      var ly = (-m[1] * (pos.x - m[4]) + m[0] * (pos.y - m[5])) / det;
       var MIN = 200; // 10px — a box can't collapse
       if (d.side === 1) {
         s.wrapWidth = Math.max(MIN, Math.round(lx));
         s.matrix = d.baseMatrix.slice();
-      } else {
+      } else if (d.side === -1) {
         // left tab: the right edge stays planted, the origin follows
         var width = Math.max(MIN, Math.round(d.right - lx));
         var dx = d.right - width;
         s.wrapWidth = width;
         s.matrix = matMul(d.baseMatrix, [1, 0, 0, 1, dx, 0]);
+      } else if (d.vert === 1) {
+        // bottom tab: grow the entry area downward
+        s.boxHeight = Math.max(MIN, Math.round(ly - d.box0.y0));
+        s.matrix = d.baseMatrix.slice();
+      } else if (d.vert === -1) {
+        // top tab: bottom edge stays planted, the origin follows
+        var h = Math.max(MIN, Math.round(d.box0.y1 - ly));
+        s.boxHeight = h;
+        s.matrix = matMul(d.baseMatrix, [1, 0, 0, 1, 0, d.box0.y1 - h - d.box0.y0]);
       }
       rebuildPreview();
     };
@@ -885,17 +943,18 @@
         ctx.closePath();
         ctx.stroke();
         ctx.setLineDash([]);
-        [tabs.left, tabs.right].forEach(function (p, side) {
-          // flat tab: a bar along the box edge (vertical in local space)
-          var eA = cs[side === 0 ? 0 : 1], eB = cs[side === 0 ? 3 : 2];
+        tabs.tabs.forEach(function (t) {
+          // flat tab: a bar along its own box edge
+          var eA = t.vert ? cs[t.vert === -1 ? 0 : 3] : cs[t.side === -1 ? 0 : 1];
+          var eB = t.vert ? cs[t.vert === -1 ? 1 : 2] : cs[t.side === -1 ? 3 : 2];
           var dx = eB.x - eA.x, dy = eB.y - eA.y;
           var len = Math.hypot(dx, dy) || 1;
           var ux = dx / len * 8 * hair, uy = dy / len * 8 * hair;
           ctx.strokeStyle = "rgba(0,160,255,0.95)";
           ctx.lineWidth = 4 * hair;
           ctx.beginPath();
-          ctx.moveTo(p.x - ux, p.y - uy);
-          ctx.lineTo(p.x + ux, p.y + uy);
+          ctx.moveTo(t.p.x - ux, t.p.y - uy);
+          ctx.lineTo(t.p.x + ux, t.p.y + uy);
           ctx.stroke();
         });
       }
@@ -943,6 +1002,8 @@
   VB.textBreakApply = textBreakApply;
   VB.textWrapApply = textWrapApply;
   VB.textSizeApply = textSizeApply;
+  VB.textBoxHApply = textBoxHApply;
+  VB.textBoxBounds = textBoxBounds;
   VB.textEditApply = textEditApply;
   VB.textTransformApply = textTransformApply;
   VB.textDeleteApply = textDeleteApply;
