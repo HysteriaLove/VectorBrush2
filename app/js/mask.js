@@ -72,6 +72,36 @@
     // walk needs a properly noded map.
     VB.repairPlanar(doc);
 
+    // Contract micro-edges. Noding two near-tangent hugging fences (a
+    // stroke re-tracing existing paint) shreds them into 1-3tw fragments
+    // whose departure angles are integer-quantization noise; the angular
+    // sort misroutes at such nodes and the walk turns closed pocket
+    // boundaries into bridge trees (the pocket-flood class). Welding a
+    // micro-edge's endpoints into one node removes the noise without
+    // changing anything visible (<=3tw).
+    var MICRO = 5;
+    for (var pass = 0; pass < 4; pass++) {
+      var weld = new Map(); // "x,y" -> {x, y} replacement
+      var contracted = 0;
+      doc.edges.forEach(function (e) {
+        if (Math.hypot(e.bx - e.ax, e.by - e.ay) > MICRO) return;
+        var fromK = e.bx + "," + e.by;
+        var toK = e.ax + "," + e.ay;
+        if (fromK === toK || weld.has(toK) || weld.has(fromK)) return;
+        weld.set(fromK, { x: e.ax, y: e.ay });
+        contracted++;
+      });
+      if (contracted === 0) break;
+      doc.edges.forEach(function (e) {
+        var wa = weld.get(e.ax + "," + e.ay);
+        if (wa) { e.ax = wa.x; e.ay = wa.y; }
+        var wb = weld.get(e.bx + "," + e.by);
+        if (wb) { e.bx = wb.x; e.by = wb.y; }
+      });
+      doc.edges = doc.edges.filter(function (e) { return !VB.edgeIsDegenerate(e); });
+      VB.repairPlanar(doc);
+    }
+
     var built = VB.buildFaces(doc);
 
     // A probe point verified to be INSIDE the face (parity against the

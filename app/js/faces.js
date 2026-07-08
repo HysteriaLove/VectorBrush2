@@ -77,8 +77,47 @@
       addOutgoing(i, true);
       addOutgoing(i, false);
     }
+
+    // Angle of a half-edge at ~dist twips out from its origin, measured
+    // ON the curve. Near-parallel siblings (a re-traced fence hugging an
+    // old one within a twip) tie on the control-point angle AND on the
+    // far-endpoint tie-break; ordering them by where the curves actually
+    // sit resolves the tie by geometry instead of float noise — a wrong
+    // relative order walks the outer faces into one (the pocket-flood
+    // class painting over dense same-color paint).
+    function angleAt(h, dist) {
+      var e = edges[h.edge];
+      var polyLen = (e.cx === null)
+        ? Math.hypot(e.bx - e.ax, e.by - e.ay)
+        : Math.hypot(e.cx - e.ax, e.cy - e.ay) + Math.hypot(e.bx - e.cx, e.by - e.cy);
+      if (polyLen === 0) return h.angle;
+      var s = Math.min(1, dist / polyLen);
+      var t = h.forward ? s : 1 - s;
+      var p = VB.geom.evalEdge(e, t);
+      var ox = h.forward ? e.ax : e.bx;
+      var oy = h.forward ? e.ay : e.by;
+      if (p.x === ox && p.y === oy) return h.angle;
+      return Math.atan2(p.y - oy, p.x - ox);
+    }
+    var TIE = 0.02; // radians: below this, control directions are noise
+    function angDiff(a, b) {
+      var d = a - b;
+      while (d > Math.PI) d -= 2 * Math.PI;
+      while (d < -Math.PI) d += 2 * Math.PI;
+      return d;
+    }
     nodes.forEach(function (list) {
-      list.sort(function (a, b) { return (a.angle - b.angle) || (a.angle2 - b.angle2); });
+      list.sort(function (a, b) {
+        var d = a.angle - b.angle;
+        if (Math.abs(d) > TIE) return d;
+        // near-tie: walk outward until the curves diverge
+        var radii = [6, 18, 48];
+        for (var r = 0; r < radii.length; r++) {
+          var da = angDiff(angleAt(a, radii[r]), angleAt(b, radii[r]));
+          if (Math.abs(da) > 0.004) return da;
+        }
+        return d || (a.angle2 - b.angle2);
+      });
     });
 
     // next(h): at h's target node, take the reverse half-edge's rotational
