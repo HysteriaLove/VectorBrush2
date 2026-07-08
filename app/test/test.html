@@ -26,6 +26,7 @@
 <script src="../js/trace.js"></script>
 <script src="../js/render.js"></script>
 <script src="../js/vbd.js"></script>
+<script src="../js/swfwrite.js"></script>
 <script src="../js/fit.js"></script>
 <script src="../js/merge.js"></script>
 <script src="../js/faces.js"></script>
@@ -826,6 +827,51 @@
         phantom.length === 0, phantom.length + " phantom chords");
       check("brush session " + ses.name + " end state sane",
         res.doc.edges.length > ses.minEdges, res.doc.edges.length + " edges");
+    }
+  })();
+
+  // ======================= SWF export round-trip ===========================
+  // The exporter's claim is 1:1: whatever the editor holds comes back
+  // bit-identical through our own SWF reader (which is itself validated
+  // against the MX 2004 reference files). Styles, stage, background and
+  // the full edge-record multiset must survive the trip.
+  log("swf export:");
+  await (async function () {
+    // A document drawn with the real tools.
+    var doc = new VB.VBDocument();
+    doc.width = 11000; doc.height = 8000;
+    VB.brushStroke(doc, [{ x: 2000, y: 4000 }, { x: 4200, y: 3400 }, { x: 6000, y: 4400 }],
+      400, { r: 204, g: 102, b: 102, a: 255 });
+    VB.pencilCommit(doc, [{ x: 1000, y: 1000 }, { x: 4000, y: 1400 }, { x: 8000, y: 900 }],
+      { width: 40, color: { r: 0, g: 0, b: 0, a: 255 } });
+    VB.brushStroke(doc, [{ x: 7000, y: 5500 }], 500, { r: 102, g: 204, b: 255, a: 255 });
+
+    var bytes = VB.encodeSWF(doc);
+    check("export produces a movie", bytes.length > 64, bytes.length + " B");
+    check("FWS v7 header", bytes[0] === 0x46 && bytes[1] === 0x57 &&
+      bytes[2] === 0x53 && bytes[3] === 7);
+    var fileLen = bytes[4] | (bytes[5] << 8) | (bytes[6] << 16) | (bytes[7] << 24);
+    check("header length field", fileLen === bytes.length, fileLen + " vs " + bytes.length);
+
+    var back = await VB.parseSWF(bytes.buffer);
+    var doc2 = back.doc;
+    check("reimports through our reader", !!doc2 && doc2.edges.length > 0);
+    check("stage round-trips", doc2.width === doc.width && doc2.height === doc.height);
+    check("background round-trips", hexColor(doc2.background) === hexColor(doc.background));
+    check("styles round-trip", doc2.fills.length === doc.fills.length &&
+      doc2.lines.length === doc.lines.length,
+      doc2.fills.length + "/" + doc2.lines.length + " vs " +
+      doc.fills.length + "/" + doc.lines.length);
+    var diff = sameStringArrays(edgeKeySet(doc), edgeKeySet(doc2));
+    check("edge records round-trip 1:1", diff === null, diff);
+
+    // Reference files survive load -> export -> reload unchanged.
+    for (var xi = 0; xi < Math.min(3, window.VBTestFixtures.length); xi++) {
+      var fx2 = window.VBTestFixtures[xi];
+      var orig = (await VB.parseSWF(b64ToBuf(fx2.b64))).doc;
+      var re = (await VB.parseSWF(VB.encodeSWF(orig).buffer)).doc;
+      var d2 = sameStringArrays(edgeKeySet(orig), edgeKeySet(re));
+      check("fixture " + fx2.name + " re-export 1:1", d2 === null, d2);
     }
   })();
 

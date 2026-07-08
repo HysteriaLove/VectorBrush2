@@ -249,6 +249,23 @@
     }
   });
 
+  document.getElementById("btn-save-swf").addEventListener("click", function () {
+    try {
+      var bytes = VB.encodeSWF(app.doc);
+      var base = app.fileName ? app.fileName.replace(/\.[^.]+$/, "") : "drawing";
+      var blob = new Blob([bytes], { type: "application/x-shockwave-flash" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = base + ".swf";
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast("Saved " + a.download + " · " + bytes.length.toLocaleString() +
+        " B (SWF v7 — import into Flash MX 2004)", 5000);
+    } catch (err) {
+      toast("SWF export failed: " + err.message, 6000);
+    }
+  });
+
   var wrap = document.getElementById("canvaswrap");
   wrap.addEventListener("dragover", function (ev) { ev.preventDefault(); });
   wrap.addEventListener("drop", function (ev) {

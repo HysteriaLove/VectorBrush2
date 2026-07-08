@@ -159,14 +159,33 @@
     w.ub(4, numFillBits);
     w.ub(4, numLineBits);
 
-    // Flatten oversized edges, then order for pen continuity.
+    writeShapeRecords(w, prepareShapeEdges(doc), numFillBits, numLineBits, stats);
+    w.align();
+    return w.toUint8Array();
+  }
+
+  // Degenerate-filter + oversized-split + pen-continuity order: the edge
+  // list ready for record emission. Shared with the SWF exporter.
+  function prepareShapeEdges(doc) {
     var edges = [];
     for (var k = 0; k < doc.edges.length; k++) {
       if (VB.edgeIsDegenerate(doc.edges[k])) continue;
       var parts = splitOversized(doc.edges[k]);
       for (var p = 0; p < parts.length; p++) edges.push(parts[p]);
     }
-    var ordered = orderForEncoding(edges);
+    return orderForEncoding(edges);
+  }
+
+  // Emit the SWF DefineShape record grammar (style-change / straight /
+  // curved records + the 6-zero-bit end record) for pre-ordered edges.
+  // This is the exact bit layout Flash reads — the VBD body and the SWF
+  // exporter share it.
+  function writeShapeRecords(w, ordered, numFillBits, numLineBits, stats) {
+    stats = stats || {};
+    stats.styleChanges = stats.styleChanges || 0;
+    stats.moveTos = stats.moveTos || 0;
+    stats.straightEdges = stats.straightEdges || 0;
+    stats.curvedEdges = stats.curvedEdges || 0;
 
     var penX = 0, penY = 0, curF0 = 0, curF1 = 0, curLn = 0;
     for (var e2 = 0; e2 < ordered.length; e2++) {
@@ -223,8 +242,6 @@
     }
 
     w.ub(1, 0); w.ub(5, 0); // end record
-    w.align();
-    return w.toUint8Array();
   }
 
   async function encodeVBD(doc, opts) {
@@ -336,4 +353,6 @@
   VB.decodeVBD = decodeVBD;
   VB.isVBD = isVBD;
   VB.vbdStats = vbdStats;
+  VB.prepareShapeEdges = prepareShapeEdges; // shared with the SWF exporter
+  VB.writeShapeRecords = writeShapeRecords;
 })();

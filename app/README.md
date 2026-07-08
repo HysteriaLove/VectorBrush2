@@ -48,6 +48,10 @@ Drop a `.swf` or `.vbd` onto the canvas, or use **Open…**.
   edge; Esc unpins. All coordinates are integer twips. Open
   `index.html#demo` for a synthetic document with the panel pre-opened.
 - **Save .vbd**: exports the document in the compact format
+- **Save .swf**: exports an SWF v7 movie (uncompressed, one DefineShape3
+  built from the exact same edge records the editor holds) for validity
+  testing in Flash MX 2004 -- File > Import (or open in the standalone
+  player) and compare against what the editor shows
 
 ## Architecture
 
@@ -63,6 +67,7 @@ no epsilons.
 | `js/trace.js` | Resolves dual-sided edges into closed fill loops (fill1 forward, fill0 reversed, exact endpoint welding) and stroke chains |
 | `js/render.js` | Canvas2D renderer: fills first (even-odd), strokes on top (round/round, 1px hairline floor). Uses only `moveTo`/`lineTo`/`quadraticCurveTo`/`fill`/`stroke` so it ports 1:1 to `PIXI.Graphics` |
 | `js/vbd.js` | `.vbd` encoder/decoder — pen-continuity edge ordering, delta bit-packing, optional deflate |
+| `js/swfwrite.js` | Minimal SWF v7 exporter (DefineShape3 + PlaceObject2, record stream shared with the `.vbd` encoder) |
 | `js/geom.js` | Edge geometry: line/quad/quad-quad intersections, de Casteljau splitting with shared rounded junctions, point-in-fill parity, distance queries |
 | `js/fit.js` | Pencil smoothing: corner segmentation + least-squares quad fitting with recursive split (Schneider-style, emits lines+quads) |
 | `js/merge.js` | Planar merge: re-nodes new strokes against the map (both sides split at crossings) and inherits region fills onto stroke pieces |
@@ -112,7 +117,7 @@ The `<title>`/final line reads `VBTEST DONE pass=N fail=M`.
 verification (bounded faces must equal E − V + C), wavy-grid bucket
 containment, and the casual-drawing gap scenarios.
 
-Current status: 311 checks, 0 failures — the SWF/VBD pipeline suite plus
+Current status: 322 checks, 0 failures — the SWF/VBD pipeline suite plus
 the journal-replay regression (pencil square → bucket fill → erase across
 it, the case that exposed the concave-join bowtie bug) and
 eraser unit tests (band erase splitting a fill, dab holes with
