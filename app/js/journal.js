@@ -203,6 +203,10 @@
           history.push(project);
           VB.textBreakApply(doc, op.index);
           break;
+        case "textWrap":
+          history.push(project);
+          VB.textWrapApply(doc, op.index, op.width, op.dx);
+          break;
         case "undo":
           history.undo(project);
           sync();

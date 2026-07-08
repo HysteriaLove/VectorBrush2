@@ -230,8 +230,16 @@
   function s16w(w, v) { w.u16(v & 0xFFFF); }
   function s32w(w, v) { w.u16((v >> 16) & 0xFFFF); w.u16(v & 0xFFFF); }
 
+  // Section format 2 opens with a 0xFFFF sentinel (impossible as a real
+  // font count) so old files — which start straight with the count —
+  // still parse. It adds per-block wrapWidth/pitch and per-record soft
+  // wrap flags.
+  var TEXT_SECTION_SENTINEL = 0xFFFF;
+
   function writeTextSection(w, doc) {
     var fonts = doc.fonts || [], texts = doc.texts || [];
+    w.u16(TEXT_SECTION_SENTINEL);
+    w.u8(2); // section format
     w.u16(fonts.length);
     fonts.forEach(function (f) {
       var name = unescape(encodeURIComponent(f.name)); // utf8 bytes
@@ -257,12 +265,15 @@
       // a,b,c,d as 16.16 fixed (SWF's own precision), tx/ty as s32 twips
       for (var i = 0; i < 4; i++) s32w(w, Math.round(t.matrix[i] * 65536));
       s32w(w, t.matrix[4]); s32w(w, t.matrix[5]);
+      s32w(w, t.wrapWidth || -1);
+      s32w(w, t.pitch || 0);
       w.u16(t.records.length);
       t.records.forEach(function (rec) {
         w.u16(rec.font);
         w.u16(rec.height);
         writeColor(w, rec.color);
         s16w(w, rec.x); s16w(w, rec.y);
+        w.u8(rec.soft ? 1 : 0);
         w.u16(rec.glyphs.length);
         rec.glyphs.forEach(function (g) { w.u16(g.gi); s16w(w, g.adv); });
       });
@@ -274,6 +285,8 @@
 
   function readTextSection(r, doc) {
     var nf = r.u16();
+    var fmt = 1;
+    if (nf === TEXT_SECTION_SENTINEL) { fmt = r.u8(); nf = r.u16(); }
     for (var i = 0; i < nf; i++) {
       var nameLen = r.u8();
       var raw = "";
@@ -303,13 +316,20 @@
     for (i = 0; i < nt; i++) {
       var matrix = [s32r(r) / 65536, s32r(r) / 65536, s32r(r) / 65536,
                     s32r(r) / 65536, s32r(r), s32r(r)];
-      var text = { matrix: matrix, records: [] };
+      var text = { matrix: matrix, records: [], wrapWidth: null, pitch: null };
+      if (fmt >= 2) {
+        var ww = s32r(r);
+        text.wrapWidth = ww > 0 ? ww : null;
+        var pp = s32r(r);
+        text.pitch = pp > 0 ? pp : null;
+      }
       var nr = r.u16();
       for (var k = 0; k < nr; k++) {
         var rec = {
           font: r.u16(), height: r.u16(), color: readColor(r),
           x: s16r(r), y: s16r(r), glyphs: []
         };
+        if (fmt >= 2 && r.u8() === 1) rec.soft = true;
         var ngl = r.u16();
         for (var g2 = 0; g2 < ngl; g2++) {
           rec.glyphs.push({ gi: r.u16(), adv: s16r(r) });

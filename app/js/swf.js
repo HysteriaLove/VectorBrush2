@@ -492,8 +492,11 @@
             glyphs: rec.glyphs.map(function (g2) { return { gi: g2.gi, adv: g2.adv }; })
           });
         }
-        if (ok) { doc.texts.push({ matrix: total, records: records }); textsPlaced++; }
-        else warnings.push("text block references a missing font — skipped");
+        if (ok) {
+          doc.texts.push({ matrix: total, records: records,
+                           wrapWidth: null, pitch: null });
+          textsPlaced++;
+        } else warnings.push("text block references a missing font — skipped");
       }
     }
     // Definitions never placed are dropped (they're invisible anyway).

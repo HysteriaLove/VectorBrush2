@@ -575,20 +575,19 @@
 
     function pickTol() { return 6 * VB.TWIPS / app.view.zoom; }
 
-    // ---- text block handles (arrow-selection resize) --------------------
-    // 8 handles in BLOCK-LOCAL space: corners scale both axes, the
-    // mid-edge FLAT TABS stretch one dimension. ax/ay mark the axes a
-    // handle drives; the anchor is the opposite handle, pinned.
-    function textHandles(block) {
+    // ---- text block box tabs (arrow-selection) --------------------------
+    // Two FLAT TABS mid-left/mid-right in BLOCK-LOCAL space. Dragging
+    // them EXTENDS the text box (the wrap width, reflowing the text) —
+    // never scales the glyphs; that's the transform tool's job.
+    function textTabs(block) {
       var b = VB.textBlockBounds(app.doc, block);
       if (!b) return null;
-      var mx = (b.x0 + b.x1) / 2, my = (b.y0 + b.y1) / 2;
-      return [
-        { x: b.x0, y: b.y0, ax: 1, ay: 1 }, { x: mx, y: b.y0, ax: 0, ay: 1 },
-        { x: b.x1, y: b.y0, ax: 1, ay: 1 }, { x: b.x1, y: my, ax: 1, ay: 0 },
-        { x: b.x1, y: b.y1, ax: 1, ay: 1 }, { x: mx, y: b.y1, ax: 0, ay: 1 },
-        { x: b.x0, y: b.y1, ax: 1, ay: 1 }, { x: b.x0, y: my, ax: 1, ay: 0 }
-      ];
+      var my = (b.y0 + b.y1) / 2;
+      return {
+        bounds: b,
+        left: { x: b.x0, y: my, side: -1 },
+        right: { x: b.x1, y: my, side: 1 }
+      };
     }
 
     function invertM(m) {
@@ -598,40 +597,32 @@
       return [a, b, c, d, -(a * m[4] + c * m[5]), -(b * m[4] + d * m[5])];
     }
 
-    function mulM(m2, m1) { // apply m1 first, then m2
-      return [
-        m2[0] * m1[0] + m2[2] * m1[1], m2[1] * m1[0] + m2[3] * m1[1],
-        m2[0] * m1[2] + m2[2] * m1[3], m2[1] * m1[2] + m2[3] * m1[3],
-        m2[0] * m1[4] + m2[2] * m1[5] + m2[4],
-        m2[1] * m1[4] + m2[3] * m1[5] + m2[5]
-      ];
-    }
-
-    // Block-local scale matrix for a handle drag (anchor pinned).
-    function textScaleGesture(drag, pos) {
+    // Pointer -> the wrap width (and origin shift for the left tab)
+    // implied by a tab drag, in block-local units.
+    function wrapDragTarget(drag, pos) {
       var inv = invertM(drag.base);
       if (!inv) return null;
       var lx = inv[0] * pos.x + inv[2] * pos.y + inv[4];
-      var ly = inv[1] * pos.x + inv[3] * pos.y + inv[5];
-      var ax = drag.anchor.x, ay = drag.anchor.y;
-      var sx = drag.h.ax ? (lx - ax) / ((drag.h.x - ax) || 1) : 1;
-      var sy = drag.h.ay ? (ly - ay) / ((drag.h.y - ay) || 1) : 1;
-      if (!isFinite(sx) || Math.abs(sx) < 0.02) sx = 0.02;
-      if (!isFinite(sy) || Math.abs(sy) < 0.02) sy = 0.02;
-      return [sx, 0, 0, sy, ax - sx * ax, ay - sy * ay];
+      var MIN = 200; // 10px floor
+      if (drag.side === 1) {
+        return { width: Math.max(MIN, Math.round(lx)), dx: 0 };
+      }
+      var width = Math.max(MIN, Math.round(drag.right - lx));
+      return { width: width, dx: drag.right - width };
     }
 
-    function pickTextHandle(index, pos) {
+    function pickTextTab(index, pos) {
       var block = app.doc.texts[index];
-      var hs = textHandles(block);
-      if (!hs) return null;
+      var tabs = textTabs(block);
+      if (!tabs) return null;
       var m = block.matrix;
-      var tol = 8 * VB.TWIPS / app.view.zoom;
-      for (var i = 0; i < hs.length; i++) {
-        var px = m[0] * hs[i].x + m[2] * hs[i].y + m[4];
-        var py = m[1] * hs[i].x + m[3] * hs[i].y + m[5];
-        if (Math.abs(pos.x - px) <= tol && Math.abs(pos.y - py) <= tol) {
-          return { h: hs[i], anchor: hs[(i + 4) % 8] };
+      var tol = 9 * VB.TWIPS / app.view.zoom;
+      var cands = [tabs.left, tabs.right];
+      for (var i = 0; i < cands.length; i++) {
+        var px = m[0] * cands[i].x + m[2] * cands[i].y + m[4];
+        var py = m[1] * cands[i].x + m[3] * cands[i].y + m[5];
+        if (Math.hypot(pos.x - px, pos.y - py) <= tol) {
+          return { side: cands[i].side, bounds: tabs.bounds };
         }
       }
       return null;
@@ -814,15 +805,20 @@
                       points: self.sel.region };
         return;
       }
-      // resize handles of an already-selected text block get first grab
+      // box tabs of an already-selected text block get first grab: they
+      // change the WRAP WIDTH (reflow), never the glyph size
       if (!shift && self.sel.text != null && app.doc.texts[self.sel.text]) {
-        var th = pickTextHandle(self.sel.text, pos);
+        var th = pickTextTab(self.sel.text, pos);
         if (th) {
+          var tBlock = app.doc.texts[self.sel.text];
           app.history.push(app.doc);
-          self.drag = { kind: "scaleText", index: self.sel.text,
-                        h: th.h, anchor: th.anchor, moved: false,
-                        from: pos, cur: pos,
-                        base: app.doc.texts[self.sel.text].matrix.slice() };
+          self.drag = { kind: "wrapText", index: self.sel.text,
+                        side: th.side, moved: false, from: pos, cur: pos,
+                        base: tBlock.matrix.slice(),
+                        baseRecords: JSON.parse(JSON.stringify(tBlock.records)),
+                        baseWrap: tBlock.wrapWidth || null,
+                        basePitch: tBlock.pitch || null,
+                        right: tBlock.wrapWidth || th.bounds.x1 };
           return;
         }
       }
@@ -956,19 +952,17 @@
         t.matrix[4] = d.base[4] + Math.round(pos.x - d.from.x);
         t.matrix[5] = d.base[5] + Math.round(pos.y - d.from.y);
       }
-      if (self.drag.kind === "scaleText" && self.drag.moved) {
-        // pull the pointer back to block-local space, scale about the
-        // opposite handle, live-update matrix = base ∘ S
+      if (self.drag.kind === "wrapText" && self.drag.moved) {
+        // live reflow from the drag-start records at the dragged width
         var d2 = self.drag;
-        var S = textScaleGesture(d2, pos);
-        if (S) {
-          var mm = d2.base;
-          app.doc.texts[d2.index].matrix = [
-            mm[0] * S[0] + mm[2] * S[1], mm[1] * S[0] + mm[3] * S[1],
-            mm[0] * S[2] + mm[2] * S[3], mm[1] * S[2] + mm[3] * S[3],
-            mm[0] * S[4] + mm[2] * S[5] + mm[4],
-            mm[1] * S[4] + mm[3] * S[5] + mm[5]
-          ];
+        var w2 = wrapDragTarget(d2, pos);
+        if (w2) {
+          var tb2 = app.doc.texts[d2.index];
+          tb2.records = JSON.parse(JSON.stringify(d2.baseRecords));
+          tb2.matrix = d2.base.slice();
+          tb2.wrapWidth = d2.baseWrap;
+          tb2.pitch = d2.basePitch;
+          VB.textWrapApply(app.doc, d2.index, w2.width, w2.dx);
         }
       }
       app.requestRender();
@@ -1009,26 +1003,28 @@
         }
         return;
       }
-      if (drag.kind === "scaleText") {
+      if (drag.kind === "wrapText") {
+        var tb3 = app.doc.texts[drag.index];
+        // back to the drag-start state, then apply the recorded op once
+        tb3.records = JSON.parse(JSON.stringify(drag.baseRecords));
+        tb3.matrix = drag.base.slice();
+        tb3.wrapWidth = drag.baseWrap;
+        tb3.pitch = drag.basePitch;
         if (!drag.moved) {
           app.history.undoStack.pop();
           app.requestRender();
           return;
         }
-        var S2 = textScaleGesture(drag, pos);
-        app.doc.texts[drag.index].matrix = drag.base.slice();
-        if (S2) {
-          // record the WORLD delta (base ∘ S ∘ base⁻¹) so replay's
-          // compose-on-the-left lands on exactly base ∘ S
-          var bi = invertM(drag.base);
-          var world = mulM(mulM(drag.base, S2), bi);
-          app.record({ op: "textTransform", index: drag.index, m: world });
-          VB.textTransformApply(app.doc, drag.index, world);
+        var w3 = wrapDragTarget(drag, pos);
+        if (w3) {
+          app.record({ op: "textWrap", index: drag.index,
+                       width: w3.width, dx: w3.dx });
+          VB.textWrapApply(app.doc, drag.index, w3.width, w3.dx);
         }
         var keepIdx = drag.index;
         app.docChanged();
         self.sel.text = keepIdx;
-        app.setMsg("text resized");
+        app.setMsg("text box resized — the text re-wrapped");
         return;
       }
       if (drag.kind === "moveText") {
@@ -1341,29 +1337,21 @@
           });
           ctx.closePath();
           ctx.stroke();
-          var hs2 = textHandles(tb);
-          var r2 = 4 * hair;
-          hs2.forEach(function (h, i2) {
+          // the two BOX TABS: flat bars mid-left/mid-right that extend
+          // the wrap width (never scale the glyphs)
+          var tabs2 = textTabs(tb);
+          [tabs2.left, tabs2.right].forEach(function (h, i2) {
             var p2 = tmap(h.x, h.y);
-            if (i2 % 2 === 0) { // corner: square
-              ctx.fillStyle = "#fff";
-              ctx.strokeStyle = "rgba(0,160,255,0.95)";
-              ctx.lineWidth = hair;
-              ctx.fillRect(p2.x - r2, p2.y - r2, 2 * r2, 2 * r2);
-              ctx.strokeRect(p2.x - r2, p2.y - r2, 2 * r2, 2 * r2);
-            } else {            // mid-edge: flat tab along the edge
-              var ca = tmap.apply(null, corners[(i2 - 1) / 2]);
-              var cb2 = tmap.apply(null, corners[((i2 - 1) / 2 + 1) % 4]);
-              var dx2 = cb2.x - ca.x, dy2 = cb2.y - ca.y;
-              var len2 = Math.hypot(dx2, dy2) || 1;
-              var ux = dx2 / len2 * 8 * hair, uy = dy2 / len2 * 8 * hair;
-              ctx.strokeStyle = "rgba(0,160,255,0.95)";
-              ctx.lineWidth = 4 * hair;
-              ctx.beginPath();
-              ctx.moveTo(p2.x - ux, p2.y - uy);
-              ctx.lineTo(p2.x + ux, p2.y + uy);
-              ctx.stroke();
-            }
+            var ca = tmap(h.x, bb.y0), cb2 = tmap(h.x, bb.y1);
+            var dx2 = cb2.x - ca.x, dy2 = cb2.y - ca.y;
+            var len2 = Math.hypot(dx2, dy2) || 1;
+            var ux = dx2 / len2 * 8 * hair, uy = dy2 / len2 * 8 * hair;
+            ctx.strokeStyle = "rgba(0,160,255,0.95)";
+            ctx.lineWidth = 4 * hair;
+            ctx.beginPath();
+            ctx.moveTo(p2.x - ux, p2.y - uy);
+            ctx.lineTo(p2.x + ux, p2.y + uy);
+            ctx.stroke();
           });
         }
       }

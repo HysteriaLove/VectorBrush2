@@ -303,7 +303,12 @@
 
     function pickHandle(pos, tol, acc) {
       var hs = handles();
+      // TEXT sessions have no mid-edge scale handles: single-axis
+      // stretching of glyphs isn't a text operation (box width is the
+      // arrow tool's tabs / the edit box); corners still free-transform
+      var textSession = self.items && self.items.textIndex != null;
       for (var i = 0; i < hs.length; i++) {
+        if (textSession && i % 2 === 1) continue;
         var p = applyPt(acc, hs[i].x, hs[i].y);
         if (Math.abs(pos.x - p.x) <= tol && Math.abs(pos.y - p.y) <= tol) {
           return { index: i, h: hs[i] };
@@ -732,28 +737,15 @@
       ctx.stroke();
       var hs = handles();
       var r = 4 * hair;
+      // text sessions show corners + knob only: free transform scales
+      // whole text; box-width tabs live on the arrow selection and the
+      // edit box, where they re-wrap instead of stretching glyphs
       var isText = self.items && self.items.textIndex != null;
       hs.forEach(function (h, hi) {
+        if (isText && hi % 2 === 1) return;
         var p = mp(h.x, h.y);
-        if (isText && hi % 2 === 1) {
-          // text sessions: mid-edge handles render as FLAT TABS along
-          // the edge — the "change the box dimensions" grips
-          var ca = mp(corners[(hi - 1) / 2][0], corners[(hi - 1) / 2][1]);
-          var cb = mp(corners[((hi - 1) / 2 + 1) % 4][0],
-                      corners[((hi - 1) / 2 + 1) % 4][1]);
-          var dx = cb.x - ca.x, dy = cb.y - ca.y;
-          var len = Math.hypot(dx, dy) || 1;
-          var ux = dx / len * 8 * hair, uy = dy / len * 8 * hair;
-          ctx.strokeStyle = "#000";
-          ctx.lineWidth = 4 * hair;
-          ctx.beginPath();
-          ctx.moveTo(p.x - ux, p.y - uy);
-          ctx.lineTo(p.x + ux, p.y + uy);
-          ctx.stroke();
-        } else {
-          ctx.fillStyle = "#000";
-          ctx.fillRect(p.x - r, p.y - r, 2 * r, 2 * r);
-        }
+        ctx.fillStyle = "#000";
+        ctx.fillRect(p.x - r, p.y - r, 2 * r, 2 * r);
       });
       // rotation knob on a stem off the mid-top edge
       var knob = rotKnob(total);

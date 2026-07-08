@@ -1882,10 +1882,48 @@
       JSON.stringify(b1.doc.edges) === JSON.stringify(b2.doc.edges) &&
       b1.doc.texts.length === 0 && b1.doc.edges.length >= 3);
 
-    // ---- arrow-selection resize handles (flat tabs) ----
+    // ---- text box WRAP: tabs extend the box, glyphs never scale ----
+    // fixture advances at 400tw: A=400(-32 kerned to B=368), B=320,
+    // space(gi0)=400, D=195
+    var wop = VB.buildTextOp(ttf, { name: "VBTest" }, "AB AB", 400, red,
+                             0, 0, 900);
+    check("wrap layout breaks at spaces within the width",
+      wop.records.length === 2 &&
+      !wop.records[0].soft && wop.records[1].soft === true &&
+      wop.records[0].str === "AB " && wop.records[1].str === "AB" &&
+      wop.records[1].y === wop.records[0].y + wop.pitch &&
+      wop.wrapWidth === 900,
+      JSON.stringify(wop.records.map(function (r) { return r.str; })));
+    var wdoc = new VB.VBDocument();
+    VB.textApplyOp(wdoc, wop);
+    check("wrap metadata lands on the block",
+      wdoc.texts[0].wrapWidth === 900 && wdoc.texts[0].pitch === wop.pitch &&
+      wdoc.texts[0].records[1].soft === true);
+    // records-only reflow: WIDEN and the soft line rejoins its paragraph
+    VB.textWrapApply(wdoc, 0, 4000);
+    check("widening re-joins soft-wrapped lines",
+      wdoc.texts[0].records.length === 1 &&
+      wdoc.texts[0].records[0].glyphs.length === 5 &&
+      wdoc.texts[0].wrapWidth === 4000,
+      wdoc.texts[0].records.length + " records");
+    // NARROW again — same break as authoring, no font file involved
+    VB.textWrapApply(wdoc, 0, 900);
+    check("narrowing re-wraps from baked advances",
+      wdoc.texts[0].records.length === 2 &&
+      wdoc.texts[0].records[1].soft === true &&
+      wdoc.texts[0].records[1].y === wdoc.texts[0].records[0].y + wop.pitch,
+      wdoc.texts[0].records.length + " records");
+    // vbd carries wrap metadata + soft flags
+    var wback = await VB.decodeVBD(await VB.encodeVBD(wdoc, { compress: true }));
+    check("vbd round-trips wrap metadata",
+      JSON.stringify(wback.doc.texts) === JSON.stringify(wdoc.texts),
+      "got " + JSON.stringify(wback.doc.texts).slice(0, 260) + " want " +
+      JSON.stringify(wdoc.texts).slice(0, 260));
+
+    // ---- arrow-selection box tabs: wrap, don't scale ----
     var adoc = new VB.VBDocument();
     adoc.width = 11000; adoc.height = 8000;
-    VB.textApplyOp(adoc, VB.buildTextOp(ttf, { name: "VBTest" }, "AB", 400, red, 2000, 3000));
+    VB.textApplyOp(adoc, VB.buildTextOp(ttf, { name: "VBTest" }, "AB AB", 400, red, 2000, 3000));
     var journalA = [], toolA;
     var appA = {
       doc: adoc, view: { zoom: 1 },
@@ -1900,21 +1938,48 @@
     toolA.onDown({ x: 2300, y: 3100 }, {});
     toolA.onUp({ x: 2300, y: 3100 });
     check("arrow click selects the block", toolA.sel.text === 0);
-    // grab the right mid-edge FLAT TAB (local (688, 120) -> world) and
-    // pull it right: width doubles, height untouched
-    toolA.onDown({ x: 2688, y: 3120 }, {});
-    check("flat tab arms a resize", toolA.drag && toolA.drag.kind === "scaleText",
+    // single line "AB AB": bounds x1 = 368+320+400+368+320 = 1776 —
+    // grab the RIGHT box tab and drag it to local width 900: the text
+    // must RE-WRAP to two lines; the matrix must NOT change
+    var bbA = VB.textBlockBounds(adoc, adoc.texts[0]);
+    var midYA = (bbA.y0 + bbA.y1) / 2;
+    toolA.onDown({ x: 2000 + bbA.x1, y: 3000 + midYA }, {});
+    check("box tab arms a wrap drag", toolA.drag && toolA.drag.kind === "wrapText",
       toolA.drag && toolA.drag.kind);
-    toolA.onMove({ x: 3376, y: 3120 });
-    toolA.onUp({ x: 3376, y: 3120 });
-    check("tab drag commits ONE textTransform",
-      journalA.length === 1 && journalA[0].op === "textTransform",
-      JSON.stringify(journalA.map(function (o) { return o.op; })));
-    check("width doubled, height kept",
-      Math.abs(adoc.texts[0].matrix[0] - 2) < 0.01 &&
-      Math.abs(adoc.texts[0].matrix[3] - 1) < 0.01 &&
+    toolA.onMove({ x: 2900, y: 3000 + midYA });
+    toolA.onUp({ x: 2900, y: 3000 + midYA });
+    check("tab drag commits ONE textWrap",
+      journalA.length === 1 && journalA[0].op === "textWrap" &&
+      journalA[0].width === 900,
+      JSON.stringify(journalA));
+    check("box resize re-wrapped without scaling",
+      adoc.texts[0].records.length === 2 &&
+      adoc.texts[0].records[1].soft === true &&
+      JSON.stringify(adoc.texts[0].matrix) === JSON.stringify([1, 0, 0, 1, 2000, 3000]) &&
       toolA.sel.text === 0,
-      JSON.stringify(adoc.texts[0].matrix));
+      JSON.stringify({ recs: adoc.texts[0].records.length, m: adoc.texts[0].matrix }));
+    // string reconstruction joins soft lines with no injected newline
+    var fontA = adoc.fonts[adoc.texts[0].records[0].font];
+    var strA = "";
+    adoc.texts[0].records.forEach(function (rec, ri) {
+      if (ri > 0 && !rec.soft) strA += "\n";
+      strA += rec.glyphs.map(function (g) {
+        return String.fromCharCode(fontA.glyphs[g.gi].code);
+      }).join("");
+    });
+    check("soft lines reconstruct the original string", strA === "AB AB", strA);
+    // transform tool: text sessions expose NO mid-edge scale handles
+    var toolT2 = VB.FreeTransformTool(appA);
+    toolT2.adopt({ textIndex: 0 });
+    var bbT = toolT2.box;
+    var midEdge = { x: 2000 + (bbT.x0 + bbT.x1) / 2, y: 3000 + bbT.y0 };
+    toolT2.onDown(midEdge, {});
+    check("transform text session has no mid-edge scale handles",
+      !toolT2.drag || toolT2.drag.kind !== "scale" ||
+      (toolT2.drag.h.ax && toolT2.drag.h.ay), // corners only
+      toolT2.drag && toolT2.drag.kind);
+    toolT2.onUp(midEdge);
+    toolT2.commitPending();
 
     // ---- bundled DejaVu fonts (fonts-builtin.js) ----
     check("builtin fonts registered",
