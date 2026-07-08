@@ -81,24 +81,48 @@
     // changing anything visible (<=3tw).
     var MICRO = 5;
     for (var pass = 0; pass < 4; pass++) {
-      var weld = new Map(); // "x,y" -> {x, y} replacement
+      var weld = new Map(); // "x,y" -> "x,y" (union-find style)
+      function resolve(k) {
+        var steps = 0;
+        while (weld.has(k) && steps++ < 128) k = weld.get(k);
+        return k;
+      }
       var contracted = 0;
       doc.edges.forEach(function (e) {
         if (Math.hypot(e.bx - e.ax, e.by - e.ay) > MICRO) return;
-        var fromK = e.bx + "," + e.by;
-        var toK = e.ax + "," + e.ay;
-        if (fromK === toK || weld.has(toK) || weld.has(fromK)) return;
-        weld.set(fromK, { x: e.ax, y: e.ay });
+        // Transitive: a CHAIN of micro-pieces (near-tangent noding
+        // leaves 30+ piece stairs) must collapse to ONE node in a
+        // single pass — pairwise-only welding left every other piece
+        // alive past the pass cap and the stair survived to scramble
+        // the face walk.
+        var rootA = resolve(e.ax + "," + e.ay);
+        var rootB = resolve(e.bx + "," + e.by);
+        if (rootA === rootB) return;
+        weld.set(rootB, rootA);
         contracted++;
       });
       if (contracted === 0) break;
       doc.edges.forEach(function (e) {
-        var wa = weld.get(e.ax + "," + e.ay);
-        if (wa) { e.ax = wa.x; e.ay = wa.y; }
-        var wb = weld.get(e.bx + "," + e.by);
-        if (wb) { e.bx = wb.x; e.by = wb.y; }
+        var ka = resolve(e.ax + "," + e.ay);
+        var pa = ka.split(",");
+        e.ax = +pa[0]; e.ay = +pa[1];
+        var kb = resolve(e.bx + "," + e.by);
+        var pb = kb.split(",");
+        e.bx = +pb[0]; e.by = +pb[1];
       });
-      doc.edges = doc.edges.filter(function (e) { return !VB.edgeIsDegenerate(e); });
+      // Welding collapses chords but leaves controls behind: a quad whose
+      // endpoints merged becomes a closed micro-CURL (a==b, control a few
+      // twips out). edgeIsDegenerate keeps those, they accumulate op after
+      // op, and a caterpillar of curls at one node scrambles the angular
+      // walk (the last pocket-flood case). A lineless closed curl within
+      // 2*MICRO extent is a sub-half-pixel nothing — delete it.
+      doc.edges = doc.edges.filter(function (e) {
+        if (VB.edgeIsDegenerate(e)) return false;
+        if (e.line !== 0) return true;
+        if (e.ax !== e.bx || e.ay !== e.by) return true;
+        if (e.cx === null) return false; // zero-length line
+        return Math.hypot(e.cx - e.ax, e.cy - e.ay) > MICRO * 2;
+      });
       VB.repairPlanar(doc);
     }
 
