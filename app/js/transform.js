@@ -362,19 +362,34 @@
           return;
         }
       }
-      // nothing here: the session is over — hand control back to the
-      // tool the user came from (lasso, arrow, ...)
+      // nothing here: start a NEW region selection right away — marquee
+      // or lasso, matching the tool the user came from. A plain click
+      // (no drag) instead ends the session and returns to that tool.
       self.adopt(null);
-      if (app.transformDone) app.transformDone();
+      var style = app.regionSelectStyle ? app.regionSelectStyle() : "marquee";
+      self.drag = { kind: "band", style: style, from: pos, cur: pos,
+                    moved: false, points: [{ x: pos.x, y: pos.y }] };
+    };
+
+    /** A pending, uncommitted session exists (anything adopted). */
+    self.hasSession = function () { return !!self.items; };
+
+    /** Would a press at pos grab the frame (handle/knob/move/rotate)? */
+    self.hitsFrame = function (pos) {
+      if (!self.box) return false;
+      var tol = 8 * VB.TWIPS / app.view.zoom;
+      var acc = composedM();
+      return !!hitTest(pos, tol, acc, invert(acc));
     };
 
     self.onHover = function (pos) {
       if (!app.setCursor) return;
-      if (!self.box) { app.setCursor(""); return; }
+      // over empty space a drag starts a fresh marquee/lasso
+      if (!self.box) { app.setCursor("crosshair"); return; }
       var tol = 8 * VB.TWIPS / app.view.zoom;
       var acc = composedM();
       var what = hitTest(pos, tol, acc, invert(acc));
-      if (!what) { app.setCursor(""); return; }
+      if (!what) { app.setCursor("crosshair"); return; }
       if (what.kind === "knob" || what.kind === "rotate") {
         app.setCursor(ROTATE_CURSOR);
       } else if (what.kind === "move") {
@@ -425,14 +440,50 @@
     }
 
     self.onMove = function (pos) {
-      if (!self.drag) return;
-      self.drag.cur = pos;
-      self.drag.m = currentMatrix();
+      var d = self.drag;
+      if (!d) return;
+      d.cur = pos;
+      if (d.kind === "band") {
+        if (Math.hypot(pos.x - d.from.x, pos.y - d.from.y) > 8) d.moved = true;
+        if (d.style === "lasso") {
+          var last = d.points[d.points.length - 1];
+          if (Math.hypot(pos.x - last.x, pos.y - last.y) >= 60) {
+            d.points.push({ x: pos.x, y: pos.y });
+          }
+        }
+      } else {
+        d.m = currentMatrix();
+      }
       app.requestRender();
     };
 
     self.onUp = function (pos) {
       var d = self.drag;
+      if (d && d.kind === "band") {
+        self.drag = null;
+        if (pos) d.cur = pos;
+        if (!d.moved) {
+          // plain click on empty: session over — hand control back to
+          // the tool the user came from (lasso, arrow, ...)
+          if (app.transformDone) app.transformDone();
+          app.requestRender();
+          return;
+        }
+        var pts;
+        if (d.style === "lasso" && d.points.length >= 3) {
+          pts = d.points.concat([{ x: d.cur.x, y: d.cur.y }]);
+        } else {
+          var x0 = Math.min(d.from.x, d.cur.x), x1 = Math.max(d.from.x, d.cur.x);
+          var y0 = Math.min(d.from.y, d.cur.y), y1 = Math.max(d.from.y, d.cur.y);
+          pts = [{ x: x0, y: y0 }, { x: x1, y: y0 },
+                 { x: x1, y: y1 }, { x: x0, y: y1 }];
+        }
+        self.adopt({ region: pts.map(function (p) {
+          return { x: Math.round(p.x), y: Math.round(p.y) };
+        }) });
+        app.setMsg("region lifted — transform it; click away to apply");
+        return;
+      }
       if (!d || !self.items) { self.drag = null; app.requestRender(); return; }
       if (pos) d.cur = pos;
       var mFinal = currentMatrix();
@@ -465,8 +516,27 @@
     }
 
     self.drawOverlay = function (ctx) {
-      if (!self.box) return;
       var hair = VB.TWIPS / app.view.zoom;
+      // an in-progress marquee/lasso band (started on empty space)
+      var bd = self.drag && self.drag.kind === "band" ? self.drag : null;
+      if (bd && bd.moved) {
+        ctx.strokeStyle = "rgba(0,160,255,0.9)";
+        ctx.lineWidth = 1.5 * hair;
+        ctx.setLineDash([6 * hair, 4 * hair]);
+        ctx.beginPath();
+        if (bd.style === "lasso") {
+          bd.points.forEach(function (p, i) {
+            if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+          });
+          ctx.lineTo(bd.cur.x, bd.cur.y);
+        } else {
+          ctx.rect(Math.min(bd.from.x, bd.cur.x), Math.min(bd.from.y, bd.cur.y),
+                   Math.abs(bd.cur.x - bd.from.x), Math.abs(bd.cur.y - bd.from.y));
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      if (!self.box) return;
       var m = self.drag && self.drag.m;
       function tx(x, y) {
         if (!m) return { x: x, y: y };

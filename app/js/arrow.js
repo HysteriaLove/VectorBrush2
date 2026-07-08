@@ -893,7 +893,10 @@
           self.setRegionSelection([
             { x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }
           ]);
-          app.setMsg("region selected — drag to move, Delete to erase, Q to transform");
+          // straight into the transform tool, region lifted and live —
+          // clicking away there commits and returns here
+          if (app.switchTool) app.switchTool("transform");
+          app.setMsg("region lifted — transform it; click away to apply");
         }
         app.requestRender();
         return;

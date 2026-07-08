@@ -1252,6 +1252,7 @@
     gesture15(1000, 0);
     gesture15(0, 500);
     tool15.onDown({ x: 10500, y: 7500 }, {}); // click away
+    tool15.onUp({ x: 10500, y: 7500 });
     check("click-away lands ONE composed op",
       journal15.length === 1 && journal15[0].op === "transformSel" &&
       Math.abs(journal15[0].m[4] - 1000) < 2 && Math.abs(journal15[0].m[5] - 500) < 2,
@@ -1275,6 +1276,7 @@
       doc15.edges.length === edges15b && VB.geom.fillAt(doc15, 4500, 3500) === 1,
       "x0=" + (tool15.box && tool15.box.x0) + " edges=" + doc15.edges.length);
     tool15.onDown({ x: 10500, y: 7500 }, {});
+    tool15.onUp({ x: 10500, y: 7500 });
     check("session revert commits nothing", journal15.length === 1,
       journal15.length + " ops");
     // ROTATED FRAME: the box remembers its rotation for the whole
@@ -1324,6 +1326,7 @@
       VB.integrityReport(doc15).length === 0 &&
       VB.geom.fillAt(doc15, 4500, 3500) === 1);
     tool15.onDown({ x: 10500, y: 7500 }, {});
+    tool15.onUp({ x: 10500, y: 7500 });
     check("rotated session committed nothing", journal15.length === 1,
       journal15.length + " ops");
     // ONE-MOTION pick-up: pressing on a shape lifts it AND starts the
@@ -1348,7 +1351,28 @@
       tool15.undoPending() === true && tool15.float === null &&
       VB.geom.fillAt(doc15, 4500, 3500) === 1);
     tool15.onDown({ x: 10500, y: 7500 }, {});
+    tool15.onUp({ x: 10500, y: 7500 });
     check("one-motion sessions committed nothing extra", journal15.length === 1,
+      journal15.length + " ops");
+    // BAND-IN-TRANSFORM: dragging on empty space while in transform
+    // mode draws a fresh marquee; releasing adopts the region lifted
+    tool15.onDown({ x: 2800, y: 2300 }, {}); // empty spot
+    tool15.onMove({ x: 4700, y: 3700 });
+    tool15.onUp({ x: 4700, y: 3700 });
+    check("empty drag in transform mode selects a new region",
+      !!tool15.items && !!tool15.items.region && !!tool15.float && !!tool15.box,
+      JSON.stringify(tool15.items && tool15.items.region));
+    check("band region lifted live", VB.geom.fillAt(doc15, 3500, 3000) === 0,
+      "fillAt=" + VB.geom.fillAt(doc15, 3500, 3000));
+    check("hasSession + hitsFrame see the live frame",
+      tool15.hasSession() === true &&
+      tool15.hitsFrame({ x: 3500, y: 3000 }) === true &&
+      tool15.hitsFrame({ x: 10500, y: 7500 }) === false);
+    check("undo puts the band region back",
+      tool15.undoPending() === true && VB.geom.fillAt(doc15, 3500, 3000) === 1);
+    tool15.onDown({ x: 10500, y: 7500 }, {});
+    tool15.onUp({ x: 10500, y: 7500 });
+    check("band sessions committed nothing", journal15.length === 1,
       journal15.length + " ops");
   })();
 

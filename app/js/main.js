@@ -66,6 +66,13 @@
       renderQueued = false;
       VB.render(ctx, app.doc, app.view);
       var tool = tools[app.tool];
+      // a pending transform session stays visible while a sibling
+      // selection tool is active
+      if (tools.transform && tool !== tools.transform &&
+          tools.transform.hasSession && tools.transform.hasSession()) {
+        try { tools.transform.drawOverlay(ctx); }
+        catch (err) { trapError("overlay: " + err.message, err.stack); }
+      }
       if (tool && tool.drawOverlay) {
         try { tool.drawOverlay(ctx); }
         catch (err) { trapError("overlay: " + err.message, err.stack); }
@@ -362,6 +369,23 @@
     }
     if (ev.button === 0) {
       var tool = tools[app.tool];
+      // a pending transform session stays GRABBABLE across the selection
+      // family: presses on its frame route to the transform tool; a
+      // press anywhere else lands the session first, then the active
+      // tool proceeds normally
+      var tf = tools.transform;
+      if (tf && tool !== tf && SEL_FAMILY[app.tool] &&
+          tf.hasSession && tf.hasSession()) {
+        var tp = clientToTwips(ev);
+        if (tf.hitsFrame(tp)) {
+          activePointerTool = tf;
+          canvas.setPointerCapture(ev.pointerId);
+          tf.onDown(tp, ev);
+          ev.preventDefault();
+          return;
+        }
+        if (tf.commitPending) tf.commitPending();
+      }
       if (tool && tool.onDown) {
         activePointerTool = tool;
         canvas.setPointerCapture(ev.pointerId);
@@ -380,8 +404,13 @@
     } else if (activePointerTool && activePointerTool.onMove) {
       activePointerTool.onMove(clientToTwips(ev));
     } else {
-      if (tools[app.tool] && tools[app.tool].onHover) {
-        tools[app.tool].onHover(clientToTwips(ev));
+      var hp = clientToTwips(ev);
+      var tfh = tools.transform;
+      if (tfh && tools[app.tool] !== tfh && SEL_FAMILY[app.tool] &&
+          tfh.hasSession && tfh.hasSession() && tfh.hitsFrame(hp)) {
+        tfh.onHover(hp); // frame cursors work from sibling tools too
+      } else if (tools[app.tool] && tools[app.tool].onHover) {
+        tools[app.tool].onHover(hp);
       }
       if (app.debug) {
         // hover inspector (pin wins) — runs alongside the active tool
@@ -440,7 +469,7 @@
       if (activePointerTool && activePointerTool.cancel) {
         activePointerTool.cancel();
         activePointerTool = null;
-      } else if (app.tool === "transform" && tools.transform &&
+      } else if (SEL_FAMILY[app.tool] && tools.transform &&
                  tools.transform.revertPending && tools.transform.revertPending()) {
         // pending free-transform abandoned, selection kept
       } else if (app.debugPin >= 0) {
@@ -527,16 +556,23 @@
   // clicking away from a finished transform returns there (lasso a
   // region, transform it, land back in the lasso).
   var returnTool = null;
+  // A pending transform session survives switching among these; it
+  // only commits when the user acts elsewhere or picks a drawing tool.
+  var SEL_FAMILY = { select: true, lasso: true, transform: true };
 
   function selectTool(tool) {
     canvas.style.cursor = "";
     if (tool === "transform" && app.tool !== "transform") returnTool = app.tool;
     if (tools.select && tools.select.commitFloat) tools.select.commitFloat();
     if (tool === "transform" && tools.select.exportSelection) {
-      tools.transform.adopt(tools.select.exportSelection());
-      if (tools.select.clearSelection) tools.select.clearSelection();
-    } else if (tools.transform && tools.transform.adopt) {
-      tools.transform.adopt(null);
+      var handoff = tools.select.exportSelection();
+      if (handoff.region || handoff.fills.length || handoff.edgeKeys.length) {
+        tools.transform.adopt(handoff); // commits any older session first
+        if (tools.select.clearSelection) tools.select.clearSelection();
+      }
+      // no new selection: whatever session the tool already holds stays
+    } else if (!SEL_FAMILY[tool] && tools.transform && tools.transform.adopt) {
+      tools.transform.adopt(null); // leaving the selection family commits
     }
     if (activePointerTool && activePointerTool.cancel) activePointerTool.cancel();
     activePointerTool = null;
@@ -558,6 +594,12 @@
   app.transformDone = function () {
     if (app.tool !== "transform") return;
     selectTool(returnTool && tools[returnTool] ? returnTool : "select");
+  };
+
+  // Empty-space drags in the transform tool draw a fresh region band —
+  // shaped like the selection tool the user came from.
+  app.regionSelectStyle = function () {
+    return returnTool === "lasso" ? "lasso" : "marquee";
   };
 
   // ---- boot ------------------------------------------------------------------------
