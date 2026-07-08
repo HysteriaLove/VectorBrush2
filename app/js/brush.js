@@ -66,11 +66,15 @@
     });
 
     // ---- 2. node the lean outline into the map ----------------------------
-    var pieces = VB.nodeEdges(doc, fitted);
+    // Integer-identical twins are adopted, not noded — intersecting a
+    // curve with itself shreds both copies (see eraser.js).
+    var adopted = VB.adoptIdenticalEdges(doc, fitted);
+    var pieces = VB.nodeEdges(doc, adopted.fresh);
     for (var k = 0; k < pieces.length; k++) doc.edges.push(pieces[k]);
 
     // ---- 3. boolean mask: faces decide everything --------------------------
-    var removed = VB.applyRegionMask(doc, preOp, insidePaint, fillIdx, pieces);
+    var removed = VB.applyRegionMask(doc, preOp, insidePaint, fillIdx,
+                                     pieces.concat(adopted.twins));
 
     return { painted: removed, boundary: fitted.length };
   }

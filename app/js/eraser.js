@@ -76,10 +76,17 @@
       return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, e.fill0, e.fill1, e.line);
     });
 
-    var pieces = VB.nodeEdges(doc, fitted);
+    // A fence piece integer-identical to an existing edge must NOT be
+    // noded against it: intersecting a curve with itself shreds both
+    // copies into sub-twip fragments no exact rule can pair (the
+    // repeated-eraser-click toggle). Drop the new copy up front and hand
+    // its old twin to the mask as a protected carrier instead.
+    var adopted = VB.adoptIdenticalEdges(doc, fitted);
+    var pieces = VB.nodeEdges(doc, adopted.fresh);
     for (var k = 0; k < pieces.length; k++) doc.edges.push(pieces[k]);
 
-    var removed = VB.applyRegionMask(doc, preOp, insideSwept, 0, pieces);
+    var removed = VB.applyRegionMask(doc, preOp, insideSwept, 0,
+                                     pieces.concat(adopted.twins));
 
     return { removed: removed, boundary: fitted.length };
   }

@@ -54,6 +54,54 @@
     // the old edge, drop the duplicate — two overlapping edges scramble
     // the angular sort in the face walk. Nothing short of integer-exact
     // is touched (near-parallels have their own nodes and faces).
+    //
+    // SPAN ALIGNMENT first: re-erasing/re-painting the exact same spot
+    // regenerates the same fence, but the OLD copy carries extra nodes
+    // from historical noding — identical geometry, different spans, so
+    // the duplicate rule misses it and the coincident pair survives to
+    // scramble the walk (the eraser-click toggle bug). Split each side
+    // at the other's endpoints that lie ON it; identical stretches then
+    // decompose into integer-identical twins.
+    (function alignCoincidentSpans() {
+      function splitsFor(target, endpoints) {
+        var bb = VB.geom.edgeBBox(target);
+        var list = [];
+        for (var i = 0; i < endpoints.length; i++) {
+          var pt = endpoints[i];
+          if (pt.x < bb.xmin - 1 || pt.x > bb.xmax + 1 ||
+              pt.y < bb.ymin - 1 || pt.y > bb.ymax + 1) continue;
+          if ((pt.x === target.ax && pt.y === target.ay) ||
+              (pt.x === target.bx && pt.y === target.by)) continue;
+          var q = VB.geom.nearestOnEdge(target, pt.x, pt.y);
+          if (q.d <= 0.75 && q.t > 0.02 && q.t < 0.98) {
+            list.push({ t: q.t, point: { x: pt.x, y: pt.y } });
+          }
+        }
+        return list;
+      }
+      var fenceEnds = [], oldEnds = [];
+      doc.edges.forEach(function (e) {
+        (fence.has(e) ? fenceEnds : oldEnds).push(
+          { x: e.ax, y: e.ay }, { x: e.bx, y: e.by });
+      });
+      var rebuilt = [];
+      doc.edges.forEach(function (e) {
+        var ends = fence.has(e) ? oldEnds : fenceEnds;
+        var list = splitsFor(e, ends);
+        if (list.length === 0) { rebuilt.push(e); return; }
+        list.sort(function (a, b) { return a.t - b.t; });
+        var pieces = VB.geom.splitEdge(e, list);
+        var isFence = fence.has(e);
+        if (isFence) fence.delete(e);
+        pieces.forEach(function (pc) {
+          if (VB.edgeIsDegenerate(pc)) return;
+          if (isFence) fence.add(pc);
+          rebuilt.push(pc);
+        });
+      });
+      doc.edges = rebuilt;
+    })();
+
     function edgeKey(ax, ay, cx, cy, bx, by) {
       return ax + "," + ay + "," + cx + "," + cy + "," + bx + "," + by;
     }
@@ -235,6 +283,32 @@
     return before - doc.edges.length;
   }
 
+  /**
+   * Splits a batch of new edges into { fresh, twins }: `fresh` are safe
+   * to node; `twins` are existing doc edges integer-identical (either
+   * orientation) to a new edge — the new copy is discarded and the old
+   * edge becomes the protected carrier. Noding a curve against an
+   * identical curve shreds both into sub-twip fragments, which no exact
+   * duplicate rule can pair afterwards.
+   */
+  function adoptIdenticalEdges(doc, newEdges) {
+    var byKey = new Map();
+    function k(ax, ay, cx, cy, bx, by) {
+      return ax + "," + ay + "," + cx + "," + cy + "," + bx + "," + by;
+    }
+    doc.edges.forEach(function (e) {
+      byKey.set(k(e.ax, e.ay, e.cx, e.cy, e.bx, e.by), e);
+    });
+    var fresh = [], twins = [];
+    newEdges.forEach(function (e) {
+      var twin = byKey.get(k(e.ax, e.ay, e.cx, e.cy, e.bx, e.by)) ||
+                 byKey.get(k(e.bx, e.by, e.cx, e.cy, e.ax, e.ay));
+      if (twin) twins.push(twin); else fresh.push(e);
+    });
+    return { fresh: fresh, twins: twins };
+  }
+
   window.VB = window.VB || {};
   VB.applyRegionMask = applyRegionMask;
+  VB.adoptIdenticalEdges = adoptIdenticalEdges;
 })();
