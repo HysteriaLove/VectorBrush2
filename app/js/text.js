@@ -962,25 +962,13 @@
           ctx.stroke();
         });
       }
-      // caret from the textarea's native caret position, computed in
-      // block-local space and mapped through the placement matrix
-      var str = s.area.value;
-      var caret = s.area.selectionStart;
-      var before = str.slice(0, caret);
-      var lineIdx = before.split("\n").length - 1;
-      var linePrefix = before.slice(before.lastIndexOf("\n") + 1);
+      // caret in block-local space, honoring SOFT WRAPS and alignment
+      // (it must sit on the visual line, not the raw string's line),
+      // then mapped through the placement matrix (rotation included)
+      var cp = sessionCaretLocal(s);
       var scale = s.sizeTw / s.ttf.unitsPerEm;
-      var cx = 0;
-      for (var i = 0; i < linePrefix.length; i++) {
-        var gi = s.ttf.glyphIndex(linePrefix.charCodeAt(i));
-        var adv = s.ttf.advance(gi);
-        if (i + 1 < linePrefix.length) {
-          adv += s.ttf.kern(gi, s.ttf.glyphIndex(linePrefix.charCodeAt(i + 1)));
-        }
-        cx += Math.round(adv * scale);
-      }
       var pitch = Math.round((s.ttf.winAscent + s.ttf.winDescent) * scale);
-      var baseline = Math.round(s.ttf.winAscent * scale) + lineIdx * pitch;
+      var baseline = Math.round(s.ttf.winAscent * scale) + cp.line * pitch;
       var top = baseline - Math.round(s.ttf.winAscent * scale);
       var bottom = baseline + Math.round(s.ttf.winDescent * scale);
       if (s.caretOn) {
@@ -988,7 +976,7 @@
         function mp(x, y) {
           return { x: m[0] * x + m[2] * y + m[4], y: m[1] * x + m[3] * y + m[5] };
         }
-        var a = mp(cx, top), b = mp(cx, bottom);
+        var a = mp(cp.x, top), b = mp(cp.x, bottom);
         ctx.strokeStyle = "#000";
         ctx.lineWidth = Math.max(1.5 * hair, 20);
         ctx.beginPath();
@@ -997,6 +985,61 @@
         ctx.stroke();
       }
     };
+
+    /** The caret's block-local position: re-runs the SAME layout walk
+     *  as buildTextOp (wrap + alignment) while tracking character
+     *  indices, so the caret lands on the correct VISUAL line. */
+    function sessionCaretLocal(s) {
+      var str = s.area.value;
+      var caret = s.area.selectionStart;
+      var scale = s.sizeTw / s.ttf.unitsPerEm;
+      var spacing = s.spacing || 0;
+      var visual = []; // {glyphs, lineNo, paraEnd}
+      var lineNo = 0;
+      str.split("\n").forEach(function (para) {
+        var run = [];
+        for (var ci = 0; ci < para.length; ci++) {
+          var code = para.charCodeAt(ci);
+          var gi = s.ttf.glyphIndex(code);
+          var adv = s.ttf.advance(gi);
+          if (ci + 1 < para.length) {
+            adv += s.ttf.kern(gi, s.ttf.glyphIndex(para.charCodeAt(ci + 1)));
+          }
+          run.push({ code: code, adv: Math.round(adv * scale) + spacing });
+        }
+        var lines = wrapRun(run, s.wrapWidth);
+        if (!lines.length) {
+          visual.push({ glyphs: [], lineNo: lineNo, paraEnd: true });
+          lineNo++;
+          return;
+        }
+        lines.forEach(function (line, li) {
+          visual.push({ glyphs: line, lineNo: lineNo,
+                        paraEnd: li === lines.length - 1 });
+          lineNo++;
+        });
+      });
+      var widths = visual.map(function (L) { return lineWidth(L.glyphs); });
+      var boxW = s.wrapWidth || Math.max.apply(null, widths.concat([0]));
+      var idx = 0;
+      for (var vi = 0; vi < visual.length; vi++) {
+        var L = visual[vi];
+        var within = caret - idx;
+        var isLast = vi === visual.length - 1;
+        // a soft-wrapped line "owns" its chars but not its end position:
+        // the caret at a wrap boundary belongs to the NEXT visual line
+        if (within < L.glyphs.length ||
+            (within === L.glyphs.length && (L.paraEnd || isLast))) {
+          var cx = alignX(s.align || 0, boxW, widths[vi]);
+          var upto = Math.min(within, L.glyphs.length);
+          for (var g = 0; g < upto; g++) cx += L.glyphs[g].adv;
+          return { x: cx, line: L.lineNo };
+        }
+        idx += L.glyphs.length;
+        if (L.paraEnd) idx += 1; // the newline character
+      }
+      return { x: 0, line: Math.max(0, lineNo - 1) };
+    }
 
     return self;
   }
