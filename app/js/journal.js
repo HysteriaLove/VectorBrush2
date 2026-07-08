@@ -127,6 +127,14 @@
           history.push(doc);
           VB.arrowDeleteSel(doc, op.fills, op.edgeKeys);
           break;
+        case "regionTransform":
+          history.push(doc);
+          VB.regionTransform(doc, op.points, op.m);
+          break;
+        case "regionDelete":
+          history.push(doc);
+          VB.regionDelete(doc, op.points);
+          break;
         case "undo":
           history.undo(doc);
           break;

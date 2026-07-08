@@ -31,6 +31,8 @@
     requestRender: requestRender,
     setMsg: setMsg,
     setCursor: function (c) { canvas.style.cursor = c || ""; },
+    toolByName: function (name) { return tools[name]; },
+    switchTool: function (name) { selectTool(name); },
     onEdgeSelected: function (idx) {
       if (!app.debug) return;
       app.debugPin = idx;
@@ -44,6 +46,7 @@
   var tools = {
     select: VB.ArrowTool(app),
     transform: VB.FreeTransformTool(app),
+    lasso: VB.LassoTool(app),
     pencil: new VB.PencilTool(app),
     brush: new VB.BrushTool(app),
     bucket: new VB.BucketTool(app),
@@ -423,7 +426,7 @@
     // O = oval, R = rectangle
     var toolKeys = { v: "select", p: "pencil", b: "brush", k: "bucket",
                      e: "eraser", n: "line", o: "oval", r: "rect",
-                     q: "transform" };
+                     q: "transform", l: "lasso" };
     if (toolKeys[k]) selectTool(toolKeys[k]);
   });
   window.addEventListener("keyup", function (ev) {

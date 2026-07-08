@@ -315,6 +315,159 @@
     return true;
   }
 
+  // ---- region selection (marquee / lasso) -------------------------------------
+  // Flash's rubber-band and lasso selections CUT through geometry: the
+  // selected content is the drawing clipped to the region. Lifting is a
+  // mask that erases the complement on a working copy; deleting is a
+  // mask that erases the region; moving/transforming is lift + erase +
+  // re-merge of the transformed clip.
+
+  // Closed loop edges from polygon points (all-quad convention so the
+  // fence stays census-safe).
+  function polyLoop(points) {
+    var loop = [];
+    for (var i = 0; i < points.length; i++) {
+      var a = points[i], b = points[(i + 1) % points.length];
+      var ax = Math.round(a.x), ay = Math.round(a.y);
+      var bx = Math.round(b.x), by = Math.round(b.y);
+      var e = VB.edge(ax, ay, Math.round((ax + bx) / 2), Math.round((ay + by) / 2),
+                      bx, by, 0, 0, 0);
+      if (!VB.edgeIsDegenerate(e)) loop.push(e);
+    }
+    return loop;
+  }
+
+  function cloneDoc(doc) {
+    var c = new VB.VBDocument();
+    c.width = doc.width; c.height = doc.height;
+    c.background = doc.background;
+    c.fills = doc.fills.map(function (f) {
+      return { type: f.type, color: { r: f.color.r, g: f.color.g, b: f.color.b, a: f.color.a } };
+    });
+    c.lines = doc.lines.map(function (l) {
+      return { width: l.width, color: { r: l.color.r, g: l.color.g, b: l.color.b, a: l.color.a } };
+    });
+    c.edges = doc.edges.map(function (e) {
+      return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, e.fill0, e.fill1, e.line);
+    });
+    return c;
+  }
+
+  function maskWith(doc, loopEdges, insideMask, maskFill) {
+    var fitted = loopEdges.map(function (e) {
+      return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, 0, 0, 0);
+    });
+    var preOp = new VB.VBDocument();
+    preOp.width = doc.width; preOp.height = doc.height;
+    preOp.fills = doc.fills; preOp.lines = doc.lines;
+    preOp.edges = doc.edges.map(function (e) {
+      return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, e.fill0, e.fill1, e.line);
+    });
+    var adopted = VB.adoptIdenticalEdges(doc, fitted);
+    var pieces = VB.nodeEdges(doc, adopted.fresh);
+    for (var k = 0; k < pieces.length; k++) doc.edges.push(pieces[k]);
+    VB.applyRegionMask(doc, preOp, insideMask, maskFill,
+                       pieces.concat(adopted.twins));
+  }
+
+  /** The drawing clipped to the region, as a fresh document. */
+  function regionLift(doc, points) {
+    var lifted = cloneDoc(doc);
+    var loop = polyLoop(points);
+    var winding = loop.map(function (e) {
+      return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, 0, 0, 0);
+    });
+    maskWith(lifted, loop, function (x, y) {
+      return VB.geom.windingNumber(winding, x, y) === 0; // erase the COMPLEMENT
+    }, 0);
+    return lifted;
+  }
+
+  /** Erase everything inside the region (marquee/lasso Delete). */
+  function regionDelete(doc, points) {
+    var loop = polyLoop(points);
+    var winding = loop.map(function (e) {
+      return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, 0, 0, 0);
+    });
+    maskWith(doc, loop, function (x, y) {
+      return VB.geom.windingNumber(winding, x, y) !== 0;
+    }, 0);
+    return true;
+  }
+
+  /**
+   * Transform the region's content by matrix m: lift the clip, erase the
+   * region, re-merge the transformed clip (fills paint over what they
+   * land on, strokes re-node and inherit destination fills).
+   */
+  function regionTransform(doc, points, m) {
+    var lifted = regionLift(doc, points);
+    if (lifted.edges.length === 0) return false;
+    regionDelete(doc, points);
+
+    function txEdge(e, f0, f1, ln) {
+      var a = applyM(m, e.ax, e.ay);
+      var b = applyM(m, e.bx, e.by);
+      var c = e.cx === null ? null : applyM(m, e.cx, e.cy);
+      return VB.edge(Math.round(a.x), Math.round(a.y),
+        c === null ? null : Math.round(c.x), c === null ? null : Math.round(c.y),
+        Math.round(b.x), Math.round(b.y), f0, f1, ln);
+    }
+
+    // fills: per fill style of the lifted clip, paint the transformed loops
+    for (var f = 1; f <= lifted.fills.length; f++) {
+      var got = VB.fillLoops(lifted, f);
+      if (!got.loops.length) continue;
+      var fitted = [];
+      got.loops.forEach(function (loop) {
+        loop.forEach(function (d) {
+          var ne = txEdge(d, 0, 0, 0);
+          if (!VB.edgeIsDegenerate(ne)) fitted.push(ne);
+        });
+      });
+      if (!fitted.length) continue;
+      var winding = fitted.map(function (e) {
+        return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, 0, 0, 0);
+      });
+      var fillIdx = doc.addFillStyle({
+        type: "solid",
+        color: {
+          r: lifted.fills[f - 1].color.r, g: lifted.fills[f - 1].color.g,
+          b: lifted.fills[f - 1].color.b, a: lifted.fills[f - 1].color.a
+        }
+      });
+      maskWith(doc, fitted, function (x, y) {
+        return VB.geom.windingNumber(winding, x, y) !== 0;
+      }, fillIdx);
+    }
+
+    // strokes: transform, re-node, inherit destination fills
+    var newStrokes = [];
+    lifted.edges.forEach(function (e) {
+      if (e.line === 0) return;
+      var lnIdx = doc.addLineStyle({
+        width: lifted.lines[e.line - 1].width,
+        color: {
+          r: lifted.lines[e.line - 1].color.r, g: lifted.lines[e.line - 1].color.g,
+          b: lifted.lines[e.line - 1].color.b, a: lifted.lines[e.line - 1].color.a
+        }
+      });
+      var ne = txEdge(e, 0, 0, lnIdx);
+      if (!VB.edgeIsDegenerate(ne)) newStrokes.push(ne);
+    });
+    if (newStrokes.length) {
+      var pieces = VB.nodeEdges(doc, newStrokes);
+      pieces.forEach(function (pc) {
+        var mid = VB.geom.evalEdge(pc, 0.5);
+        var fl = VB.geom.fillAt(doc, mid.x, mid.y);
+        pc.fill0 = fl; pc.fill1 = fl;
+        doc.edges.push(pc);
+      });
+      VB.repairPlanar(doc);
+    }
+    return true;
+  }
+
   // ---- interactive tool ---------------------------------------------------------
 
   // Flash's arrow cursor states: the badge at the pointer's lower right
@@ -346,22 +499,28 @@
       app: app,
       // selection: fills as pick points (+loops snapshot for overlay),
       // strokes as record keys
-      sel: { fills: [], edgeKeys: [] },
+      sel: { fills: [], edgeKeys: [], region: null },
       drag: null,
       hoverPos: null
     };
 
     function pickTol() { return 6 * VB.TWIPS / app.view.zoom; }
     function selEmpty() {
-      return self.sel.fills.length === 0 && self.sel.edgeKeys.length === 0;
+      return self.sel.fills.length === 0 && self.sel.edgeKeys.length === 0 &&
+             !self.sel.region;
     }
     self.clearSelection = function () {
-      self.sel = { fills: [], edgeKeys: [] };
+      self.sel = { fills: [], edgeKeys: [], region: null };
+    };
+    self.setRegionSelection = function (points) {
+      self.sel = { fills: [], edgeKeys: [], region: points };
+      app.requestRender();
     };
     self.exportSelection = function () {
       return {
         fills: self.sel.fills.map(function (f) { return { x: f.x, y: f.y }; }),
-        edgeKeys: self.sel.edgeKeys.slice()
+        edgeKeys: self.sel.edgeKeys.slice(),
+        region: self.sel.region ? self.sel.region.slice() : null
       };
     };
 
@@ -413,8 +572,20 @@
       return true;
     }
 
+    function insideRegionSel(pos) {
+      if (!self.sel.region) return false;
+      var loop = polyLoop(self.sel.region);
+      return VB.geom.windingNumber(loop, pos.x, pos.y) !== 0;
+    }
+
     self.onDown = function (pos, ev) {
       var shift = !!(ev && ev.shiftKey);
+      // press inside an active region selection: move it
+      if (insideRegionSel(pos)) {
+        self.drag = { kind: "moveRegion", from: pos, cur: pos, moved: false,
+                      points: self.sel.region };
+        return;
+      }
       var ei = pickEdge(pos);
       var overSelFill = fillSelected(pos);
       var overSelEdge = ei >= 0 &&
@@ -461,6 +632,8 @@
         }
       }
       if (!shift) self.clearSelection();
+      // empty canvas: rubber-band marquee
+      self.drag = { kind: "marquee", from: pos, cur: pos, moved: false };
       app.requestRender();
     };
 
@@ -549,6 +722,31 @@
         }
         return;
       }
+      if (drag.kind === "marquee") {
+        if (drag.moved) {
+          var x0 = Math.min(drag.from.x, pos.x), x1 = Math.max(drag.from.x, pos.x);
+          var y0 = Math.min(drag.from.y, pos.y), y1 = Math.max(drag.from.y, pos.y);
+          self.setRegionSelection([
+            { x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }
+          ]);
+          app.setMsg("region selected — drag to move, Delete to erase, Q to transform");
+        }
+        app.requestRender();
+        return;
+      }
+      if (drag.kind === "moveRegion") {
+        if (!drag.moved) { app.requestRender(); return; }
+        var rdx = Math.round(pos.x - drag.from.x);
+        var rdy = Math.round(pos.y - drag.from.y);
+        var rm = [1, 0, 0, 1, rdx, rdy];
+        app.record({ op: "regionTransform", points: drag.points, m: rm });
+        app.history.push(app.doc);
+        regionTransform(app.doc, drag.points, rm);
+        self.clearSelection();
+        app.docChanged();
+        app.setMsg("region moved");
+        return;
+      }
       if (drag.kind === "moveSel") {
         if (!drag.moved) { app.requestRender(); return; }
         var dx = Math.round(pos.x - drag.from.x);
@@ -566,6 +764,16 @@
 
     self.onDeleteKey = function () {
       if (selEmpty()) return false;
+      if (self.sel.region) {
+        var pts = self.sel.region;
+        app.record({ op: "regionDelete", points: pts });
+        app.history.push(app.doc);
+        regionDelete(app.doc, pts);
+        self.clearSelection();
+        app.docChanged();
+        app.setMsg("region erased");
+        return true;
+      }
       var items = self.exportSelection();
       app.record({ op: "deleteSel", fills: items.fills, edgeKeys: items.edgeKeys });
       app.history.push(app.doc);
@@ -631,10 +839,39 @@
         });
         strokeEdges(ctx, edges, 0, 0);
       }
+      if (self.sel.region) {
+        ctx.strokeStyle = "rgba(0,160,255,0.9)";
+        ctx.lineWidth = 1.5 * hair;
+        ctx.setLineDash([6 * hair, 4 * hair]);
+        ctx.beginPath();
+        self.sel.region.forEach(function (p, i2) {
+          if (i2 === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+        });
+        ctx.closePath();
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
       if (!self.drag || !self.drag.moved) return;
       ctx.strokeStyle = "rgba(255,120,0,0.9)";
       ctx.lineWidth = 2 * hair;
-      if (self.drag.kind === "moveSel") {
+      if (self.drag.kind === "marquee") {
+        ctx.setLineDash([6 * hair, 4 * hair]);
+        ctx.strokeRect(Math.min(self.drag.from.x, self.drag.cur.x),
+                       Math.min(self.drag.from.y, self.drag.cur.y),
+                       Math.abs(self.drag.cur.x - self.drag.from.x),
+                       Math.abs(self.drag.cur.y - self.drag.from.y));
+        ctx.setLineDash([]);
+      } else if (self.drag.kind === "moveRegion") {
+        var rdx2 = self.drag.cur.x - self.drag.from.x;
+        var rdy2 = self.drag.cur.y - self.drag.from.y;
+        ctx.beginPath();
+        self.drag.points.forEach(function (p, i2) {
+          if (i2 === 0) ctx.moveTo(p.x + rdx2, p.y + rdy2);
+          else ctx.lineTo(p.x + rdx2, p.y + rdy2);
+        });
+        ctx.closePath();
+        ctx.stroke();
+      } else if (self.drag.kind === "moveSel") {
         var dx = self.drag.cur.x - self.drag.from.x;
         var dy = self.drag.cur.y - self.drag.from.y;
         strokeEdges(ctx, self.drag.ghosts, dx, dy);
@@ -668,5 +905,9 @@
   VB.arrowDeleteSel = arrowDeleteSel;
   VB.arrowTransformSel = arrowTransformSel;
   VB.connectedStrokeKeys = connectedStrokeKeys;
+  VB.regionLift = regionLift;
+  VB.regionDelete = regionDelete;
+  VB.regionTransform = regionTransform;
+  VB.regionPolyLoop = polyLoop;
   VB.arrowEdgeKey = edgeKey;
 })();

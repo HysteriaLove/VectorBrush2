@@ -10,6 +10,11 @@ No build step, no dependencies: open `index.html` in a browser
 (Chromium-based required for zlib support via `DecompressionStream`).
 Drop a `.swf` or `.vbd` onto the canvas, or use **Open…**.
 
+- **Lasso** (`L`) and the arrow's rubber-band marquee: REGION selections
+  that cut through geometry like Flash's — marquee half a shape and drag
+  the chunk away. The region clips fills and strokes exactly (boolean
+  mask), moves with paint-over, Deletes like a shaped eraser, and hands
+  to Free Transform
 - **Free Transform** (`Q`): transform box around the selection (adopted
   from the arrow tool, or click to pick): eight scale handles anchored
   at the opposite handle, rotate by grabbing just outside the box, move
@@ -106,6 +111,7 @@ no epsilons.
 | `js/shapes.js` | Line/Oval/Rectangle tools: shape loops through the boolean-mask pipeline (filled) or planar merge (stroke-only) |
 | `js/arrow.js` | Arrow tool: edge reshape / node move / face lift-move-delete, all journaled |
 | `js/transform.js` | Free Transform tool: scale/rotate/move box over the selection, committed as one affine matrix |
+| `js/lasso.js` | Lasso tool: freeform region selection, handed to the arrow/transform |
 | `js/main.js` | GUI shell: viewport, toolbar, tool routing, file I/O |
 
 The document model is deliberately **not** an object/layer scene graph: like
@@ -142,7 +148,7 @@ The `<title>`/final line reads `VBTEST DONE pass=N fail=M`.
 verification (bounded faces must equal E − V + C), wavy-grid bucket
 containment, and the casual-drawing gap scenarios.
 
-Current status: 360 checks, 0 failures — the SWF/VBD pipeline suite plus
+Current status: 370 checks, 0 failures — the SWF/VBD pipeline suite plus
 the journal-replay regression (pencil square → bucket fill → erase across
 it, the case that exposed the concave-join bowtie bug) and
 eraser unit tests (band erase splitting a fill, dab holes with

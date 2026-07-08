@@ -60,7 +60,11 @@
     }
 
     self.adopt = function (items) {
-      if (items && (items.fills.length || items.edgeKeys.length)) {
+      if (items && items.region) {
+        self.items = { region: items.region };
+        self.ghosts = VB.regionPolyLoop(items.region);
+        self.box = bboxOf(self.ghosts);
+      } else if (items && (items.fills.length || items.edgeKeys.length)) {
         self.items = items;
         self.ghosts = ghostsOf(items);
         self.box = bboxOf(self.ghosts);
@@ -181,10 +185,16 @@
         app.requestRender();
         return;
       }
-      app.record({ op: "transformSel", fills: self.items.fills,
-                   edgeKeys: self.items.edgeKeys, m: mFinal });
-      app.history.push(app.doc);
-      VB.arrowTransformSel(app.doc, self.items.fills, self.items.edgeKeys, mFinal);
+      if (self.items.region) {
+        app.record({ op: "regionTransform", points: self.items.region, m: mFinal });
+        app.history.push(app.doc);
+        VB.regionTransform(app.doc, self.items.region, mFinal);
+      } else {
+        app.record({ op: "transformSel", fills: self.items.fills,
+                     edgeKeys: self.items.edgeKeys, m: mFinal });
+        app.history.push(app.doc);
+        VB.arrowTransformSel(app.doc, self.items.fills, self.items.edgeKeys, mFinal);
+      }
       self.adopt(null);
       app.docChanged();
       app.setMsg("selection transformed");
