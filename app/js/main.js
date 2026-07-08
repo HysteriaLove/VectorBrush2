@@ -213,7 +213,6 @@
       app.history.clear();
       app.journal.length = 0;
       app.journal.push({ op: "load", name: name, b64: VB.bytesToB64(bytes) });
-      document.getElementById("drophint").classList.add("hidden");
       document.getElementById("fileinfo").textContent =
         name + " · " + kind + " · " + bytes.length.toLocaleString() + " B";
       var warn = (result.info.warnings || []);
@@ -591,7 +590,6 @@
     VB.brushStroke(d, [
       { x: 1200, y: 5200 }, { x: 3200, y: 4400 }, { x: 5400, y: 3600 }, { x: 7600, y: 2400 }
     ], 180, { r: 204, g: 102, b: 102, a: 255 });
-    document.getElementById("drophint").classList.add("hidden");
     toggleDebug();
     app.debugPin = Math.min(9, d.edges.length - 1);
     refreshDebugEdge();
