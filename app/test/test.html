@@ -1701,6 +1701,104 @@
     check("authored text survives vbd",
       JSON.stringify(back.doc.texts) === JSON.stringify(ra.doc.texts) &&
       JSON.stringify(back.doc.fonts) === JSON.stringify(ra.doc.fonts));
+
+    // ---- text as an OBJECT: hit, move, transform, edit, delete ----
+    var hdoc = new VB.VBDocument();
+    VB.textApplyOp(hdoc, VB.buildTextOp(ttf, { name: "VBTest" }, "AB", 400, red, 1000, 2000));
+    // block-local bounds: A triangle spans y -682..0, x 0..1024 EM at
+    // scale 400/1024 -> local x 0..~688 (A 400 wide + B), y -266..0
+    // block-local: baseline y=320, height fallback tops out at -80;
+    // B's widest contour lands at 368 (kerned pen) + 819*400/1024 = 688
+    var hb = VB.textBlockBounds(hdoc, hdoc.texts[0]);
+    check("text bounds hug the outlines",
+      hb && hb.x0 === 0 && hb.y0 === -80 && hb.x1 === 688 && hb.y1 === 320,
+      JSON.stringify(hb));
+    check("textHit maps through the matrix",
+      VB.textHit(hdoc, 1200, 2200) === 0 &&   // inside (baseline y=2320)
+      VB.textHit(hdoc, 5000, 5000) === -1);
+    // move
+    VB.textTransformApply(hdoc, 0, [1, 0, 0, 1, 500, -300]);
+    check("textTransform composes translation",
+      hdoc.texts[0].matrix[4] === 1500 && hdoc.texts[0].matrix[5] === 1700 &&
+      VB.textHit(hdoc, 1700, 1900) === 0);
+    // rotate 90° about the block origin: text stays text
+    VB.textTransformApply(hdoc, 0, [0, 1, -1, 0,
+      1500 + 1700, 1700 - 1500]);
+    check("textTransform composes rotation",
+      Math.abs(hdoc.texts[0].matrix[0]) < 1e-9 && hdoc.texts[0].matrix[1] === 1,
+      JSON.stringify(hdoc.texts[0].matrix));
+    // edit: replace content, keep the (rotated) matrix
+    var edit = VB.buildTextOp(ttf, { name: "VBTest" }, "D", 400, red, 0, 0);
+    var mBefore = hdoc.texts[0].matrix.slice();
+    VB.textEditApply(hdoc, { index: 0, font: edit.font, records: edit.records });
+    check("textEdit swaps records, keeps placement",
+      JSON.stringify(hdoc.texts[0].matrix) === JSON.stringify(mBefore) &&
+      hdoc.texts[0].records.length === 1 &&
+      hdoc.fonts[0].glyphs[hdoc.texts[0].records[0].glyphs[0].gi].code === 68);
+    VB.textDeleteApply(hdoc, 0);
+    check("textDelete removes the block", hdoc.texts.length === 0);
+
+    // replay determinism of the object ops
+    var objOps = [
+      { op: "new", width: 11000, height: 8000 },
+      VB.buildTextOp(ttf, { name: "VBTest" }, "AB", 400, red, 1000, 2000),
+      { op: "textTransform", index: 0, m: [0, 1, -1, 0, 3200, 200] },
+      VB.buildTextOp(ttf, { name: "VBTest" }, "D", 400, red, 4000, 4000),
+      { op: "textDelete", index: 1 },
+      { op: "undo" }
+    ];
+    var oa = await VB.replayJournal(objOps);
+    var ob = await VB.replayJournal(objOps);
+    check("text object ops replay deterministically",
+      JSON.stringify(oa.doc.texts) === JSON.stringify(ob.doc.texts) &&
+      oa.doc.texts.length === 2,
+      oa.doc.texts.length + " blocks");
+
+    // transform-tool session on a text block: rotate via the knob,
+    // commit ONE textTransform op, text stays text
+    var tdoc = new VB.VBDocument();
+    tdoc.width = 11000; tdoc.height = 8000;
+    VB.textApplyOp(tdoc, VB.buildTextOp(ttf, { name: "VBTest" }, "AB", 400, red, 3000, 3000));
+    var journalT = [], toolT;
+    var appT = {
+      doc: tdoc,
+      view: { zoom: 1 },
+      record: function (op) { journalT.push(op); },
+      history: new VB.History(),
+      docChanged: function () { toolT.discard(); },
+      requestRender: function () {},
+      setMsg: function () {},
+      setCursor: function () {}
+    };
+    toolT = VB.FreeTransformTool(appT);
+    toolT.adopt({ textIndex: 0 });
+    check("transform adopts a text block (lifted, frame up)",
+      !!toolT.box && !!toolT.float && toolT.float.textBlock &&
+      tdoc.texts.length === 0);
+    var fq = toolT.frameQuad();
+    check("text frame sits at the block's placement",
+      fq && Math.abs(fq[0].x - 3000) < 40 && fq[0].y < 3000,
+      JSON.stringify(fq && fq[0]));
+    // rotate ~90° from just outside a frame corner
+    var c0x = (toolT.box.x0 + toolT.box.x1) / 2 + 3000;
+    var c0y = (toolT.box.y0 + toolT.box.y1) / 2 + 3000;
+    toolT.onDown({ x: fq[0].x - 200, y: fq[0].y - 200 }, {});
+    check("text frame arms rotation near corners",
+      toolT.drag && toolT.drag.kind === "rotate",
+      toolT.drag && toolT.drag.kind);
+    // drag to the point rotated 90° about the frame center
+    var dx0 = (fq[0].x - 200) - c0x, dy0 = (fq[0].y - 200) - c0y;
+    toolT.onMove({ x: c0x - dy0, y: c0y + dx0 });
+    toolT.onUp({ x: c0x - dy0, y: c0y + dx0 });
+    toolT.onDown({ x: 10500, y: 7500 }, {}); // click away commits
+    toolT.onUp({ x: 10500, y: 7500 });
+    check("text transform session commits ONE textTransform op",
+      journalT.length === 1 && journalT[0].op === "textTransform" &&
+      journalT[0].index === 0, JSON.stringify(journalT.map(function (o) { return o.op; })));
+    check("text stays text after rotation",
+      tdoc.texts.length === 1 && tdoc.edges.length === 0 &&
+      Math.abs(Math.abs(tdoc.texts[0].matrix[1]) - 1) < 0.02,
+      JSON.stringify(tdoc.texts[0] && tdoc.texts[0].matrix));
   })();
 
   // ======================= SWF export round-trip ===========================

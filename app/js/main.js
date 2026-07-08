@@ -620,7 +620,10 @@
     if (textOpts) textOpts.classList.toggle("hidden", tool !== "text");
     if (tool === "transform" && tools.select.exportSelection) {
       var handoff = tools.select.exportSelection();
-      if (handoff.region || handoff.fills.length || handoff.edgeKeys.length) {
+      if (handoff.text != null) {
+        tools.transform.adopt({ textIndex: handoff.text });
+        if (tools.select.clearSelection) tools.select.clearSelection();
+      } else if (handoff.region || handoff.fills.length || handoff.edgeKeys.length) {
         tools.transform.adopt(handoff); // commits any older session first
         if (tools.select.clearSelection) tools.select.clearSelection();
       }
@@ -648,6 +651,13 @@
   app.transformDone = function () {
     if (app.tool !== "transform") return;
     selectTool(returnTool && tools[returnTool] ? returnTool : "select");
+  };
+
+  // Double-clicking a text block (from any selection tool) opens it in
+  // the text tool's edit session.
+  app.editText = function (index) {
+    selectTool("text");
+    tools.text.editBlock(index);
   };
 
   // ---- text tool options ------------------------------------------------------

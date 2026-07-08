@@ -576,10 +576,10 @@
     function pickTol() { return 6 * VB.TWIPS / app.view.zoom; }
     function selEmpty() {
       return self.sel.fills.length === 0 && self.sel.edgeKeys.length === 0 &&
-             !self.sel.region;
+             !self.sel.region && self.sel.text == null;
     }
     self.clearSelection = function () {
-      self.sel = { fills: [], edgeKeys: [], region: null };
+      self.sel = { fills: [], edgeKeys: [], region: null, text: null };
       self.float = null;
     };
     self.setRegionSelection = function (points) {
@@ -673,7 +673,8 @@
       return {
         fills: self.sel.fills.map(function (f) { return { x: f.x, y: f.y }; }),
         edgeKeys: self.sel.edgeKeys.slice(),
-        region: self.sel.region ? self.sel.region.slice() : null
+        region: self.sel.region ? self.sel.region.slice() : null,
+        text: self.sel.text != null ? self.sel.text : null
       };
     };
 
@@ -699,6 +700,7 @@
     }
 
     function cursorFor(pos) {
+      if (VB.textHit(app.doc, pos.x, pos.y) >= 0) return CURSORS.move;
       if (fillSelected(pos)) return CURSORS.move;
       if (pickAnchor(pos)) return CURSORS.vertex;
       if (pickEdge(pos) >= 0) return CURSORS.curve;
@@ -749,6 +751,24 @@
         self.drag = { kind: "moveRegion", from: pos, cur: pos, moved: false,
                       points: self.sel.region };
         return;
+      }
+      // text blocks float ABOVE the ink, so they get first pick; the
+      // press selects AND starts a move in one motion. The drag mutates
+      // the block matrix live — the pre-drag history snapshot is taken
+      // here and popped if the press turns out to be a plain click.
+      if (!shift) {
+        var ti = VB.textHit(app.doc, pos.x, pos.y);
+        if (ti >= 0) {
+          self.clearSelection();
+          self.sel.text = ti;
+          app.history.push(app.doc);
+          self.drag = { kind: "moveText", index: ti, from: pos, cur: pos,
+                        moved: false,
+                        base: app.doc.texts[ti].matrix.slice() };
+          app.setMsg("text selected — drag to move, double-click to edit, Delete to remove");
+          app.requestRender();
+          return;
+        }
       }
       var ei = pickEdge(pos);
       var overSelFill = fillSelected(pos);
@@ -804,6 +824,12 @@
     // Double-click: on a stroke, select ALL attached strokes; on a fill,
     // the face plus its outline strokes.
     self.onDblClick = function (pos) {
+      // double-click a text block: hand it to the text tool for editing
+      var ti = VB.textHit(app.doc, pos.x, pos.y);
+      if (ti >= 0) {
+        if (app.editText) app.editText(ti);
+        return;
+      }
       var ei = pickEdge(pos);
       if (ei >= 0 && app.doc.edges[ei].line > 0) {
         self.sel = { fills: [], edgeKeys: VB.connectedStrokeKeys(app.doc, ei) };
@@ -848,6 +874,14 @@
       self.drag.cur = pos;
       var d0 = self.drag.from || VB.geom.evalEdge(self.drag.edge, self.drag.t);
       if (Math.hypot(pos.x - d0.x, pos.y - d0.y) > 8) self.drag.moved = true;
+      if (self.drag.kind === "moveText" && self.drag.moved) {
+        // live: translation composed onto the block's own matrix
+        var d = self.drag;
+        var t = app.doc.texts[d.index];
+        t.matrix = d.base.slice();
+        t.matrix[4] = d.base[4] + Math.round(pos.x - d.from.x);
+        t.matrix[5] = d.base[5] + Math.round(pos.y - d.from.y);
+      }
       app.requestRender();
     };
 
@@ -884,6 +918,25 @@
           if (idx >= 0 && app.onEdgeSelected) app.onEdgeSelected(idx);
           app.requestRender();
         }
+        return;
+      }
+      if (drag.kind === "moveText") {
+        if (!drag.moved) {
+          app.history.undoStack.pop(); // plain click: nothing changed
+          app.requestRender();
+          return;
+        }
+        var tdx = Math.round(pos.x - drag.from.x);
+        var tdy = Math.round(pos.y - drag.from.y);
+        // reset then apply the recorded op so live == replay exactly
+        app.doc.texts[drag.index].matrix = drag.base.slice();
+        app.record({ op: "textTransform", index: drag.index,
+                     m: [1, 0, 0, 1, tdx, tdy] });
+        VB.textTransformApply(app.doc, drag.index, [1, 0, 0, 1, tdx, tdy]);
+        var keepText = drag.index;
+        app.docChanged();
+        self.sel.text = keepText; // stays selected, Flash-style
+        app.setMsg("text moved");
         return;
       }
       if (drag.kind === "marquee") {
@@ -1006,6 +1059,16 @@
         return true;
       }
       if (selEmpty()) return false;
+      if (self.sel.text != null) {
+        var tIdx = self.sel.text;
+        app.record({ op: "textDelete", index: tIdx });
+        app.history.push(app.doc);
+        VB.textDeleteApply(app.doc, tIdx);
+        self.clearSelection();
+        app.docChanged();
+        app.setMsg("text deleted");
+        return true;
+      }
       if (self.sel.region) {
         var pts = self.sel.region;
         app.record({ op: "regionDelete", points: pts });
@@ -1142,6 +1205,27 @@
           ctx.stroke();
         });
         ctx.restore();
+      }
+      if (self.sel.text != null && app.doc.texts[self.sel.text]) {
+        // Flash's text selection frame: a solid rect hugging the block,
+        // mapped through its matrix (rides rotation/scale)
+        var tb = app.doc.texts[self.sel.text];
+        var bb = VB.textBlockBounds(app.doc, tb);
+        if (bb) {
+          var tm = tb.matrix;
+          var corners = [[bb.x0, bb.y0], [bb.x1, bb.y0],
+                         [bb.x1, bb.y1], [bb.x0, bb.y1]];
+          ctx.strokeStyle = "rgba(0,160,255,0.9)";
+          ctx.lineWidth = 1.5 * hair;
+          ctx.beginPath();
+          corners.forEach(function (c2, i2) {
+            var px2 = tm[0] * c2[0] + tm[2] * c2[1] + tm[4];
+            var py2 = tm[1] * c2[0] + tm[3] * c2[1] + tm[5];
+            if (i2 === 0) ctx.moveTo(px2, py2); else ctx.lineTo(px2, py2);
+          });
+          ctx.closePath();
+          ctx.stroke();
+        }
       }
       if (self.sel.region) {
         ctx.strokeStyle = "rgba(0,160,255,0.9)";

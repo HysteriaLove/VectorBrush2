@@ -80,6 +80,101 @@
     return doc.texts.length - 1;
   }
 
+  function matMul(m2, m1) { // apply m1 first, then m2
+    return [
+      m2[0] * m1[0] + m2[2] * m1[1],
+      m2[1] * m1[0] + m2[3] * m1[1],
+      m2[0] * m1[2] + m2[2] * m1[3],
+      m2[1] * m1[2] + m2[3] * m1[3],
+      m2[0] * m1[4] + m2[2] * m1[5] + m2[4],
+      m2[1] * m1[4] + m2[3] * m1[5] + m2[5]
+    ];
+  }
+
+  /** Transform a block: compose a world-space matrix ONTO its own
+   *  (text stays text under move/rotate/scale, like Flash). */
+  function textTransformApply(doc, index, m) {
+    var t = doc.texts[index];
+    if (!t) return false;
+    t.matrix = matMul(m, t.matrix);
+    return true;
+  }
+
+  function textDeleteApply(doc, index) {
+    if (index < 0 || index >= doc.texts.length) return false;
+    doc.texts.splice(index, 1);
+    return true;
+  }
+
+  /** Replace a block's content (records + font subset), keeping its
+   *  placement matrix — the edit-session commit. Self-contained like
+   *  textCreate. */
+  function textEditApply(doc, op) {
+    var t = doc.texts[op.index];
+    if (!t) return false;
+    var merged = mergeFont(doc, op.font);
+    t.records = op.records.map(function (rec) {
+      return {
+        font: merged.fontIndex,
+        height: rec.height,
+        color: { r: rec.color.r, g: rec.color.g, b: rec.color.b, a: rec.color.a },
+        x: rec.x, y: rec.y,
+        glyphs: rec.glyphs.map(function (g) {
+          return { gi: merged.giMap[g.gi], adv: g.adv };
+        })
+      };
+    });
+    return true;
+  }
+
+  /** Block-LOCAL bounds (before the matrix) from the actual glyph
+   *  contours, with an advance/height fallback for empty glyphs. */
+  function textBlockBounds(doc, block) {
+    var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    block.records.forEach(function (rec) {
+      var font = doc.fonts[rec.font];
+      var scale = rec.height / 1024;
+      var penX = rec.x;
+      rec.glyphs.forEach(function (g) {
+        var glyph = font && font.glyphs[g.gi];
+        if (glyph && glyph.contours.length) {
+          glyph.contours.forEach(function (c) {
+            var px = penX + c.mx * scale, py = rec.y + c.my * scale;
+            x0 = Math.min(x0, px); x1 = Math.max(x1, px);
+            y0 = Math.min(y0, py); y1 = Math.max(y1, py);
+            c.segs.forEach(function (s) {
+              var sx = penX + s.x * scale, sy = rec.y + s.y * scale;
+              x0 = Math.min(x0, sx); x1 = Math.max(x1, sx);
+              y0 = Math.min(y0, sy); y1 = Math.max(y1, sy);
+            });
+          });
+        }
+        penX += g.adv;
+      });
+      // baseline box fallback so spaces/empty lines stay grabbable
+      x0 = Math.min(x0, rec.x); x1 = Math.max(x1, penX);
+      y0 = Math.min(y0, rec.y - rec.height); y1 = Math.max(y1, rec.y);
+    });
+    if (!isFinite(x0)) return null;
+    return { x0: x0, y0: y0, x1: x1, y1: y1 };
+  }
+
+  /** Topmost block whose LOCAL bounds contain the stage point, or -1. */
+  function textHit(doc, x, y) {
+    for (var i = doc.texts.length - 1; i >= 0; i--) {
+      var t = doc.texts[i];
+      var b = textBlockBounds(doc, t);
+      if (!b) continue;
+      var m = t.matrix;
+      var det = m[0] * m[3] - m[1] * m[2];
+      if (Math.abs(det) < 1e-9) continue;
+      var ix = (m[3] * (x - m[4]) - m[2] * (y - m[5])) / det;
+      var iy = (-m[1] * (x - m[4]) + m[0] * (y - m[5])) / det;
+      if (ix >= b.x0 && ix <= b.x1 && iy >= b.y0 && iy <= b.y1) return i;
+    }
+    return -1;
+  }
+
   // ---- authoring layout ------------------------------------------------------
 
   /** Lay a string out with a parsed TTF into a self-contained textCreate
@@ -226,10 +321,11 @@
     function rebuildPreview() {
       var s = self.session;
       if (!s) return;
-      var op = buildTextOp(s.ttf, s.meta, s.area.value, s.sizeTw, s.color, s.x, s.y);
+      var op = buildTextOp(s.ttf, s.meta, s.area.value, s.sizeTw, s.color, 0, 0);
       if (op) {
         var doc = { fonts: [], texts: [] };
         textApplyOp(doc, op);
+        doc.texts[0].matrix = s.matrix.slice();
         s.preview = { doc: doc, block: doc.texts[0] };
       } else {
         s.preview = null;
@@ -259,28 +355,80 @@
       }
       var entry = fonts.find(label);
       var style = (entry.style || "").toLowerCase();
-      self.session = {
-        x: pos.x, y: pos.y,
+      beginSession({
+        matrix: [1, 0, 0, 1, Math.round(pos.x), Math.round(pos.y)],
+        editIndex: null,
+        stash: null,
+        original: "",
         ttf: ttf,
         meta: { name: entry.family || label,
                 bold: style.indexOf("bold") >= 0,
                 italic: style.indexOf("italic") >= 0 || style.indexOf("oblique") >= 0 },
         sizeTw: sizeTw(),
-        color: { r: app.fillColor.r, g: app.fillColor.g, b: app.fillColor.b, a: app.fillColor.a },
-        area: makeArea(screen.x, screen.y),
-        preview: null,
-        caretOn: true
-      };
-      self.session.area.addEventListener("input", rebuildPreview);
-      self.session.area.focus();
+        color: { r: app.fillColor.r, g: app.fillColor.g, b: app.fillColor.b, a: app.fillColor.a }
+      }, screen, "");
+      app.setMsg("type; click away to place the text");
+    }
+
+    function beginSession(fields, screen, seed) {
+      var s = fields;
+      s.area = makeArea(screen.x, screen.y);
+      s.preview = null;
+      s.caretOn = true;
+      self.session = s;
+      s.area.value = seed;
+      s.area.addEventListener("input", rebuildPreview);
+      s.area.focus();
+      s.area.setSelectionRange(seed.length, seed.length);
       self.caretTimer = setInterval(function () {
         if (!self.session) return;
         self.session.caretOn = !self.session.caretOn;
         app.requestRender();
       }, 530);
-      app.setMsg("type; click away to place the text");
-      app.requestRender();
+      rebuildPreview();
     }
+
+    /** Re-open an existing block for editing (double-click). The block
+     *  is lifted out while the session runs (history snapshot taken, the
+     *  lift itself is un-journaled — the arrow-float convention). */
+    self.editBlock = async function (index) {
+      if (self.session) endSession(true);
+      var block = app.doc.texts[index];
+      if (!block || !block.records.length) return false;
+      var font = app.doc.fonts[block.records[0].font];
+      var entry = fonts.find(font.name);
+      var ttf = null;
+      if (entry) {
+        try { ttf = await fonts.ensureParsed(entry.label); } catch (e) { ttf = null; }
+      }
+      if (!ttf) {
+        app.setMsg("editing “" + font.name + "” needs its font — press Fonts… " +
+                   "or drop the .ttf, then double-click again");
+        return false;
+      }
+      // reconstruct the string from glyph codes, one record per line
+      var str = block.records.map(function (rec) {
+        return rec.glyphs.map(function (g) {
+          var glyph = font.glyphs[g.gi];
+          return glyph ? String.fromCharCode(glyph.code) : "";
+        }).join("");
+      }).join("\n");
+      app.history.push(app.doc); // pre-lift snapshot (one undo step)
+      app.doc.texts.splice(index, 1);
+      beginSession({
+        matrix: block.matrix.slice(),
+        editIndex: index,
+        stash: block,
+        original: str,
+        ttf: ttf,
+        meta: { name: font.name, bold: font.bold, italic: font.italic },
+        sizeTw: block.records[0].height,
+        color: block.records[0].color
+      }, { x: 0, y: 0 }, str);
+      app.requestRender();
+      app.setMsg("editing text; click away to apply");
+      return true;
+    };
 
     function endSession(commit) {
       var s = self.session;
@@ -289,8 +437,36 @@
       clearInterval(self.caretTimer);
       var str = s.area.value;
       s.area.remove();
+
+      if (s.editIndex !== null) {
+        // put the lifted block back so the doc matches what replay sees
+        app.doc.texts.splice(s.editIndex, 0, s.stash);
+        if (!commit || str === s.original) {
+          // nothing changed: drop the lift snapshot, record nothing
+          app.history.undoStack.pop();
+          app.requestRender();
+          return false;
+        }
+        if (!str.length) {
+          app.record({ op: "textDelete", index: s.editIndex });
+          textDeleteApply(app.doc, s.editIndex);
+          app.docChanged();
+          app.setMsg("text deleted");
+          return true;
+        }
+        var editOp = buildTextOp(s.ttf, s.meta, str, s.sizeTw, s.color, 0, 0);
+        app.record({ op: "textEdit", index: s.editIndex,
+                     font: editOp.font, records: editOp.records });
+        textEditApply(app.doc, { index: s.editIndex,
+                                 font: editOp.font, records: editOp.records });
+        app.docChanged();
+        app.setMsg("text updated");
+        return true;
+      }
+
       if (!commit || !str.length) { app.requestRender(); return false; }
-      var op = buildTextOp(s.ttf, s.meta, str, s.sizeTw, s.color, s.x, s.y);
+      var op = buildTextOp(s.ttf, s.meta, str, s.sizeTw, s.color,
+                           s.matrix[4], s.matrix[5]);
       if (!op) { app.requestRender(); return false; }
       app.record(op);
       app.history.push(app.doc);
@@ -307,6 +483,9 @@
         endSession(true); // click-away lands the block
         return;
       }
+      // double-click editing works from the text tool too
+      var hit = textHit(app.doc, pos.x, pos.y);
+      if (hit >= 0) { self.editBlock(hit); return; }
       // screen position for the hidden textarea (keeps IME popups near)
       var rect = ev && ev.target && ev.target.getBoundingClientRect
         ? ev.target.getBoundingClientRect() : { left: 0, top: 0 };
@@ -328,14 +507,15 @@
       if (s.preview) {
         VB.drawTextBlock(ctx, s.preview.doc, s.preview.block);
       }
-      // caret from the textarea's native caret position
+      // caret from the textarea's native caret position, computed in
+      // block-local space and mapped through the placement matrix
       var str = s.area.value;
       var caret = s.area.selectionStart;
       var before = str.slice(0, caret);
       var lineIdx = before.split("\n").length - 1;
       var linePrefix = before.slice(before.lastIndexOf("\n") + 1);
       var scale = s.sizeTw / s.ttf.unitsPerEm;
-      var cx = s.x;
+      var cx = 0;
       for (var i = 0; i < linePrefix.length; i++) {
         var gi = s.ttf.glyphIndex(linePrefix.charCodeAt(i));
         var adv = s.ttf.advance(gi);
@@ -345,14 +525,20 @@
         cx += Math.round(adv * scale);
       }
       var pitch = Math.round((s.ttf.winAscent + s.ttf.winDescent) * scale);
-      var baseline = s.y + Math.round(s.ttf.winAscent * scale) + lineIdx * pitch;
-      var ascTw = Math.round(s.ttf.winAscent * scale);
+      var baseline = Math.round(s.ttf.winAscent * scale) + lineIdx * pitch;
+      var top = baseline - Math.round(s.ttf.winAscent * scale);
+      var bottom = baseline + Math.round(s.ttf.winDescent * scale);
       if (s.caretOn) {
+        var m = s.matrix;
+        function mp(x, y) {
+          return { x: m[0] * x + m[2] * y + m[4], y: m[1] * x + m[3] * y + m[5] };
+        }
+        var a = mp(cx, top), b = mp(cx, bottom);
         ctx.strokeStyle = "#000";
         ctx.lineWidth = Math.max(1.5 * hair, 20);
         ctx.beginPath();
-        ctx.moveTo(cx, baseline - ascTw);
-        ctx.lineTo(cx, baseline + Math.round(s.ttf.winDescent * scale));
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
         ctx.stroke();
       }
     };
@@ -362,6 +548,11 @@
 
   window.VB = window.VB || {};
   VB.textApplyOp = textApplyOp;
+  VB.textEditApply = textEditApply;
+  VB.textTransformApply = textTransformApply;
+  VB.textDeleteApply = textDeleteApply;
+  VB.textBlockBounds = textBlockBounds;
+  VB.textHit = textHit;
   VB.buildTextOp = buildTextOp;
   VB.textFonts = fonts;
   VB.TextTool = TextTool;

@@ -187,6 +187,18 @@
           history.push(project);
           VB.textApplyOp(doc, op);
           break;
+        case "textEdit":
+          history.push(project);
+          VB.textEditApply(doc, op);
+          break;
+        case "textTransform":
+          history.push(project);
+          VB.textTransformApply(doc, op.index, op.m);
+          break;
+        case "textDelete":
+          history.push(project);
+          VB.textDeleteApply(doc, op.index);
+          break;
         case "undo":
           history.undo(project);
           sync();

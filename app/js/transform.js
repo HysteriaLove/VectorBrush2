@@ -28,12 +28,13 @@
   function FreeTransformTool(app) {
     var self = {
       app: app,
-      items: null,    // {fills:[{x,y}], edgeKeys:[]} or {region:[pts]}
+      items: null,    // {fills,edgeKeys} | {region:[pts]} | {textIndex}
       pristine: null, // untransformed edge copies of the selection
       gestures: [],   // accumulated per-gesture matrices (uncommitted)
+      base: [1, 0, 0, 1, 0, 0], // a text block's own matrix (else identity)
       ghosts: null,   // pristine mapped through the composed matrix
-      box: null,      // {x0,y0,x1,y1} of ghosts
-      float: null,    // lifted clip {doc, paths} once a gesture landed
+      box: null,      // {x0,y0,x1,y1} in pristine space
+      float: null,    // lifted clip {doc, paths} or {textBlock, textIndex}
       drag: null
     };
 
@@ -86,10 +87,19 @@
         m2[1] * m1[4] + m2[3] * m1[5] + m2[5]
       ];
     }
-    function composedM() {
+    // World matrices of the accumulated gestures only (what commits).
+    function gestureM() {
       var m = [1, 0, 0, 1, 0, 0];
       self.gestures.forEach(function (g) { m = matMul(g, m); });
       return m;
+    }
+    // Pristine-space -> world. For shape sessions base is identity; a
+    // TEXT session's pristine space is the block's local space, so its
+    // own placement matrix sits under the gestures — every piece of
+    // frame math (handles, knob, rotate zones, axis-aligned scaling)
+    // then works on text blocks unchanged.
+    function composedM() {
+      return matMul(gestureM(), self.base || [1, 0, 0, 1, 0, 0]);
     }
     function isIdentity(m) {
       return Math.abs(m[0] - 1) < 1e-6 && Math.abs(m[1]) < 1e-6 &&
@@ -135,6 +145,16 @@
      *  floating under the composed matrix. */
     function ensureLifted() {
       if (self.float || !self.items) return;
+      if (self.items.textIndex != null) {
+        // a text block lifts by leaving the texts array — no masking;
+        // its fonts stay in the doc so the preview can draw it
+        var idx = self.items.textIndex;
+        if (!app.doc.texts[idx]) return;
+        app.history.push(app.doc);
+        self.float = { textBlock: app.doc.texts[idx], textIndex: idx };
+        app.doc.texts.splice(idx, 1);
+        return;
+      }
       // the clip builders only READ the doc — build first, snapshot,
       // then remove the originals
       var clip = self.items.region
@@ -161,11 +181,21 @@
       if (!self.items || !self.gestures.length) {
         self.gestures = []; unlift(); return false;
       }
-      var m = composedM();
+      var m = gestureM();
       var fl = self.float;
       self.gestures = []; // before mutating: docChanged() discards us
       if (isIdentity(m) || !fl) { unlift(); return false; }
       self.float = null;
+      if (fl.textBlock) {
+        // put the block back untouched, then apply the recorded op —
+        // the live doc ends exactly where a replay ends
+        app.doc.texts.splice(fl.textIndex, 0, fl.textBlock);
+        app.record({ op: "textTransform", index: fl.textIndex, m: m });
+        VB.textTransformApply(app.doc, fl.textIndex, m);
+        app.docChanged();
+        app.setMsg("text transformed");
+        return true;
+      }
       if (self.items.region) {
         app.record({ op: "regionTransform", points: self.items.region, m: m });
       } else {
@@ -183,6 +213,7 @@
      *  float is NOT restored: the change replaced the doc wholesale. */
     self.discard = function () {
       self.items = null; self.pristine = null; self.gestures = [];
+      self.base = [1, 0, 0, 1, 0, 0];
       self.ghosts = null; self.box = null; self.float = null; self.drag = null;
     };
 
@@ -222,10 +253,25 @@
     self.adopt = function (items) {
       self.commitPending();
       self.gestures = [];
-      if (items && items.region) {
+      self.base = [1, 0, 0, 1, 0, 0];
+      if (items && items.textIndex != null && app.doc.texts[items.textIndex]) {
+        // a text block: pristine space is the block's LOCAL space and
+        // its placement matrix becomes the session base, so the frame
+        // appears already rotated/scaled the way the block is
+        var blk = app.doc.texts[items.textIndex];
+        self.items = { textIndex: items.textIndex };
+        self.base = blk.matrix.slice();
+        var bb = VB.textBlockBounds(app.doc, blk);
+        self.pristine = bb ? [
+          VB.edge(bb.x0, bb.y0, null, null, bb.x1, bb.y0, 0, 0, 0),
+          VB.edge(bb.x1, bb.y0, null, null, bb.x1, bb.y1, 0, 0, 0),
+          VB.edge(bb.x1, bb.y1, null, null, bb.x0, bb.y1, 0, 0, 0),
+          VB.edge(bb.x0, bb.y1, null, null, bb.x0, bb.y0, 0, 0, 0)
+        ] : null;
+      } else if (items && items.region) {
         self.items = { region: items.region };
         self.pristine = VB.regionPolyLoop(items.region);
-      } else if (items && (items.fills.length || items.edgeKeys.length)) {
+      } else if (items && items.fills && (items.fills.length || items.edgeKeys.length)) {
         self.items = items;
         self.pristine = ghostsOf(items);
       } else {
@@ -344,9 +390,15 @@
       // as ONE op FIRST, so the pick below sees the post-commit document
       // (the originals only now leave their old location)
       self.commitPending();
-      // (re)pick a selection: fill or attached-stroke chain under cursor.
-      // The press keeps going as a MOVE — pick up and drag in one motion,
-      // like the arrow tool.
+      // (re)pick a selection: text block, fill, or attached-stroke chain
+      // under the cursor. The press keeps going as a MOVE — pick up and
+      // drag in one motion, like the arrow tool.
+      var ti = VB.textHit(app.doc, pos.x, pos.y);
+      if (ti >= 0) {
+        self.adopt({ textIndex: ti });
+        if (self.box) self.drag = { kind: "move", from: pos, cur: pos, m: null };
+        return;
+      }
       var fillIdx = VB.geom.fillAt(app.doc, pos.x, pos.y);
       if (fillIdx > 0) {
         self.adopt({ fills: [{ x: pos.x, y: pos.y }], edgeKeys: [] });
@@ -548,7 +600,13 @@
         return { x: total[0] * x + total[2] * y + total[4],
                  y: total[1] * x + total[3] * y + total[5] };
       }
-      if (self.float) {
+      if (self.float && self.float.textBlock) {
+        // a floating TEXT block: draw it through the whole session
+        // matrix (its fonts still live in the doc)
+        VB.drawTextBlock(ctx, app.doc, {
+          matrix: total, records: self.float.textBlock.records
+        });
+      } else if (self.float) {
         // the lifted clip renders here with its REAL fills (it no longer
         // exists in the doc) — the untransformed clip mapped through the
         // whole session
