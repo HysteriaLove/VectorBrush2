@@ -244,8 +244,7 @@
   app.errors = [];
   function trapError(msg, stack) {
     app.errors.push({ atOp: app.journal.length, msg: String(msg),
-                      stack: String(stack || "").split("
-").slice(0, 8).join(" | ") });
+                      stack: String(stack || "").split("\n").slice(0, 8).join(" | ") });
     setMsg("✖ internal error: " + msg + " — use Save log to export a report");
   }
   window.addEventListener("error", function (ev) {
