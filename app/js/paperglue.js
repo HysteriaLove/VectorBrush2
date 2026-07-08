@@ -70,15 +70,20 @@
     for (var i = 0; i + 1 < pathPts.length; i++) {
       kids.push(capsule(pathPts[i], pathPts[i + 1], radius));
     }
+    var diag = { capsules: kids.length, rounds: [] };
+    VB._sweptDiag = diag;
     while (kids.length > 1) {
       var next = [];
+      var childCounts = [];
       for (var k = 0; k + 1 < kids.length; k += 2) {
         var u = kids[k].unite(kids[k + 1], { insert: false });
         kids[k].remove();
         kids[k + 1].remove();
         next.push(u);
+        childCounts.push(u.children ? u.children.length : 1);
       }
       if (kids.length & 1) next.push(kids[kids.length - 1]);
+      diag.rounds.push(childCounts.join(","));
       kids = next;
     }
     return kids[0];
@@ -114,14 +119,50 @@
   function sweptOutline(pathPts, radius, fitTol) {
     var region = sweptRegion(pathPts, radius);
     if (!region) return [];
+    // A capsule chain is connected by construction, and every pen point
+    // is covered by its capsules. If a pen point is NOT contained in the
+    // united region, a pairwise unite carved the joint away (a paper.js
+    // near-tangent artifact that renders as an unpainted/unerased notch
+    // ON the drag). Re-cover each carved joint with a slightly fat
+    // bridge capsule — fat overlap unites reliably, and the +2tw bulge
+    // (0.1 px) only exists on this rare repair path.
+    var s = ensureScope();
+    var repaired = 0;
+    for (var pi = 0; pi < pathPts.length && repaired < 6; pi++) {
+      var pp = pathPts[pi];
+      if (region.contains(new s.Point(pp.x, pp.y))) continue;
+      repaired++;
+      var a = pathPts[Math.max(0, pi - 1)];
+      var b = pathPts[Math.min(pathPts.length - 1, pi + 1)];
+      var bridge = capsule(a, b, radius + 2);
+      var u = region.unite(bridge, { insert: false });
+      bridge.remove();
+      region.remove();
+      region = u;
+    }
+    VB._sweptBridges = repaired;
+    // Drop ILLEGITIMATE holes. A true pocket lies wholly OUTSIDE the
+    // swept distance field (no capsule covers it), so a hole child whose
+    // interior point is within the radius is a paper.js boolean artifact
+    // (near-tangent overlap resolved as a hole ON the pen path — it
+    // renders as an unpainted/unerased notch). The test is exact, no
+    // tolerance band: pocket interiors are > radius by definition.
+    if (region.children) {
+      for (var ci = region.children.length - 1; ci >= 0; ci--) {
+        var ch = region.children[ci];
+        if (ch.clockwise) continue; // outer boundary, not a hole
+        var ip = ch.interiorPoint;
+        if (ip && VB.distToPath(pathPts, ip.x, ip.y) <= radius - 1) {
+          ch.remove();
+        }
+      }
+    }
     var step = Math.min(40, Math.max(8, radius * 0.3));
     var loops = itemLoops(region, step);
     region.remove();
-    var out = [];
-    loops.forEach(function (pts) {
-      pts.push({ x: pts[0].x, y: pts[0].y }); // close for the fitter
-      var geoms = VB.fitStroke(pts, fitTol || 12);
-      if (geoms.length === 0) return;
+
+    function geomsToLoop(geoms) {
+      if (geoms.length === 0) return [];
       geoms[geoms.length - 1].bx = geoms[0].ax; // exact closure
       geoms[geoms.length - 1].by = geoms[0].ay;
       var loop = [];
@@ -137,6 +178,50 @@
         var fe = VB.edge(g.ax, g.ay, cx, cy, g.bx, g.by, 0, 0, 0);
         if (!VB.edgeIsDegenerate(fe)) loop.push(fe);
       });
+      return loop;
+    }
+
+    // The true union contour never self-crosses, but smoothing a sharp
+    // wiggle can fold the FIT across itself — the crossing lens has
+    // winding 0 and leaves an unpainted (or unerased) notch ON the drag.
+    // Self-noding detects a crossing exactly (a split changes the piece
+    // count); the repair refits tighter, then falls back to the raw
+    // contour samples. The common, healthy path is untouched.
+    function selfCrosses(loop) {
+      if (loop.length < 3) return false;
+      var temp = new VB.VBDocument();
+      var pieces = VB.nodeEdges(temp, loop.map(function (e) {
+        return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, 0, 0, 0);
+      }));
+      return pieces.length !== loop.length;
+    }
+
+    var out = [];
+    var repairs = { loops: 0, refit: 0, raw: 0 };
+    VB._outlineRepairs = repairs;
+    loops.forEach(function (pts) {
+      repairs.loops++;
+      pts.push({ x: pts[0].x, y: pts[0].y }); // close for the fitter
+      var loop = geomsToLoop(VB.fitStroke(pts, fitTol || 12));
+      if (loop.length && selfCrosses(loop)) {
+        repairs.refit++;
+        var tight = geomsToLoop(VB.fitStroke(pts, 3));
+        if (tight.length && !selfCrosses(tight)) {
+          loop = tight;
+        } else {
+          repairs.raw++;
+          // raw contour samples, connected by straight-run quads
+          var raw = [];
+          for (var i = 0; i + 1 < pts.length; i++) {
+            raw.push({
+              ax: Math.round(pts[i].x), ay: Math.round(pts[i].y),
+              cx: null, cy: null,
+              bx: Math.round(pts[i + 1].x), by: Math.round(pts[i + 1].y)
+            });
+          }
+          loop = geomsToLoop(raw);
+        }
+      }
       if (loop.length) out.push(loop);
     });
     return out;
