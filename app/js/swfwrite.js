@@ -1,13 +1,17 @@
 /* swfwrite.js — minimal SWF exporter for validity-testing our geometry
  * in Flash MX 2004.
  *
- * Writes an uncompressed SWF v7 movie with exactly one frame:
+ * Writes an uncompressed SWF v7 movie with exactly one frame, mirroring
+ * the MX 2004 reference files' structure byte-for-byte:
  *   FWS header · stage RECT · 12 fps · 1 frame
  *   SetBackgroundColor
- *   DefineShape3 (the whole document as one shape: solid RGBA fills,
- *     round lines, and the SAME two-sided edge records our planar map
- *     stores — the record stream is shared with the .vbd encoder)
- *   PlaceObject2 (depth 1, identity placement)
+ *   DefineShape (v1/RGB like the references when colors are opaque;
+ *     v2/v3 only when style counts or alpha demand it) — the whole
+ *     document as one shape, with the SAME two-sided edge records our
+ *     planar map stores (the record stream is shared with the .vbd
+ *     encoder)
+ *   PlaceObject2 (depth 1, explicit identity matrix — the MX 2004
+ *     importer requires it even though the player does not)
  *   ShowFrame · End
  *
  * Deliberately not full-featured: no compression, no gradients/bitmaps
@@ -21,7 +25,9 @@
   var TAG_SHOW_FRAME = 1;
   var TAG_SET_BACKGROUND = 9;
   var TAG_PLACE_OBJECT2 = 26;
-  var TAG_DEFINE_SHAPE3 = 32;
+  var TAG_DEFINE_SHAPE = 2;   // v1: RGB styles — what MX 2004 itself writes
+  var TAG_DEFINE_SHAPE2 = 22; // v2: RGB + extended style counts
+  var TAG_DEFINE_SHAPE3 = 32; // v3: RGBA styles
   var TAG_END = 0;
 
   function writeRGB(w, c) { w.u8(c.r); w.u8(c.g); w.u8(c.b); }
@@ -76,7 +82,24 @@
    * Solid fills only (matching the editor's current feature set).
    */
   function encodeSWF(doc) {
-    // ---- DefineShape3 body -------------------------------------------------
+    // Pick the lowest shape version that can express the document —
+    // the MX 2004 reference files are all DefineShape v1 (RGB), and the
+    // MX 2004 IMPORTER rejects files the player happily runs, so match
+    // what the tool itself writes whenever possible.
+    var hasAlpha = false;
+    for (var ai = 0; ai < doc.fills.length; ai++) {
+      if (doc.fills[ai].color && doc.fills[ai].color.a !== 255) hasAlpha = true;
+    }
+    for (var aj = 0; aj < doc.lines.length; aj++) {
+      if (doc.lines[aj].color.a !== 255) hasAlpha = true;
+    }
+    var needExt = doc.fills.length >= 0xff || doc.lines.length >= 0xff;
+    var shapeTag = hasAlpha ? TAG_DEFINE_SHAPE3
+                 : needExt ? TAG_DEFINE_SHAPE2
+                 : TAG_DEFINE_SHAPE;
+    var rgba = hasAlpha;
+
+    // ---- DefineShape body ---------------------------------------------------
     var sw = new VB.BitWriter();
     sw.u16(1); // shape id
     sw.rect(shapeBounds(doc));
@@ -87,12 +110,12 @@
         throw new Error("SWF export supports solid fills only");
       }
       sw.u8(0x00); // solid
-      writeRGBA(sw, f.color);
+      if (rgba) writeRGBA(sw, f.color); else writeRGB(sw, f.color);
     }
     writeStyleCount(sw, doc.lines.length);
     for (var j = 0; j < doc.lines.length; j++) {
       sw.u16(doc.lines[j].width);
-      writeRGBA(sw, doc.lines[j].color);
+      if (rgba) writeRGBA(sw, doc.lines[j].color); else writeRGB(sw, doc.lines[j].color);
     }
     var numFillBits = VB.ubits(doc.fills.length);
     var numLineBits = VB.ubits(doc.lines.length);
@@ -102,11 +125,18 @@
     VB.writeShapeRecords(sw, VB.prepareShapeEdges(doc), numFillBits, numLineBits);
     var shapeBody = sw.toUint8Array();
 
-    // ---- PlaceObject2: character 1 at depth 1, identity placement ----------
+    // ---- PlaceObject2: character 1 at depth 1, identity matrix -------------
+    // Byte-for-byte what the MX 2004 reference files contain
+    // (06 01 00 01 00 00): the importer requires the explicit matrix
+    // even though the player defaults to identity without it.
     var pw = new VB.BitWriter();
-    pw.u8(0x02); // PlaceFlagHasCharacter
+    pw.u8(0x06); // PlaceFlagHasCharacter | PlaceFlagHasMatrix
     pw.u16(1);   // depth
     pw.u16(1);   // character id
+    pw.ub(1, 0); // no scale
+    pw.ub(1, 0); // no rotate
+    pw.ub(5, 0); // translate nbits = 0 (identity)
+    pw.align();
     var placeBody = pw.toUint8Array();
 
     var bw = new VB.BitWriter();
@@ -119,7 +149,7 @@
     b.u16(12 << 8); // frame rate 12.0 (8.8 fixed, fraction in the low byte)
     b.u16(1);       // frame count
     appendTag(b, TAG_SET_BACKGROUND, bgBody);
-    appendTag(b, TAG_DEFINE_SHAPE3, shapeBody);
+    appendTag(b, shapeTag, shapeBody);
     appendTag(b, TAG_PLACE_OBJECT2, placeBody);
     appendTag(b, TAG_SHOW_FRAME, []);
     appendTag(b, TAG_END, []);
