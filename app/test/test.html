@@ -929,12 +929,12 @@
     // 2. move a stroked rectangle's corner node
     var doc2 = new VB.VBDocument();
     doc2.width = 11000; doc2.height = 8000;
-    VB.shapeCommit(doc2, VB.rectLoop(2000, 2000, 6000, 5000), null, blk);
-    VB.arrowMoveNode(doc2, 2000, 2000, 1500, 1200);
+    VB.shapeCommit(doc2, VB.rectLoop(2100, 3700, 6300, 5400), null, blk);
+    VB.arrowMoveNode(doc2, 2100, 3700, 1500, 1200);
     var atNew = 0, atOld = 0;
     doc2.edges.forEach(function (e) {
       if ((e.ax === 1500 && e.ay === 1200) || (e.bx === 1500 && e.by === 1200)) atNew++;
-      if ((e.ax === 2000 && e.ay === 2000) || (e.bx === 2000 && e.by === 2000)) atOld++;
+      if ((e.ax === 2100 && e.ay === 3700) || (e.bx === 2100 && e.by === 3700)) atOld++;
     });
     check("node move: incident records follow", atNew === 2 && atOld === 0,
       atNew + " at new, " + atOld + " at old");

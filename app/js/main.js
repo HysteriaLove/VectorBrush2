@@ -30,6 +30,7 @@
     record: function (op) { app.journal.push(op); },
     requestRender: requestRender,
     setMsg: setMsg,
+    setCursor: function (c) { canvas.style.cursor = c || ""; },
     docChanged: docChanged
   };
 
@@ -481,6 +482,7 @@
   // ---- tool palette -----------------------------------------------------------------
 
   function selectTool(tool) {
+    canvas.style.cursor = "";
     if (activePointerTool && activePointerTool.cancel) activePointerTool.cancel();
     activePointerTool = null;
     app.tool = tool;

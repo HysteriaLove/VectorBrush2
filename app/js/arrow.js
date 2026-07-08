@@ -70,11 +70,11 @@
     if (moved.length === 0) return false;
     var updated = [];
     moved.forEach(function (e) {
-      var ax = (e.ax === x && e.ay === y) ? nx : e.ax;
-      var ay = (e.ax === x && e.ay === y) ? ny : e.ay;
-      var bx = (e.bx === x && e.by === y) ? nx : e.bx;
-      var by = (e.by === x && e.by === y) ? ny : e.by;
-      var ne = VB.edge(ax, ay, e.cx, e.cy, bx, by, e.fill0, e.fill1, e.line);
+      var aHit = e.ax === x && e.ay === y;
+      var bHit = e.bx === x && e.by === y;
+      var ne = VB.edge(aHit ? nx : e.ax, aHit ? ny : e.ay, e.cx, e.cy,
+                       bHit ? nx : e.bx, bHit ? ny : e.by,
+                       e.fill0, e.fill1, e.line);
       if (!VB.edgeIsDegenerate(ne)) updated.push(ne);
     });
     var pieces = VB.nodeEdges(doc, updated);
@@ -182,6 +182,30 @@
 
   // ---- interactive tool ---------------------------------------------------------
 
+  // Flash's arrow cursor states: the badge at the pointer's lower right
+  // tells what a click/drag will do — dashed marquee over empty space,
+  // 4-way move over a fill, a right-angle corner over a vertex, an arc
+  // over an edge.
+  var ARROW_PATH = '<path d="M4 2 L4 17 L8.2 13.4 L10.8 19.4 L13.4 18.2 L10.8 12.4 L16 12.4 Z"' +
+    ' fill="white" stroke="black" stroke-width="1.2"/>';
+  function cursorURI(badge) {
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="26" height="26">' +
+      ARROW_PATH + badge + '</svg>';
+    return 'url("data:image/svg+xml,' + encodeURIComponent(svg) + '") 4 2, default';
+  }
+  var CURSORS = {
+    marquee: cursorURI('<rect x="16" y="17" width="8" height="7" fill="white"' +
+      ' stroke="black" stroke-width="1" stroke-dasharray="2 1.4"/>'),
+    move: cursorURI('<g stroke="black" stroke-width="1.6" fill="black">' +
+      '<path d="M20 15v10M15 20h10"/>' +
+      '<path d="M20 13.6 l-2.4 3 h4.8 Z M20 26.4 l-2.4 -3 h4.8 Z' +
+      ' M13.6 20 l3 -2.4 v4.8 Z M26.4 20 l-3 -2.4 v4.8 Z" stroke="none"/></g>'),
+    vertex: cursorURI('<path d="M16 24 L16 17.5 L23 17.5" fill="none"' +
+      ' stroke="black" stroke-width="1.8"/>'),
+    curve: cursorURI('<path d="M16 24 Q19 15 24 19" fill="none"' +
+      ' stroke="black" stroke-width="1.8"/>')
+  };
+
   function ArrowTool(app) {
     var self = {
       app: app,
@@ -191,6 +215,17 @@
     };
 
     function pickTol() { return 6 * VB.TWIPS / app.view.zoom; }
+
+    function cursorFor(pos) {
+      if (pickAnchor(pos)) return CURSORS.vertex;
+      if (pickEdge(pos) >= 0) return CURSORS.curve;
+      if (VB.geom.fillAt(app.doc, pos.x, pos.y) > 0) return CURSORS.move;
+      return CURSORS.marquee;
+    }
+
+    self.onHover = function (pos) {
+      if (app.setCursor) app.setCursor(cursorFor(pos));
+    };
 
     function pickAnchor(pos) {
       var tol = pickTol();
