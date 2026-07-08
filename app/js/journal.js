@@ -99,6 +99,26 @@
           VB.shapeCommit(doc, VB.rectLoop(op.x0, op.y0, op.x1, op.y1),
             op.fill, op.line);
           break;
+        case "reshape":
+          history.push(doc);
+          VB.arrowReshape(doc, op.key, op.t, op.x, op.y);
+          break;
+        case "moveNode":
+          history.push(doc);
+          VB.arrowMoveNode(doc, op.x, op.y, op.nx, op.ny);
+          break;
+        case "moveFill":
+          history.push(doc);
+          VB.arrowMoveFill(doc, op.x, op.y, op.dx, op.dy);
+          break;
+        case "deleteFill":
+          history.push(doc);
+          VB.arrowDeleteFill(doc, op.x, op.y);
+          break;
+        case "deleteEdge":
+          history.push(doc);
+          VB.arrowDeleteEdge(doc, op.key);
+          break;
         case "undo":
           history.undo(doc);
           break;

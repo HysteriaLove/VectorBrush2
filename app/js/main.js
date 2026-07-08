@@ -34,6 +34,7 @@
   };
 
   var tools = {
+    select: VB.ArrowTool(app),
     pencil: new VB.PencilTool(app),
     brush: new VB.BrushTool(app),
     bucket: new VB.BucketTool(app),
@@ -392,6 +393,10 @@
     if ((ev.ctrlKey && ev.key.toLowerCase() === "y") ||
         (ev.ctrlKey && ev.shiftKey && ev.key.toLowerCase() === "z")) { ev.preventDefault(); doRedo(); return; }
     if (ev.ctrlKey && ev.key.toLowerCase() === "o") { ev.preventDefault(); fileInput.click(); return; }
+    if ((ev.key === "Delete" || ev.key === "Backspace") &&
+        app.tool === "select" && tools.select.onDeleteKey) {
+      if (tools.select.onDeleteKey()) { ev.preventDefault(); return; }
+    }
     if (ev.key === "Escape") {
       if (activePointerTool && activePointerTool.cancel) {
         activePointerTool.cancel();

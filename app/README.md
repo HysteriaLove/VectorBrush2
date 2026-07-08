@@ -10,6 +10,12 @@ No build step, no dependencies: open `index.html` in a browser
 (Chromium-based required for zlib support via `DecompressionStream`).
 Drop a `.swf` or `.vbd` onto the canvas, or use **Open…**.
 
+- **Arrow** (`V`): Flash's selection tool. Drag the middle of an edge to
+  reshape it (endpoints pinned, straight records become curves through
+  the drag point — semantics extracted from the Arrow001 reference
+  series); drag an anchor to move the shared node; click a fill to
+  select that face, drag it to lift-and-drop with paint-over, press
+  Delete to erase it; click a stroke segment and Delete to remove it
 - Mouse wheel: zoom around the cursor
 - Middle-drag or Space+drag: pan
 - `V`/`P`/`B`/`E`/`N`/`O`/`R`/`K`: tool shortcuts
@@ -88,6 +94,7 @@ no epsilons.
 | `js/debug.js` | Vector debug overlay + hover edge inspector |
 | `js/pencil.js` | Pencil tool: capture → fit → merge, with raw-trail preview |
 | `js/shapes.js` | Line/Oval/Rectangle tools: shape loops through the boolean-mask pipeline (filled) or planar merge (stroke-only) |
+| `js/arrow.js` | Arrow tool: edge reshape / node move / face lift-move-delete, all journaled |
 | `js/main.js` | GUI shell: viewport, toolbar, tool routing, file I/O |
 
 The document model is deliberately **not** an object/layer scene graph: like
@@ -124,7 +131,7 @@ The `<title>`/final line reads `VBTEST DONE pass=N fail=M`.
 verification (bounded faces must equal E − V + C), wavy-grid bucket
 containment, and the casual-drawing gap scenarios.
 
-Current status: 337 checks, 0 failures — the SWF/VBD pipeline suite plus
+Current status: 350 checks, 0 failures — the SWF/VBD pipeline suite plus
 the journal-replay regression (pencil square → bucket fill → erase across
 it, the case that exposed the concave-join bowtie bug) and
 eraser unit tests (band erase splitting a fill, dab holes with

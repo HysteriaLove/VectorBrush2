@@ -44,6 +44,7 @@
 <script src="../js/debug.js"></script>
 <script src="../js/pencil.js"></script>
 <script src="../js/shapes.js"></script>
+<script src="../js/arrow.js"></script>
 <script src="fixtures.js"></script>
 <script src="userlog.js"></script>
 <script src="userlog2.js"></script>
@@ -893,6 +894,82 @@
       res.doc.edges.length > 10 && VB.integrityReport(res.doc).length === 0,
       res.doc.edges.length + " edges; " + VB.integrityReport(res.doc)[0]);
     check("replayed oval still filled", VB.geom.fillAt(res.doc, 4000, 3000) === 1);
+  })();
+
+  // ======================= unit tests: arrow tool ===========================
+  // Semantics from the Arrow001 reference diffs: reshape pins endpoints
+  // and solves the quad control through the drag point (Arrow002->003 is
+  // L->Q with identical endpoints); node moves carry incident records;
+  // fills lift-and-drop with paint-over; deleting a fill stamps its own
+  // sides empty.
+  log("arrow tool:");
+  await (async function () {
+    var red = { r: 204, g: 102, b: 102, a: 255 };
+    var blk = { width: 40, color: { r: 0, g: 0, b: 0, a: 255 } };
+
+    // 1. reshape a straight stroke: L -> Q, endpoints pinned, curve
+    //    through the drag point
+    var doc = new VB.VBDocument();
+    doc.width = 11000; doc.height = 8000;
+    VB.lineCommit(doc, { x: 2000, y: 2000 }, { x: 8000, y: 2000 }, blk, 0);
+    check("reshape target is one straight record",
+      doc.edges.length === 1 && doc.edges[0].cx === null);
+    var key = VB.arrowEdgeKey(doc.edges[0]);
+    VB.arrowReshape(doc, key, 0.5, 5000, 3000);
+    check("reshape L->Q", doc.edges.length === 1 && doc.edges[0].cx !== null);
+    check("reshape endpoints pinned",
+      doc.edges[0].ax === 2000 && doc.edges[0].ay === 2000 &&
+      doc.edges[0].bx === 8000 && doc.edges[0].by === 2000);
+    var mid = VB.geom.evalEdge(doc.edges[0], 0.5);
+    check("reshaped curve passes through the drag point",
+      Math.hypot(mid.x - 5000, mid.y - 3000) < 3,
+      "(" + Math.round(mid.x) + "," + Math.round(mid.y) + ")");
+    check("reshape keeps the stroke", doc.edges[0].line === 1);
+
+    // 2. move a stroked rectangle's corner node
+    var doc2 = new VB.VBDocument();
+    doc2.width = 11000; doc2.height = 8000;
+    VB.shapeCommit(doc2, VB.rectLoop(2000, 2000, 6000, 5000), null, blk);
+    VB.arrowMoveNode(doc2, 2000, 2000, 1500, 1200);
+    var atNew = 0, atOld = 0;
+    doc2.edges.forEach(function (e) {
+      if ((e.ax === 1500 && e.ay === 1200) || (e.bx === 1500 && e.by === 1200)) atNew++;
+      if ((e.ax === 2000 && e.ay === 2000) || (e.bx === 2000 && e.by === 2000)) atOld++;
+    });
+    check("node move: incident records follow", atNew === 2 && atOld === 0,
+      atNew + " at new, " + atOld + " at old");
+    check("node move consistent", VB.integrityReport(doc2).length === 0,
+      VB.integrityReport(doc2)[0]);
+
+    // 3. fill face: lift-and-drop, then delete
+    var doc3 = new VB.VBDocument();
+    doc3.width = 11000; doc3.height = 8000;
+    VB.shapeCommit(doc3, VB.ellipseLoop(4000, 3000, 1500, 1200), red, null);
+    VB.arrowMoveFill(doc3, 4000, 3000, 3000, 1500);
+    check("moved fill: source empty", VB.geom.fillAt(doc3, 4000, 3000) === 0);
+    check("moved fill: destination filled", VB.geom.fillAt(doc3, 7000, 4500) === 1);
+    check("moved fill consistent", VB.integrityReport(doc3).length === 0,
+      VB.integrityReport(doc3)[0]);
+    VB.arrowDeleteFill(doc3, 7000, 4500);
+    check("deleted fill: empty", VB.geom.fillAt(doc3, 7000, 4500) === 0);
+    check("deleted fill: lineless boundary dissolved", doc3.edges.length === 0,
+      doc3.edges.length + " edges left");
+
+    // 4. journal replay of arrow ops with undo/redo
+    var ops = [
+      { op: "new", width: 11000, height: 8000 },
+      { op: "oval", x0: 2500, y0: 1800, x1: 5500, y1: 4200, fill: red, line: null },
+      { op: "moveFill", x: 4000, y: 3000, dx: 2500, dy: 1000 },
+      { op: "undo" },
+      { op: "redo" },
+      { op: "deleteFill", x: 6500, y: 4000 }
+    ];
+    var res = await VB.replayJournal(ops);
+    check("arrow ops replay deterministically",
+      VB.integrityReport(res.doc).length === 0 &&
+      VB.geom.fillAt(res.doc, 6500, 4000) === 0 &&
+      VB.geom.fillAt(res.doc, 4000, 3000) === 0,
+      VB.integrityReport(res.doc)[0]);
   })();
 
   // ======================= SWF export round-trip ===========================
