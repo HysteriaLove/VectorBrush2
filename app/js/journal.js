@@ -199,6 +199,10 @@
           history.push(project);
           VB.textDeleteApply(doc, op.index);
           break;
+        case "textBreak":
+          history.push(project);
+          VB.textBreakApply(doc, op.index);
+          break;
         case "undo":
           history.undo(project);
           sync();

@@ -426,6 +426,43 @@
     /** A pending, uncommitted session exists (anything adopted). */
     self.hasSession = function () { return !!self.items; };
 
+    /** Pristine->world matrix of the whole session (for the toolbar's
+     *  rotation readout). */
+    self.sessionMatrix = function () { return composedM(); };
+
+    /** Set the session's ABSOLUTE rotation (degrees) about the frame
+     *  center — the toolbar field; 0 snaps upright. */
+    self.rotateTo = function (deg) {
+      if (!self.items || !self.box) return false;
+      ensureLifted();
+      var m = composedM();
+      var cur = Math.atan2(m[1], m[0]);
+      var a = deg * Math.PI / 180 - cur;
+      if (Math.abs(a) < 1e-6) return true;
+      var b = self.box;
+      var c = applyPt(m, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2);
+      var cos = Math.cos(a), sin = Math.sin(a);
+      self.gestures.push([cos, sin, -sin, cos,
+        c.x - cos * c.x + sin * c.y, c.y - sin * c.x - cos * c.y]);
+      refreshGhosts();
+      app.requestRender();
+      app.setMsg("rotation " + deg + "° — click away to apply");
+      return true;
+    };
+
+    /** Double-click while transforming a TEXT block: land the session
+     *  and reopen the block in the text editor. */
+    self.onDblClick = function (pos) {
+      var wasText = self.items && self.items.textIndex != null;
+      var idx = wasText ? self.items.textIndex : -1;
+      self.commitPending();
+      if (!wasText) {
+        idx = VB.textHit(app.doc, pos.x, pos.y);
+        if (idx < 0) return;
+      }
+      if (app.editText) app.editText(idx);
+    };
+
     /** Would a press at pos grab the frame (handle/knob/move/rotate)? */
     self.hitsFrame = function (pos) {
       if (!self.box) return false;
@@ -695,10 +732,28 @@
       ctx.stroke();
       var hs = handles();
       var r = 4 * hair;
-      ctx.fillStyle = "#000";
-      hs.forEach(function (h) {
+      var isText = self.items && self.items.textIndex != null;
+      hs.forEach(function (h, hi) {
         var p = mp(h.x, h.y);
-        ctx.fillRect(p.x - r, p.y - r, 2 * r, 2 * r);
+        if (isText && hi % 2 === 1) {
+          // text sessions: mid-edge handles render as FLAT TABS along
+          // the edge — the "change the box dimensions" grips
+          var ca = mp(corners[(hi - 1) / 2][0], corners[(hi - 1) / 2][1]);
+          var cb = mp(corners[((hi - 1) / 2 + 1) % 4][0],
+                      corners[((hi - 1) / 2 + 1) % 4][1]);
+          var dx = cb.x - ca.x, dy = cb.y - ca.y;
+          var len = Math.hypot(dx, dy) || 1;
+          var ux = dx / len * 8 * hair, uy = dy / len * 8 * hair;
+          ctx.strokeStyle = "#000";
+          ctx.lineWidth = 4 * hair;
+          ctx.beginPath();
+          ctx.moveTo(p.x - ux, p.y - uy);
+          ctx.lineTo(p.x + ux, p.y + uy);
+          ctx.stroke();
+        } else {
+          ctx.fillStyle = "#000";
+          ctx.fillRect(p.x - r, p.y - r, 2 * r, 2 * r);
+        }
       });
       // rotation knob on a stem off the mid-top edge
       var knob = rotKnob(total);

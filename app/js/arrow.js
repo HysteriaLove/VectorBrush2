@@ -574,6 +574,68 @@
     };
 
     function pickTol() { return 6 * VB.TWIPS / app.view.zoom; }
+
+    // ---- text block handles (arrow-selection resize) --------------------
+    // 8 handles in BLOCK-LOCAL space: corners scale both axes, the
+    // mid-edge FLAT TABS stretch one dimension. ax/ay mark the axes a
+    // handle drives; the anchor is the opposite handle, pinned.
+    function textHandles(block) {
+      var b = VB.textBlockBounds(app.doc, block);
+      if (!b) return null;
+      var mx = (b.x0 + b.x1) / 2, my = (b.y0 + b.y1) / 2;
+      return [
+        { x: b.x0, y: b.y0, ax: 1, ay: 1 }, { x: mx, y: b.y0, ax: 0, ay: 1 },
+        { x: b.x1, y: b.y0, ax: 1, ay: 1 }, { x: b.x1, y: my, ax: 1, ay: 0 },
+        { x: b.x1, y: b.y1, ax: 1, ay: 1 }, { x: mx, y: b.y1, ax: 0, ay: 1 },
+        { x: b.x0, y: b.y1, ax: 1, ay: 1 }, { x: b.x0, y: my, ax: 1, ay: 0 }
+      ];
+    }
+
+    function invertM(m) {
+      var det = m[0] * m[3] - m[1] * m[2];
+      if (Math.abs(det) < 1e-9) return null;
+      var a = m[3] / det, b = -m[1] / det, c = -m[2] / det, d = m[0] / det;
+      return [a, b, c, d, -(a * m[4] + c * m[5]), -(b * m[4] + d * m[5])];
+    }
+
+    function mulM(m2, m1) { // apply m1 first, then m2
+      return [
+        m2[0] * m1[0] + m2[2] * m1[1], m2[1] * m1[0] + m2[3] * m1[1],
+        m2[0] * m1[2] + m2[2] * m1[3], m2[1] * m1[2] + m2[3] * m1[3],
+        m2[0] * m1[4] + m2[2] * m1[5] + m2[4],
+        m2[1] * m1[4] + m2[3] * m1[5] + m2[5]
+      ];
+    }
+
+    // Block-local scale matrix for a handle drag (anchor pinned).
+    function textScaleGesture(drag, pos) {
+      var inv = invertM(drag.base);
+      if (!inv) return null;
+      var lx = inv[0] * pos.x + inv[2] * pos.y + inv[4];
+      var ly = inv[1] * pos.x + inv[3] * pos.y + inv[5];
+      var ax = drag.anchor.x, ay = drag.anchor.y;
+      var sx = drag.h.ax ? (lx - ax) / ((drag.h.x - ax) || 1) : 1;
+      var sy = drag.h.ay ? (ly - ay) / ((drag.h.y - ay) || 1) : 1;
+      if (!isFinite(sx) || Math.abs(sx) < 0.02) sx = 0.02;
+      if (!isFinite(sy) || Math.abs(sy) < 0.02) sy = 0.02;
+      return [sx, 0, 0, sy, ax - sx * ax, ay - sy * ay];
+    }
+
+    function pickTextHandle(index, pos) {
+      var block = app.doc.texts[index];
+      var hs = textHandles(block);
+      if (!hs) return null;
+      var m = block.matrix;
+      var tol = 8 * VB.TWIPS / app.view.zoom;
+      for (var i = 0; i < hs.length; i++) {
+        var px = m[0] * hs[i].x + m[2] * hs[i].y + m[4];
+        var py = m[1] * hs[i].x + m[3] * hs[i].y + m[5];
+        if (Math.abs(pos.x - px) <= tol && Math.abs(pos.y - py) <= tol) {
+          return { h: hs[i], anchor: hs[(i + 4) % 8] };
+        }
+      }
+      return null;
+    }
     function selEmpty() {
       return self.sel.fills.length === 0 && self.sel.edgeKeys.length === 0 &&
              !self.sel.region && self.sel.text == null;
@@ -752,6 +814,18 @@
                       points: self.sel.region };
         return;
       }
+      // resize handles of an already-selected text block get first grab
+      if (!shift && self.sel.text != null && app.doc.texts[self.sel.text]) {
+        var th = pickTextHandle(self.sel.text, pos);
+        if (th) {
+          app.history.push(app.doc);
+          self.drag = { kind: "scaleText", index: self.sel.text,
+                        h: th.h, anchor: th.anchor, moved: false,
+                        from: pos, cur: pos,
+                        base: app.doc.texts[self.sel.text].matrix.slice() };
+          return;
+        }
+      }
       // text blocks float ABOVE the ink, so they get first pick; the
       // press selects AND starts a move in one motion. The drag mutates
       // the block matrix live — the pre-drag history snapshot is taken
@@ -882,6 +956,21 @@
         t.matrix[4] = d.base[4] + Math.round(pos.x - d.from.x);
         t.matrix[5] = d.base[5] + Math.round(pos.y - d.from.y);
       }
+      if (self.drag.kind === "scaleText" && self.drag.moved) {
+        // pull the pointer back to block-local space, scale about the
+        // opposite handle, live-update matrix = base ∘ S
+        var d2 = self.drag;
+        var S = textScaleGesture(d2, pos);
+        if (S) {
+          var mm = d2.base;
+          app.doc.texts[d2.index].matrix = [
+            mm[0] * S[0] + mm[2] * S[1], mm[1] * S[0] + mm[3] * S[1],
+            mm[0] * S[2] + mm[2] * S[3], mm[1] * S[2] + mm[3] * S[3],
+            mm[0] * S[4] + mm[2] * S[5] + mm[4],
+            mm[1] * S[4] + mm[3] * S[5] + mm[5]
+          ];
+        }
+      }
       app.requestRender();
     };
 
@@ -918,6 +1007,28 @@
           if (idx >= 0 && app.onEdgeSelected) app.onEdgeSelected(idx);
           app.requestRender();
         }
+        return;
+      }
+      if (drag.kind === "scaleText") {
+        if (!drag.moved) {
+          app.history.undoStack.pop();
+          app.requestRender();
+          return;
+        }
+        var S2 = textScaleGesture(drag, pos);
+        app.doc.texts[drag.index].matrix = drag.base.slice();
+        if (S2) {
+          // record the WORLD delta (base ∘ S ∘ base⁻¹) so replay's
+          // compose-on-the-left lands on exactly base ∘ S
+          var bi = invertM(drag.base);
+          var world = mulM(mulM(drag.base, S2), bi);
+          app.record({ op: "textTransform", index: drag.index, m: world });
+          VB.textTransformApply(app.doc, drag.index, world);
+        }
+        var keepIdx = drag.index;
+        app.docChanged();
+        self.sel.text = keepIdx;
+        app.setMsg("text resized");
         return;
       }
       if (drag.kind === "moveText") {
@@ -1208,23 +1319,52 @@
       }
       if (self.sel.text != null && app.doc.texts[self.sel.text]) {
         // Flash's text selection frame: a solid rect hugging the block,
-        // mapped through its matrix (rides rotation/scale)
+        // mapped through its matrix (rides rotation/scale), with resize
+        // handles — squares on the corners, FLAT TABS mid-edge for the
+        // box dimensions
         var tb = app.doc.texts[self.sel.text];
         var bb = VB.textBlockBounds(app.doc, tb);
         if (bb) {
           var tm = tb.matrix;
+          function tmap(x, y) {
+            return { x: tm[0] * x + tm[2] * y + tm[4],
+                     y: tm[1] * x + tm[3] * y + tm[5] };
+          }
           var corners = [[bb.x0, bb.y0], [bb.x1, bb.y0],
                          [bb.x1, bb.y1], [bb.x0, bb.y1]];
           ctx.strokeStyle = "rgba(0,160,255,0.9)";
           ctx.lineWidth = 1.5 * hair;
           ctx.beginPath();
           corners.forEach(function (c2, i2) {
-            var px2 = tm[0] * c2[0] + tm[2] * c2[1] + tm[4];
-            var py2 = tm[1] * c2[0] + tm[3] * c2[1] + tm[5];
-            if (i2 === 0) ctx.moveTo(px2, py2); else ctx.lineTo(px2, py2);
+            var p2 = tmap(c2[0], c2[1]);
+            if (i2 === 0) ctx.moveTo(p2.x, p2.y); else ctx.lineTo(p2.x, p2.y);
           });
           ctx.closePath();
           ctx.stroke();
+          var hs2 = textHandles(tb);
+          var r2 = 4 * hair;
+          hs2.forEach(function (h, i2) {
+            var p2 = tmap(h.x, h.y);
+            if (i2 % 2 === 0) { // corner: square
+              ctx.fillStyle = "#fff";
+              ctx.strokeStyle = "rgba(0,160,255,0.95)";
+              ctx.lineWidth = hair;
+              ctx.fillRect(p2.x - r2, p2.y - r2, 2 * r2, 2 * r2);
+              ctx.strokeRect(p2.x - r2, p2.y - r2, 2 * r2, 2 * r2);
+            } else {            // mid-edge: flat tab along the edge
+              var ca = tmap.apply(null, corners[(i2 - 1) / 2]);
+              var cb2 = tmap.apply(null, corners[((i2 - 1) / 2 + 1) % 4]);
+              var dx2 = cb2.x - ca.x, dy2 = cb2.y - ca.y;
+              var len2 = Math.hypot(dx2, dy2) || 1;
+              var ux = dx2 / len2 * 8 * hair, uy = dy2 / len2 * 8 * hair;
+              ctx.strokeStyle = "rgba(0,160,255,0.95)";
+              ctx.lineWidth = 4 * hair;
+              ctx.beginPath();
+              ctx.moveTo(p2.x - ux, p2.y - uy);
+              ctx.lineTo(p2.x + ux, p2.y + uy);
+              ctx.stroke();
+            }
+          });
         }
       }
       if (self.sel.region) {

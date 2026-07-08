@@ -144,6 +144,15 @@
   #debugpanel.hidden { display: none; }
   #text-opts { display: inline-flex; align-items: center; gap: 6px; }
   #text-opts.hidden { display: none; }
+  #ctxmenu {
+    position: absolute; z-index: 20; min-width: 180px;
+    background: var(--panel); border: 1px solid var(--panel-edge);
+    border-radius: 4px; box-shadow: 0 6px 18px rgba(0,0,0,0.4);
+    font-size: 12px; color: var(--text); padding: 4px 0;
+  }
+  #ctxmenu.hidden { display: none; }
+  .ctxitem { padding: 6px 14px; cursor: pointer; }
+  .ctxitem:hover { background: #3d5a80; }
   #debugpanel h4 {
     font: 600 11px/1.4 "Segoe UI", sans-serif;
     color: var(--accent);
@@ -236,6 +245,9 @@
       </label>
       <button id="btn-fonts" title="List the system's fonts (or drop a .ttf on the canvas)">Fonts…</button>
     </span>
+    <label class="ctl" title="Selection rotation (degrees) — type 0 to snap upright">
+      ⟳<input type="number" id="sel-rotation" value="0" step="1" style="width:56px" disabled>°
+    </label>
     <div class="sep"></div>
     <button id="btn-zoom-out" title="Zoom out">−</button>
     <button id="btn-zoom-100" title="Zoom to 100%">100%</button>
@@ -263,6 +275,7 @@
     </div>
     <div id="canvaswrap">
       <canvas id="stage-canvas"></canvas>
+      <div id="ctxmenu" class="hidden"></div>
       <div id="toast"></div>
     </div>
     <div id="layerspanel">

@@ -159,6 +159,74 @@
     return { x0: x0, y0: y0, x1: x1, y1: y1 };
   }
 
+  /** Break a block apart into planar-map geometry: every glyph outline
+   *  is instantiated through the pen position, the EM scale and the
+   *  block matrix (affine keeps quads quads), then merged through the
+   *  boolean-mask pipeline with EVEN-ODD stamping — Flash's fill rule,
+   *  which makes letter counters holes regardless of orientation. One
+   *  mask pass per record (records never share borders). */
+  function textBreakApply(doc, index) {
+    var t = doc.texts[index];
+    if (!t) return false;
+    doc.texts.splice(index, 1);
+    var m = t.matrix;
+    t.records.forEach(function (rec) {
+      var font = doc.fonts[rec.font];
+      if (!font) return;
+      var scale = rec.height / 1024;
+      var fitted = [];
+      var penX = rec.x;
+      rec.glyphs.forEach(function (g) {
+        var glyph = font.glyphs[g.gi];
+        if (glyph) {
+          glyph.contours.forEach(function (c) {
+            function tp(x, y) {
+              var lx = penX + x * scale, ly = rec.y + y * scale;
+              return {
+                x: Math.round(m[0] * lx + m[2] * ly + m[4]),
+                y: Math.round(m[1] * lx + m[3] * ly + m[5])
+              };
+            }
+            var prev = tp(c.mx, c.my);
+            c.segs.forEach(function (s) {
+              var to = tp(s.x, s.y);
+              var e = s.cx === undefined
+                ? VB.edge(prev.x, prev.y, null, null, to.x, to.y, 0, 0, 0)
+                : (function () {
+                    var ct = tp(s.cx, s.cy);
+                    return VB.edge(prev.x, prev.y, ct.x, ct.y, to.x, to.y, 0, 0, 0);
+                  })();
+              if (!VB.edgeIsDegenerate(e)) fitted.push(e);
+              prev = to;
+            });
+          });
+        }
+        penX += g.adv;
+      });
+      if (!fitted.length) return;
+      var fillIdx = doc.addFillStyle({
+        type: "solid",
+        color: { r: rec.color.r, g: rec.color.g, b: rec.color.b, a: rec.color.a }
+      });
+      var winding = fitted.map(function (e) {
+        return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, 0, 0, 0);
+      });
+      var preOp = new VB.VBDocument();
+      preOp.width = doc.width; preOp.height = doc.height;
+      preOp.fills = doc.fills; preOp.lines = doc.lines;
+      preOp.edges = doc.edges.map(function (e) {
+        return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, e.fill0, e.fill1, e.line);
+      });
+      var adopted = VB.adoptIdenticalEdges(doc, fitted);
+      var pieces = VB.nodeEdges(doc, adopted.fresh);
+      for (var k = 0; k < pieces.length; k++) doc.edges.push(pieces[k]);
+      VB.applyRegionMask(doc, preOp, function (x, y) {
+        return (VB.geom.windingNumber(winding, x, y) & 1) === 1;
+      }, fillIdx, pieces.concat(adopted.twins));
+    });
+    return true;
+  }
+
   /** Topmost block whose LOCAL bounds contain the stage point, or -1. */
   function textHit(doc, x, y) {
     for (var i = doc.texts.length - 1; i >= 0; i--) {
@@ -548,6 +616,7 @@
 
   window.VB = window.VB || {};
   VB.textApplyOp = textApplyOp;
+  VB.textBreakApply = textBreakApply;
   VB.textEditApply = textEditApply;
   VB.textTransformApply = textTransformApply;
   VB.textDeleteApply = textDeleteApply;

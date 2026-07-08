@@ -104,6 +104,7 @@
         VB.renderDebug(ctx, app.doc, app.view,
           app.debugPin >= 0 ? app.debugPin : app.debugHover);
       }
+      refreshRotationField();
       updateStatus();
     });
   }
@@ -659,6 +660,98 @@
     selectTool("text");
     tools.text.editBlock(index);
   };
+
+  // ---- selection rotation field ------------------------------------------------
+  // Shows the selection's absolute angle; typing a value (0 to snap
+  // upright) rotates about the selection's center.
+
+  function rotationTarget() {
+    if (tools.transform && tools.transform.hasSession && tools.transform.hasSession()) {
+      return { kind: "session", m: tools.transform.sessionMatrix() };
+    }
+    if (tools.select && tools.select.sel && tools.select.sel.text != null &&
+        app.doc.texts[tools.select.sel.text]) {
+      return { kind: "text", index: tools.select.sel.text,
+               m: app.doc.texts[tools.select.sel.text].matrix };
+    }
+    return null;
+  }
+
+  function refreshRotationField() {
+    var inp = document.getElementById("sel-rotation");
+    if (!inp || document.activeElement === inp) return;
+    var t = rotationTarget();
+    if (!t) { inp.value = "0"; inp.disabled = true; return; }
+    inp.disabled = false;
+    inp.value = String(Math.round(Math.atan2(t.m[1], t.m[0]) * 1800 / Math.PI) / 10);
+  }
+
+  document.getElementById("sel-rotation").addEventListener("change", function () {
+    var deg = parseFloat(this.value) || 0;
+    var t = rotationTarget();
+    if (!t) return;
+    if (t.kind === "session") {
+      tools.transform.rotateTo(deg);
+      return;
+    }
+    var block = app.doc.texts[t.index];
+    var cur = Math.atan2(block.matrix[1], block.matrix[0]);
+    var a = deg * Math.PI / 180 - cur;
+    if (Math.abs(a) < 1e-6) return;
+    var bb = VB.textBlockBounds(app.doc, block);
+    var lx = (bb.x0 + bb.x1) / 2, ly = (bb.y0 + bb.y1) / 2;
+    var c = { x: block.matrix[0] * lx + block.matrix[2] * ly + block.matrix[4],
+              y: block.matrix[1] * lx + block.matrix[3] * ly + block.matrix[5] };
+    var cos = Math.cos(a), sin = Math.sin(a);
+    var m = [cos, sin, -sin, cos,
+             c.x - cos * c.x + sin * c.y, c.y - sin * c.x - cos * c.y];
+    app.record({ op: "textTransform", index: t.index, m: m });
+    app.history.push();
+    VB.textTransformApply(app.doc, t.index, m);
+    var keep = t.index;
+    docChanged();
+    tools.select.sel.text = keep;
+    requestRender();
+    setMsg("rotation set to " + deg + "°");
+  });
+
+  // ---- canvas context menu ------------------------------------------------------
+
+  var ctxmenu = document.getElementById("ctxmenu");
+  function hideCtxMenu() { ctxmenu.classList.add("hidden"); }
+  canvas.addEventListener("contextmenu", function (ev) {
+    ev.preventDefault();
+    flushSelections(); // lifted sessions land so the hit test sees them
+    var pos = clientToTwips(ev);
+    var ti = VB.textHit(app.doc, pos.x, pos.y);
+    if (ti < 0) { hideCtxMenu(); return; }
+    ctxmenu.innerHTML = "";
+    [["Edit text", function () { app.editText(ti); }],
+     ["Break apart into vectors", function () {
+       app.record({ op: "textBreak", index: ti });
+       app.history.push();
+       VB.textBreakApply(app.doc, ti);
+       docChanged();
+       toast("Text broken into vectors — it now merges like any ink");
+     }],
+     ["Delete text", function () {
+       app.record({ op: "textDelete", index: ti });
+       app.history.push();
+       VB.textDeleteApply(app.doc, ti);
+       docChanged();
+     }]].forEach(function (item) {
+      var row = document.createElement("div");
+      row.className = "ctxitem";
+      row.textContent = item[0];
+      row.addEventListener("click", function () { hideCtxMenu(); item[1](); });
+      ctxmenu.appendChild(row);
+    });
+    var wrap = document.getElementById("canvaswrap").getBoundingClientRect();
+    ctxmenu.style.left = (ev.clientX - wrap.left) + "px";
+    ctxmenu.style.top = (ev.clientY - wrap.top) + "px";
+    ctxmenu.classList.remove("hidden");
+  });
+  canvas.addEventListener("pointerdown", hideCtxMenu);
 
   // ---- text tool options ------------------------------------------------------
 
