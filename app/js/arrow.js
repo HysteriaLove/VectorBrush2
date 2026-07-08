@@ -589,15 +589,66 @@
       if (!fl) return false;
       self.float = null;
       var m = [1, 0, 0, 1, fl.dx, fl.dy];
-      app.record({ op: "regionTransform", points: fl.origin, m: m });
+      if (fl.kind === "sel") {
+        app.record({ op: "transformSel", fills: fl.items.fills,
+                     edgeKeys: fl.items.edgeKeys, m: m });
+      } else {
+        app.record({ op: "regionTransform", points: fl.origin, m: m });
+      }
       VB.regionMergeLifted(app.doc, fl.doc, m);
-      var placed = fl.points;
+      var placed = fl.kind === "region" ? fl.points : null;
       app.docChanged();
-      // keep the committed region selected so Q can adopt it in place
+      // keep a committed REGION selected so Q can adopt it in place
       self.sel = { fills: [], edgeKeys: [], region: placed };
       app.setMsg("selection merged");
       return true;
     };
+
+    // Build a standalone floating document from a fill/stroke selection
+    // (resolved against the CURRENT doc, before any lifting).
+    function liftSelectionDoc(items) {
+      var lifted = new VB.VBDocument();
+      lifted.width = app.doc.width; lifted.height = app.doc.height;
+      items.fills.forEach(function (p) {
+        var got = faceLoopsAt(app.doc, p.x, p.y);
+        if (!got) return;
+        var src = app.doc.fills[got.fillIdx - 1];
+        var idx = lifted.addFillStyle({
+          type: "solid",
+          color: { r: src.color.r, g: src.color.g, b: src.color.b, a: src.color.a }
+        });
+        got.loops.forEach(function (loop) {
+          loop.forEach(function (e) {
+            lifted.edges.push(VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, 0, idx, 0));
+          });
+        });
+      });
+      items.edgeKeys.forEach(function (k) {
+        var i = findByKey(app.doc, k);
+        if (i < 0) return;
+        var e = app.doc.edges[i];
+        if (e.line === 0) return;
+        var ls = app.doc.lines[e.line - 1];
+        var lnIdx = lifted.addLineStyle({
+          width: ls.width,
+          color: { r: ls.color.r, g: ls.color.g, b: ls.color.b, a: ls.color.a }
+        });
+        lifted.edges.push(VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, 0, 0, lnIdx));
+      });
+      return lifted;
+    }
+
+    function bboxPoints(edges) {
+      var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      edges.forEach(function (e) {
+        [[e.ax, e.ay], [e.bx, e.by]].concat(
+          e.cx === null ? [] : [[e.cx, e.cy]]).forEach(function (p) {
+          x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]);
+          y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]);
+        });
+      });
+      return [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }];
+    }
     self.exportSelection = function () {
       return {
         fills: self.sel.fills.map(function (f) { return { x: f.x, y: f.y }; }),
@@ -844,6 +895,7 @@
         }
         regionDelete(app.doc, drag.points);
         self.float = {
+          kind: "region",
           origin: drag.points,
           doc: lifted,
           dx: rdx, dy: rdy,
@@ -870,26 +922,61 @@
       }
       if (drag.kind === "moveSel") {
         if (!drag.moved) { app.requestRender(); return; }
+        // FIRST drag: LIFT the shapes into a floating chunk — no union
+        // until the user clicks away (dropping a shape onto another must
+        // not stamp it while it is still being placed).
         var dx = Math.round(pos.x - drag.from.x);
         var dy = Math.round(pos.y - drag.from.y);
-        var m = [1, 0, 0, 1, dx, dy];
-        app.record({ op: "transformSel", fills: drag.items.fills,
-                     edgeKeys: drag.items.edgeKeys, m: m });
-        app.history.push(app.doc);
-        arrowTransformSel(app.doc, drag.items.fills, drag.items.edgeKeys, m);
-        self.clearSelection();
-        app.docChanged();
-        app.setMsg("selection moved");
+        app.history.push(app.doc); // undo point for the whole gesture
+        var liftedSel = liftSelectionDoc(drag.items);
+        if (liftedSel.edges.length === 0) {
+          app.history.undoStack.pop();
+          self.clearSelection();
+          app.requestRender();
+          return;
+        }
+        // remove originals: fills deleted, strokes leave lineless twins
+        drag.items.fills.forEach(function (p) {
+          arrowDeleteFill(app.doc, p.x, p.y);
+        });
+        drag.items.edgeKeys.forEach(function (k) {
+          var i5 = findByKey(app.doc, k);
+          if (i5 < 0) return;
+          var e5 = app.doc.edges[i5];
+          if (e5.fill0 !== e5.fill1) {
+            app.doc.edges[i5] = VB.edge(e5.ax, e5.ay, e5.cx, e5.cy,
+                                        e5.bx, e5.by, e5.fill0, e5.fill1, 0);
+          } else {
+            app.doc.edges.splice(i5, 1);
+          }
+        });
+        self.float = {
+          kind: "sel",
+          items: drag.items,
+          doc: liftedSel,
+          dx: dx, dy: dy,
+          points: bboxPoints(liftedSel.edges).map(function (q) {
+            return { x: q.x + dx, y: q.y + dy };
+          })
+        };
+        self.sel = { fills: [], edgeKeys: [], region: null };
+        app.requestRender();
+        app.setMsg("selection floating — drag to keep moving, click away to merge, Delete to discard");
       }
     };
 
     self.onDeleteKey = function () {
       if (self.float) {
         // the content is already lifted out of the doc; recording the
-        // deletion of the ORIGIN reproduces this state on replay
+        // deletion of the ORIGINALS reproduces this state on replay
         var fl = self.float;
         self.float = null;
-        app.record({ op: "regionDelete", points: fl.origin });
+        if (fl.kind === "sel") {
+          app.record({ op: "deleteSel", fills: fl.items.fills,
+                       edgeKeys: fl.items.edgeKeys });
+        } else {
+          app.record({ op: "regionDelete", points: fl.origin });
+        }
         self.clearSelection();
         app.docChanged();
         app.setMsg("floating selection discarded");
