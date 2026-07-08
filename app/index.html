@@ -142,8 +142,15 @@
     color: var(--text);
   }
   #debugpanel.hidden { display: none; }
-  #text-opts { display: inline-flex; align-items: center; gap: 6px; }
+  #text-opts { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   #text-opts.hidden { display: none; }
+  #text-opts .txtstyle {
+    width: 24px; height: 22px; padding: 0;
+    background: #2b2d31; color: var(--text);
+    border: 1px solid var(--panel-edge); border-radius: 3px; cursor: pointer;
+  }
+  #text-opts .txtstyle.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #text-opts input[type=number] { width: 52px; }
   #ctxmenu {
     position: absolute; z-index: 20; min-width: 180px;
     background: var(--panel); border: 1px solid var(--panel-edge);
@@ -238,11 +245,26 @@
     </label>
     <span id="text-opts" class="hidden">
       <label class="ctl" title="Font family">
-        <select id="text-font" style="max-width:150px"></select>
+        <select id="text-font" style="max-width:130px"></select>
       </label>
       <label class="ctl" title="Text size (pt)">
         <input type="number" id="text-size" value="24" min="4" max="200" step="1">pt
       </label>
+      <label class="ctl" title="Text color">
+        <input type="color" id="text-color" value="#000000">
+      </label>
+      <button id="text-bold" class="txtstyle" title="Bold"><b>B</b></button>
+      <button id="text-italic" class="txtstyle" title="Italic"><i>I</i></button>
+      <button id="text-align-l" class="txtstyle" title="Align left">⯇</button>
+      <button id="text-align-c" class="txtstyle" title="Align center">☰</button>
+      <button id="text-align-r" class="txtstyle" title="Align right">⯈</button>
+      <label class="ctl" title="Letter spacing (px)">
+        A↔<input type="number" id="text-spacing" value="0" min="-20" max="60" step="0.5">
+      </label>
+      <label class="ctl" title="X (px)">X<input type="number" id="text-x" step="1" style="width:56px"></label>
+      <label class="ctl" title="Y (px)">Y<input type="number" id="text-y" step="1" style="width:56px"></label>
+      <label class="ctl" title="Box width (px) — text re-wraps">W<input type="number" id="text-w" step="1" min="10" style="width:56px"></label>
+      <label class="ctl" title="Box height (px) — scales the text">H<input type="number" id="text-h" step="1" min="1" style="width:56px"></label>
       <button id="btn-fonts" title="List the system's fonts (or drop a .ttf on the canvas)">Fonts…</button>
     </span>
     <label class="ctl" title="Selection rotation (degrees) — type 0 to snap upright">

@@ -105,6 +105,7 @@
           app.debugPin >= 0 ? app.debugPin : app.debugHover);
       }
       refreshRotationField();
+      syncTextPanel();
       updateStatus();
     });
   }
@@ -617,8 +618,8 @@
     if (tool === "transform" && app.tool !== "transform") returnTool = app.tool;
     if (tools.select && tools.select.commitFloat) tools.select.commitFloat();
     if (tools.text && tools.text.commitPending) tools.text.commitPending();
-    var textOpts = document.getElementById("text-opts");
-    if (textOpts) textOpts.classList.toggle("hidden", tool !== "text");
+    // the text properties panel shows/hides in syncTextPanel (it also
+    // serves arrow-selected blocks, not just the text tool)
     if (tool === "transform" && tools.select.exportSelection) {
       var handoff = tools.select.exportSelection();
       if (handoff.text != null) {
@@ -778,6 +779,219 @@
     } catch (err) {
       toast(err.message, 6000);
     }
+  });
+
+  // ---- text properties panel -----------------------------------------------
+  // Edits the live text session, or restyles the arrow-selected block.
+
+  function textPropsTarget() {
+    if (tools.text && tools.text.sessionProps && tools.text.sessionProps()) {
+      return { kind: "session" };
+    }
+    if (tools.select && tools.select.sel && tools.select.sel.text != null &&
+        app.doc.texts[tools.select.sel.text]) {
+      return { kind: "block", index: tools.select.sel.text };
+    }
+    return null;
+  }
+
+  function findFace(family, bold, italic) {
+    var best = null;
+    VB.textFonts.entries.forEach(function (e) {
+      if (e.family !== family) return;
+      var s = (e.style || "").toLowerCase();
+      var isB = s.indexOf("bold") >= 0;
+      var isI = s.indexOf("italic") >= 0 || s.indexOf("oblique") >= 0;
+      if (isB === !!bold && isI === !!italic) best = e;
+    });
+    return best;
+  }
+
+  function cssColor(c) {
+    function hex(v) { return ("0" + v.toString(16)).slice(-2); }
+    return "#" + hex(c.r) + hex(c.g) + hex(c.b);
+  }
+
+  function syncTextPanel() {
+    var panel = document.getElementById("text-opts");
+    var target = textPropsTarget();
+    var show = app.tool === "text" || !!target;
+    panel.classList.toggle("hidden", !show);
+    if (!show) return;
+    function setVal(id, v) {
+      var el = document.getElementById(id);
+      if (document.activeElement !== el) el.value = v;
+    }
+    var props = null, block = null;
+    if (target && target.kind === "session") {
+      props = tools.text.sessionProps();
+    } else if (target && target.kind === "block") {
+      block = app.doc.texts[target.index];
+      var f = app.doc.fonts[block.records[0].font];
+      props = { sizeTw: block.records[0].height, color: block.records[0].color,
+                align: block.align || 0, spacing: block.spacing || 0,
+                family: f ? f.name : "", bold: f && f.bold, italic: f && f.italic,
+                wrapWidth: block.wrapWidth, matrix: block.matrix };
+    }
+    if (!props) return;
+    setVal("text-size", Math.round(props.sizeTw / 20));
+    setVal("text-color", cssColor(props.color));
+    setVal("text-spacing", (props.spacing || 0) / 20);
+    document.getElementById("text-bold").classList.toggle("active", !!props.bold);
+    document.getElementById("text-italic").classList.toggle("active", !!props.italic);
+    ["l", "c", "r"].forEach(function (k, i) {
+      document.getElementById("text-align-" + k)
+        .classList.toggle("active", (props.align || 0) === i);
+    });
+    var faceLabel = props.family +
+      (props.bold || props.italic
+        ? " " + (props.bold ? "Bold" : "") + (props.bold && props.italic ? " " : "") +
+          (props.italic ? "Oblique" : "") : "");
+    var sel = document.getElementById("text-font");
+    if (document.activeElement !== sel) {
+      if (VB.textFonts.find(faceLabel)) sel.value = faceLabel;
+      else if (VB.textFonts.find(props.family)) sel.value = props.family;
+    }
+    setVal("text-x", Math.round(props.matrix[4] / 20));
+    setVal("text-y", Math.round(props.matrix[5] / 20));
+    if (block) {
+      var bb = VB.textBlockBounds(app.doc, block);
+      setVal("text-w", Math.round(((props.wrapWidth || (bb ? bb.x1 - Math.min(0, bb.x0) : 0))) / 20));
+      setVal("text-h", bb ? Math.round((bb.y1 - bb.y0) / 20) : 0);
+    } else {
+      setVal("text-w", props.wrapWidth ? Math.round(props.wrapWidth / 20) : "");
+      setVal("text-h", Math.round(props.sizeTw / 20));
+    }
+  }
+
+  /** Apply a panel change: live session or a self-contained op on the
+   *  selected block (restyle needs the face's TTF — bundled fonts make
+   *  this the common case). */
+  async function applyTextProps(change) {
+    var target = textPropsTarget();
+    if (!target) return;
+    if (target.kind === "session") {
+      var sp = tools.text.sessionProps();
+      var props = {};
+      if (change.sizeTw) props.sizeTw = change.sizeTw;
+      if (change.color) props.color = change.color;
+      if (change.align !== undefined) props.align = change.align;
+      if (change.spacing !== undefined) props.spacing = change.spacing;
+      if (change.family || change.bold !== undefined || change.italic !== undefined) {
+        var fam = change.family || sp.family;
+        var bold = change.bold !== undefined ? change.bold : sp.bold;
+        var italic = change.italic !== undefined ? change.italic : sp.italic;
+        var face = findFace(fam, bold, italic) || VB.textFonts.find(fam);
+        if (!face) { toast("no " + fam + " face for that style"); return; }
+        try {
+          props.ttf = await VB.textFonts.ensureParsed(face.label);
+          props.meta = { name: face.family, bold: bold, italic: italic };
+        } catch (err) { toast(err.message, 5000); return; }
+      }
+      tools.text.setSessionProps(props);
+      return;
+    }
+    // a selected block
+    var index = target.index;
+    var block = app.doc.texts[index];
+    if (change.x !== undefined || change.y !== undefined) {
+      var dx = change.x !== undefined ? change.x - block.matrix[4] : 0;
+      var dy = change.y !== undefined ? change.y - block.matrix[5] : 0;
+      if (!dx && !dy) return;
+      app.record({ op: "textTransform", index: index, m: [1, 0, 0, 1, dx, dy] });
+      app.history.push();
+      VB.textTransformApply(app.doc, index, [1, 0, 0, 1, dx, dy]);
+    } else if (change.wrapWidth) {
+      app.record({ op: "textWrap", index: index, width: change.wrapWidth, dx: 0 });
+      app.history.push();
+      VB.textWrapApply(app.doc, index, change.wrapWidth, 0);
+    } else if (change.boxHeight) {
+      var bb2 = VB.textBlockBounds(app.doc, block);
+      if (!bb2) return;
+      var f2 = change.boxHeight / (bb2.y1 - bb2.y0);
+      var h2 = Math.max(20, Math.round(block.records[0].height * f2));
+      app.record({ op: "textSize", index: index, height: h2, dy: 0 });
+      app.history.push();
+      VB.textSizeApply(app.doc, index, h2, 0);
+    } else {
+      // full restyle via a self-contained textEdit
+      var font = app.doc.fonts[block.records[0].font];
+      var fam2 = change.family || font.name;
+      var bold2 = change.bold !== undefined ? change.bold : font.bold;
+      var italic2 = change.italic !== undefined ? change.italic : font.italic;
+      var face2 = findFace(fam2, bold2, italic2) || VB.textFonts.find(fam2);
+      if (!face2) { toast("no " + fam2 + " face for that style — load it first"); return; }
+      var ttf2;
+      try { ttf2 = await VB.textFonts.ensureParsed(face2.label); }
+      catch (err) { toast("restyling needs the font: " + err.message, 5000); return; }
+      var str = "";
+      block.records.forEach(function (rec, ri) {
+        if (ri > 0 && !rec.soft) str += "\n";
+        str += rec.glyphs.map(function (g) {
+          var gl = font.glyphs[g.gi];
+          return gl ? String.fromCharCode(gl.code) : "";
+        }).join("");
+      });
+      var op = VB.buildTextOp(ttf2, { name: face2.family, bold: bold2, italic: italic2 },
+        str, change.sizeTw || block.records[0].height,
+        change.color || block.records[0].color, 0, 0,
+        block.wrapWidth,
+        change.align !== undefined ? change.align : (block.align || 0),
+        change.spacing !== undefined ? change.spacing : (block.spacing || 0));
+      if (!op) return;
+      var edit = { op: "textEdit", index: index, font: op.font,
+                   records: op.records, wrapWidth: op.wrapWidth,
+                   pitch: op.pitch, align: op.align, spacing: op.spacing };
+      app.record(edit);
+      app.history.push();
+      VB.textEditApply(app.doc, edit);
+    }
+    var keep = index;
+    docChanged();
+    tools.select.sel.text = keep;
+    requestRender();
+  }
+
+  document.getElementById("text-size").addEventListener("change", function () {
+    applyTextProps({ sizeTw: Math.round((parseFloat(this.value) || 24) * 20) });
+  });
+  document.getElementById("text-color").addEventListener("change", function () {
+    var v = this.value;
+    applyTextProps({ color: { r: parseInt(v.slice(1, 3), 16),
+                              g: parseInt(v.slice(3, 5), 16),
+                              b: parseInt(v.slice(5, 7), 16), a: 255 } });
+  });
+  document.getElementById("text-bold").addEventListener("click", function () {
+    applyTextProps({ bold: !this.classList.contains("active") });
+  });
+  document.getElementById("text-italic").addEventListener("click", function () {
+    applyTextProps({ italic: !this.classList.contains("active") });
+  });
+  ["l", "c", "r"].forEach(function (k, i) {
+    document.getElementById("text-align-" + k).addEventListener("click", function () {
+      applyTextProps({ align: i });
+    });
+  });
+  document.getElementById("text-spacing").addEventListener("change", function () {
+    applyTextProps({ spacing: Math.round((parseFloat(this.value) || 0) * 20) });
+  });
+  document.getElementById("text-x").addEventListener("change", function () {
+    applyTextProps({ x: Math.round((parseFloat(this.value) || 0) * 20) });
+  });
+  document.getElementById("text-y").addEventListener("change", function () {
+    applyTextProps({ y: Math.round((parseFloat(this.value) || 0) * 20) });
+  });
+  document.getElementById("text-w").addEventListener("change", function () {
+    var w = Math.round((parseFloat(this.value) || 0) * 20);
+    if (w > 0) applyTextProps({ wrapWidth: w });
+  });
+  document.getElementById("text-h").addEventListener("change", function () {
+    var h = Math.round((parseFloat(this.value) || 0) * 20);
+    if (h > 0) applyTextProps({ boxHeight: h });
+  });
+  document.getElementById("text-font").addEventListener("change", function () {
+    var e = VB.textFonts.find(this.value);
+    if (e) applyTextProps({ family: e.family, bold: undefined, italic: undefined });
   });
 
   // ---- layers & scenes panel ---------------------------------------------------

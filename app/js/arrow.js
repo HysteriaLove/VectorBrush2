@@ -582,11 +582,15 @@
     function textTabs(block) {
       var b = VB.textBlockBounds(app.doc, block);
       if (!b) return null;
-      var my = (b.y0 + b.y1) / 2;
+      var my = (b.y0 + b.y1) / 2, mx = (b.x0 + b.x1) / 2;
       return {
         bounds: b,
-        left: { x: b.x0, y: my, side: -1 },
-        right: { x: b.x1, y: my, side: 1 }
+        tabs: [
+          { x: b.x0, y: my, side: -1 },  // width, right edge planted
+          { x: b.x1, y: my, side: 1 },   // width
+          { x: mx, y: b.y0, vert: -1 },  // point size, bottom planted
+          { x: mx, y: b.y1, vert: 1 }    // point size
+        ]
       };
     }
 
@@ -611,18 +615,38 @@
       return { width: width, dx: drag.right - width };
     }
 
+    // Pointer -> new point size (and origin shift for the top tab):
+    // the box height scales the text, Flash's H-field semantics.
+    function sizeDragTarget(drag, pos) {
+      var inv = invertM(drag.base);
+      if (!inv) return null;
+      var ly = inv[1] * pos.x + inv[3] * pos.y + inv[5];
+      var b = drag.bounds;
+      var boxH = b.y1 - b.y0 || 1;
+      var f;
+      if (drag.vert === 1) f = (ly - b.y0) / boxH;      // bottom tab
+      else f = (b.y1 - ly) / boxH;                       // top tab
+      if (!isFinite(f)) return null;
+      var height = Math.max(20, Math.round(drag.baseHeight * f));
+      f = height / drag.baseHeight;
+      // keep the opposite edge planted
+      var dy = drag.vert === 1 ? Math.round(b.y0 * (1 - f))
+                               : Math.round(b.y1 * (1 - f));
+      return { height: height, dy: dy };
+    }
+
     function pickTextTab(index, pos) {
       var block = app.doc.texts[index];
       var tabs = textTabs(block);
       if (!tabs) return null;
       var m = block.matrix;
       var tol = 9 * VB.TWIPS / app.view.zoom;
-      var cands = [tabs.left, tabs.right];
-      for (var i = 0; i < cands.length; i++) {
-        var px = m[0] * cands[i].x + m[2] * cands[i].y + m[4];
-        var py = m[1] * cands[i].x + m[3] * cands[i].y + m[5];
+      for (var i = 0; i < tabs.tabs.length; i++) {
+        var t = tabs.tabs[i];
+        var px = m[0] * t.x + m[2] * t.y + m[4];
+        var py = m[1] * t.x + m[3] * t.y + m[5];
         if (Math.hypot(pos.x - px, pos.y - py) <= tol) {
-          return { side: cands[i].side, bounds: tabs.bounds };
+          return { side: t.side || 0, vert: t.vert || 0, bounds: tabs.bounds };
         }
       }
       return null;
@@ -812,12 +836,16 @@
         if (th) {
           var tBlock = app.doc.texts[self.sel.text];
           app.history.push(app.doc);
-          self.drag = { kind: "wrapText", index: self.sel.text,
-                        side: th.side, moved: false, from: pos, cur: pos,
+          self.drag = { kind: th.vert ? "sizeText" : "wrapText",
+                        index: self.sel.text,
+                        side: th.side, vert: th.vert,
+                        moved: false, from: pos, cur: pos,
                         base: tBlock.matrix.slice(),
                         baseRecords: JSON.parse(JSON.stringify(tBlock.records)),
                         baseWrap: tBlock.wrapWidth || null,
                         basePitch: tBlock.pitch || null,
+                        baseHeight: tBlock.records[0].height,
+                        bounds: th.bounds,
                         right: tBlock.wrapWidth || th.bounds.x1 };
           return;
         }
@@ -952,17 +980,21 @@
         t.matrix[4] = d.base[4] + Math.round(pos.x - d.from.x);
         t.matrix[5] = d.base[5] + Math.round(pos.y - d.from.y);
       }
-      if (self.drag.kind === "wrapText" && self.drag.moved) {
-        // live reflow from the drag-start records at the dragged width
+      if ((self.drag.kind === "wrapText" || self.drag.kind === "sizeText") &&
+          self.drag.moved) {
+        // live: back to the drag-start state, then the pending op
         var d2 = self.drag;
-        var w2 = wrapDragTarget(d2, pos);
-        if (w2) {
-          var tb2 = app.doc.texts[d2.index];
-          tb2.records = JSON.parse(JSON.stringify(d2.baseRecords));
-          tb2.matrix = d2.base.slice();
-          tb2.wrapWidth = d2.baseWrap;
-          tb2.pitch = d2.basePitch;
-          VB.textWrapApply(app.doc, d2.index, w2.width, w2.dx);
+        var tb2 = app.doc.texts[d2.index];
+        tb2.records = JSON.parse(JSON.stringify(d2.baseRecords));
+        tb2.matrix = d2.base.slice();
+        tb2.wrapWidth = d2.baseWrap;
+        tb2.pitch = d2.basePitch;
+        if (d2.kind === "wrapText") {
+          var w2 = wrapDragTarget(d2, pos);
+          if (w2) VB.textWrapApply(app.doc, d2.index, w2.width, w2.dx);
+        } else {
+          var z2 = sizeDragTarget(d2, pos);
+          if (z2) VB.textSizeApply(app.doc, d2.index, z2.height, z2.dy);
         }
       }
       app.requestRender();
@@ -1003,7 +1035,7 @@
         }
         return;
       }
-      if (drag.kind === "wrapText") {
+      if (drag.kind === "wrapText" || drag.kind === "sizeText") {
         var tb3 = app.doc.texts[drag.index];
         // back to the drag-start state, then apply the recorded op once
         tb3.records = JSON.parse(JSON.stringify(drag.baseRecords));
@@ -1015,16 +1047,27 @@
           app.requestRender();
           return;
         }
-        var w3 = wrapDragTarget(drag, pos);
-        if (w3) {
-          app.record({ op: "textWrap", index: drag.index,
-                       width: w3.width, dx: w3.dx });
-          VB.textWrapApply(app.doc, drag.index, w3.width, w3.dx);
+        if (drag.kind === "wrapText") {
+          var w3 = wrapDragTarget(drag, pos);
+          if (w3) {
+            app.record({ op: "textWrap", index: drag.index,
+                         width: w3.width, dx: w3.dx });
+            VB.textWrapApply(app.doc, drag.index, w3.width, w3.dx);
+          }
+        } else {
+          var z3 = sizeDragTarget(drag, pos);
+          if (z3) {
+            app.record({ op: "textSize", index: drag.index,
+                         height: z3.height, dy: z3.dy });
+            VB.textSizeApply(app.doc, drag.index, z3.height, z3.dy);
+          }
         }
         var keepIdx = drag.index;
         app.docChanged();
         self.sel.text = keepIdx;
-        app.setMsg("text box resized — the text re-wrapped");
+        app.setMsg(drag.kind === "wrapText"
+          ? "text box resized — the text re-wrapped"
+          : "text size changed");
         return;
       }
       if (drag.kind === "moveText") {
@@ -1337,12 +1380,14 @@
           });
           ctx.closePath();
           ctx.stroke();
-          // the two BOX TABS: flat bars mid-left/mid-right that extend
-          // the wrap width (never scale the glyphs)
+          // the BOX TABS: side tabs extend the wrap width, top/bottom
+          // tabs change the point size — glyphs are never distorted
           var tabs2 = textTabs(tb);
-          [tabs2.left, tabs2.right].forEach(function (h, i2) {
+          tabs2.tabs.forEach(function (h) {
             var p2 = tmap(h.x, h.y);
-            var ca = tmap(h.x, bb.y0), cb2 = tmap(h.x, bb.y1);
+            // the bar runs along its own edge
+            var ca = h.vert ? tmap(bb.x0, h.y) : tmap(h.x, bb.y0);
+            var cb2 = h.vert ? tmap(bb.x1, h.y) : tmap(h.x, bb.y1);
             var dx2 = cb2.x - ca.x, dy2 = cb2.y - ca.y;
             var len2 = Math.hypot(dx2, dy2) || 1;
             var ux = dx2 / len2 * 8 * hair, uy = dy2 / len2 * 8 * hair;

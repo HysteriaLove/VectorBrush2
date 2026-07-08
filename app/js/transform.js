@@ -147,11 +147,13 @@
       if (self.float || !self.items) return;
       if (self.items.textIndex != null) {
         // a text block lifts by leaving the texts array — no masking;
-        // its fonts stay in the doc so the preview can draw it
+        // its fonts stay in the doc so the preview can draw it. orig is
+        // what commit reinserts (ops re-derive the working state).
         var idx = self.items.textIndex;
         if (!app.doc.texts[idx]) return;
         app.history.push(app.doc);
-        self.float = { textBlock: app.doc.texts[idx], textIndex: idx };
+        self.float = { textBlock: app.doc.texts[idx],
+                       orig: app.doc.texts[idx], textIndex: idx };
         app.doc.texts.splice(idx, 1);
         return;
       }
@@ -172,26 +174,43 @@
     function unlift() {
       if (!self.float) return;
       self.float = null;
+      self.boxOps = [];
       app.history.undo(app.doc);
     }
 
     /** Land the accumulated session on the document as ONE journal op.
      *  No history push here — the lift-time snapshot IS the undo step. */
     self.commitPending = function () {
-      if (!self.items || !self.gestures.length) {
+      var boxOps = self.boxOps || [];
+      if (!self.items || (!self.gestures.length && !boxOps.length)) {
         self.gestures = []; unlift(); return false;
       }
       var m = gestureM();
       var fl = self.float;
       self.gestures = []; // before mutating: docChanged() discards us
-      if (isIdentity(m) || !fl) { unlift(); return false; }
+      self.boxOps = [];
+      if (!fl || (isIdentity(m) && !boxOps.length)) { unlift(); return false; }
       self.float = null;
       if (fl.textBlock) {
-        // put the block back untouched, then apply the recorded op —
-        // the live doc ends exactly where a replay ends
-        app.doc.texts.splice(fl.textIndex, 0, fl.textBlock);
-        app.record({ op: "textTransform", index: fl.textIndex, m: m });
-        VB.textTransformApply(app.doc, fl.textIndex, m);
+        // put the ORIGINAL back, then replay the session as ops: box
+        // tabs first (wrap/size), then the transform — the live doc
+        // ends exactly where a replay ends
+        app.doc.texts.splice(fl.textIndex, 0, fl.orig);
+        boxOps.forEach(function (bop) {
+          if (bop.op === "textWrap") {
+            app.record({ op: "textWrap", index: fl.textIndex,
+                         width: bop.width, dx: bop.dx });
+            VB.textWrapApply(app.doc, fl.textIndex, bop.width, bop.dx);
+          } else {
+            app.record({ op: "textSize", index: fl.textIndex,
+                         height: bop.height, dy: bop.dy });
+            VB.textSizeApply(app.doc, fl.textIndex, bop.height, bop.dy);
+          }
+        });
+        if (!isIdentity(m)) {
+          app.record({ op: "textTransform", index: fl.textIndex, m: m });
+          VB.textTransformApply(app.doc, fl.textIndex, m);
+        }
         app.docChanged();
         app.setMsg("text transformed");
         return true;
@@ -214,6 +233,7 @@
     self.discard = function () {
       self.items = null; self.pristine = null; self.gestures = [];
       self.base = [1, 0, 0, 1, 0, 0];
+      self.boxOps = [];
       self.ghosts = null; self.box = null; self.float = null; self.drag = null;
     };
 
@@ -303,12 +323,7 @@
 
     function pickHandle(pos, tol, acc) {
       var hs = handles();
-      // TEXT sessions have no mid-edge scale handles: single-axis
-      // stretching of glyphs isn't a text operation (box width is the
-      // arrow tool's tabs / the edit box); corners still free-transform
-      var textSession = self.items && self.items.textIndex != null;
       for (var i = 0; i < hs.length; i++) {
-        if (textSession && i % 2 === 1) continue;
         var p = applyPt(acc, hs[i].x, hs[i].y);
         if (Math.abs(pos.x - p.x) <= tol && Math.abs(pos.y - p.y) <= tol) {
           return { index: i, h: hs[i] };
@@ -377,8 +392,26 @@
           // a press that manipulates re-lifts if needed (the selection
           // can sit adopted-but-unlifted after an undo-to-zero)
           ensureLifted();
+          var isTextSel = self.items && self.items.textIndex != null;
           if (what.kind === "knob" || what.kind === "rotate") {
             armRotate(pos, acc);
+          } else if (what.kind === "scale" &&
+                     isTextSel && what.hit.index % 2 === 1) {
+            // TEXT mid-edge = BOX TAB: sides re-wrap the width,
+            // top/bottom change the point size — glyphs never distort
+            var b0 = self.box;
+            var work = self.float && self.float.textBlock;
+            if (work) {
+              self.drag = {
+                kind: "boxtab", hi: what.hit.index,
+                acc: acc, accInv: accInv, cur: pos,
+                stashJson: JSON.stringify(work),
+                baseHeight: work.records[0].height,
+                right: work.wrapWidth || b0.x1,
+                box0: { x0: b0.x0, y0: b0.y0, x1: b0.x1, y1: b0.y1 },
+                pending: null, m: null
+              };
+            }
           } else if (what.kind === "scale") {
             // anchor = opposite handle, held fixed in pristine space
             var hs = handles();
@@ -533,10 +566,48 @@
       return null;
     }
 
+    // Pointer -> the pending box op (wrap or size) for a tab drag, in
+    // block-local units; applies it live to the floating block.
+    function applyBoxTab(d, pos) {
+      var lx = d.accInv[0] * pos.x + d.accInv[2] * pos.y + d.accInv[4];
+      var ly = d.accInv[1] * pos.x + d.accInv[3] * pos.y + d.accInv[5];
+      var b = d.box0;
+      var MIN = 200;
+      if (d.hi === 3) {                       // right: wrap width
+        d.pending = { op: "textWrap", width: Math.max(MIN, Math.round(lx)), dx: 0 };
+      } else if (d.hi === 7) {                // left: wrap, right edge planted
+        var width = Math.max(MIN, Math.round(d.right - lx));
+        d.pending = { op: "textWrap", width: width, dx: d.right - width };
+      } else {                                // top/bottom: point size
+        var boxH = b.y1 - b.y0 || 1;
+        var f = d.hi === 5 ? (ly - b.y0) / boxH : (b.y1 - ly) / boxH;
+        if (!isFinite(f)) return;
+        var height = Math.max(20, Math.round(d.baseHeight * f));
+        f = height / d.baseHeight;
+        d.pending = { op: "textSize", height: height,
+                      dy: d.hi === 5 ? Math.round(b.y0 * (1 - f))
+                                     : Math.round(b.y1 * (1 - f)) };
+      }
+      // live-apply to the floating block via a scratch doc
+      var work = JSON.parse(d.stashJson);
+      var scratch = { fonts: app.doc.fonts, texts: [work] };
+      if (d.pending.op === "textWrap") {
+        VB.textWrapApply(scratch, 0, d.pending.width, d.pending.dx);
+      } else {
+        VB.textSizeApply(scratch, 0, d.pending.height, d.pending.dy);
+      }
+      self.float.textBlock = work;
+    }
+
     self.onMove = function (pos) {
       var d = self.drag;
       if (!d) return;
       d.cur = pos;
+      if (d.kind === "boxtab") {
+        applyBoxTab(d, pos);
+        app.requestRender();
+        return;
+      }
       if (d.kind === "band") {
         if (Math.hypot(pos.x - d.from.x, pos.y - d.from.y) > 8) d.moved = true;
         if (d.style === "lasso") {
@@ -553,6 +624,30 @@
 
     self.onUp = function (pos) {
       var d = self.drag;
+      if (d && d.kind === "boxtab") {
+        self.drag = null;
+        if (d.pending && self.float && self.float.textBlock) {
+          // queue the op and rebase the frame on the reshaped block so
+          // handles, knob and later gestures track the new box
+          self.boxOps = self.boxOps || [];
+          self.boxOps.push(d.pending);
+          self.base = self.float.textBlock.matrix.slice();
+          var bb = VB.textBlockBounds(app.doc, self.float.textBlock);
+          if (bb) {
+            self.box = bb;
+            self.pristine = [
+              VB.edge(bb.x0, bb.y0, null, null, bb.x1, bb.y0, 0, 0, 0),
+              VB.edge(bb.x1, bb.y0, null, null, bb.x1, bb.y1, 0, 0, 0),
+              VB.edge(bb.x1, bb.y1, null, null, bb.x0, bb.y1, 0, 0, 0),
+              VB.edge(bb.x0, bb.y1, null, null, bb.x0, bb.y0, 0, 0, 0)
+            ];
+            refreshGhosts();
+          }
+          app.setMsg("text box adjusted — click away to apply");
+        }
+        app.requestRender();
+        return;
+      }
       if (d && d.kind === "band") {
         self.drag = null;
         if (pos) d.cur = pos;
@@ -643,10 +738,12 @@
                  y: total[1] * x + total[3] * y + total[5] };
       }
       if (self.float && self.float.textBlock) {
-        // a floating TEXT block: draw it through the whole session
-        // matrix (its fonts still live in the doc)
+        // a floating TEXT block: gestures over the block's OWN matrix
+        // (box tabs shift it mid-drag before the frame rebases)
+        var tg = m ? matMul(m, gestureM()) : gestureM();
         VB.drawTextBlock(ctx, app.doc, {
-          matrix: total, records: self.float.textBlock.records
+          matrix: matMul(tg, self.float.textBlock.matrix),
+          records: self.float.textBlock.records
         });
       } else if (self.float) {
         // the lifted clip renders here with its REAL fills (it no longer
@@ -737,15 +834,28 @@
       ctx.stroke();
       var hs = handles();
       var r = 4 * hair;
-      // text sessions show corners + knob only: free transform scales
-      // whole text; box-width tabs live on the arrow selection and the
-      // edit box, where they re-wrap instead of stretching glyphs
+      // text sessions: corners free-transform, mid-edges are BOX TABS
+      // (flat bars — sides re-wrap the width, top/bottom set the size)
       var isText = self.items && self.items.textIndex != null;
       hs.forEach(function (h, hi) {
-        if (isText && hi % 2 === 1) return;
         var p = mp(h.x, h.y);
-        ctx.fillStyle = "#000";
-        ctx.fillRect(p.x - r, p.y - r, 2 * r, 2 * r);
+        if (isText && hi % 2 === 1) {
+          var ci = (hi - 1) / 2;
+          var ca = mp(corners[ci][0], corners[ci][1]);
+          var cb = mp(corners[(ci + 1) % 4][0], corners[(ci + 1) % 4][1]);
+          var dx = cb.x - ca.x, dy = cb.y - ca.y;
+          var len = Math.hypot(dx, dy) || 1;
+          var ux = dx / len * 8 * hair, uy = dy / len * 8 * hair;
+          ctx.strokeStyle = "#000";
+          ctx.lineWidth = 4 * hair;
+          ctx.beginPath();
+          ctx.moveTo(p.x - ux, p.y - uy);
+          ctx.lineTo(p.x + ux, p.y + uy);
+          ctx.stroke();
+        } else {
+          ctx.fillStyle = "#000";
+          ctx.fillRect(p.x - r, p.y - r, 2 * r, 2 * r);
+        }
       });
       // rotation knob on a stem off the mid-top edge
       var knob = rotKnob(total);

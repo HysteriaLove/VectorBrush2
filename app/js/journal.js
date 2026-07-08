@@ -207,6 +207,10 @@
           history.push(project);
           VB.textWrapApply(doc, op.index, op.width, op.dx);
           break;
+        case "textSize":
+          history.push(project);
+          VB.textSizeApply(doc, op.index, op.height, op.dy);
+          break;
         case "undo":
           history.undo(project);
           sync();

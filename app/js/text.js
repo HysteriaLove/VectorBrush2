@@ -82,7 +82,9 @@
       matrix: op.matrix.slice(),
       records: opRecords(merged, op.records),
       wrapWidth: op.wrapWidth || null,
-      pitch: op.pitch || null
+      pitch: op.pitch || null,
+      align: op.align || 0,
+      spacing: op.spacing || 0
     };
     doc.texts.push(block);
     return doc.texts.length - 1;
@@ -124,6 +126,8 @@
     t.records = opRecords(merged, op.records);
     t.wrapWidth = op.wrapWidth || null;
     t.pitch = op.pitch || t.pitch || null;
+    t.align = op.align || 0;
+    t.spacing = op.spacing || 0;
     if (op.matrix) t.matrix = op.matrix.slice(); // box origin moved
     return true;
   }
@@ -274,13 +278,31 @@
     return lines;
   }
 
+  function lineWidth(glyphs) {
+    var w = 0;
+    for (var i = 0; i < glyphs.length; i++) w += glyphs[i].adv;
+    return w;
+  }
+
+  /** Per-line x offset for an alignment (0 left, 1 center, 2 right)
+   *  within a box width. */
+  function alignX(align, boxW, lineW) {
+    if (align === 1) return Math.max(0, Math.round((boxW - lineW) / 2));
+    if (align === 2) return Math.max(0, boxW - lineW);
+    return 0;
+  }
+
   /** Lay a string out with a parsed TTF into a self-contained textCreate
    *  op. sizeTw = point size in twips (Flash: height field). Advances
-   *  bake hmtx + kerning at authoring time, like MX2004. wrapWidth
-   *  (block-local twips) makes it a fixed-width box: lines wrap at
-   *  spaces, continuation records are marked soft so edits and later
-   *  re-wraps can reassemble the paragraphs. */
-  function buildTextOp(ttf, meta, str, sizeTw, color, x, y, wrapWidth) {
+   *  bake hmtx + kerning + letter-spacing at authoring time, like
+   *  MX2004. wrapWidth (block-local twips) makes it a fixed-width box:
+   *  lines wrap at spaces, continuation records are marked soft so
+   *  edits and later re-wraps can reassemble the paragraphs. align:
+   *  0 left / 1 center / 2 right. spacing: extra tracking in twips. */
+  function buildTextOp(ttf, meta, str, sizeTw, color, x, y, wrapWidth,
+                       align, spacing) {
+    align = align || 0;
+    spacing = spacing || 0;
     var scale = sizeTw / ttf.unitsPerEm;
     var subset = [];       // op font glyph list
     var subsetByCode = {};
@@ -293,7 +315,7 @@
     }
     var baseline = Math.round(ttf.winAscent * scale);
     var pitch = Math.round((ttf.winAscent + ttf.winDescent) * scale);
-    var records = [];
+    var lineRuns = []; // {glyphs, soft, str, lineNo}
     var lineNo = 0;
     str.split("\n").forEach(function (para) {
       var run = [];
@@ -304,23 +326,31 @@
         if (ci + 1 < para.length) {
           adv += ttf.kern(gi, ttf.glyphIndex(para.charCodeAt(ci + 1)));
         }
-        run.push({ code: code, gi: opGi(code), adv: Math.round(adv * scale) });
+        run.push({ code: code, gi: opGi(code),
+                   adv: Math.round(adv * scale) + spacing });
       }
       var lines = wrapRun(run, wrapWidth);
       if (!lines.length) { lineNo++; return; } // blank line advances y
       lines.forEach(function (line, li) {
-        records.push({
-          height: sizeTw,
-          color: { r: color.r, g: color.g, b: color.b, a: color.a },
-          x: 0, y: baseline + lineNo * pitch,
-          soft: li > 0,
-          str: line.map(function (e2) { return String.fromCharCode(e2.code); }).join(""),
-          glyphs: line.map(function (e2) { return { gi: e2.gi, adv: e2.adv }; })
-        });
+        lineRuns.push({ line: line, soft: li > 0, lineNo: lineNo });
         lineNo++;
       });
     });
-    if (records.length === 0) return null;
+    if (lineRuns.length === 0) return null;
+    var boxW = wrapWidth ||
+      Math.max.apply(null, lineRuns.map(function (lr) { return lineWidth(lr.line); }));
+    var records = lineRuns.map(function (lr) {
+      var rec = {
+        height: sizeTw,
+        color: { r: color.r, g: color.g, b: color.b, a: color.a },
+        x: alignX(align, boxW, lineWidth(lr.line)),
+        y: baseline + lr.lineNo * pitch,
+        str: lr.line.map(function (e2) { return String.fromCharCode(e2.code); }).join(""),
+        glyphs: lr.line.map(function (e2) { return { gi: e2.gi, adv: e2.adv }; })
+      };
+      if (lr.soft) rec.soft = true;
+      return rec;
+    });
     return {
       op: "textCreate",
       font: { name: meta.name, bold: !!meta.bold, italic: !!meta.italic,
@@ -328,8 +358,31 @@
       matrix: [1, 0, 0, 1, Math.round(x), Math.round(y)],
       records: records,
       wrapWidth: wrapWidth || null,
-      pitch: pitch
+      pitch: pitch,
+      align: align,
+      spacing: spacing
     };
+  }
+
+  /** Change a block's point size using ONLY its records: outlines are
+   *  EM-relative, so scaling height/advances/offsets by the ratio is
+   *  exact (Flash's H field semantics). No font file needed. */
+  function textSizeApply(doc, index, height, dy) {
+    var t = doc.texts[index];
+    if (!t || !t.records.length || height < 20) return false;
+    var f = height / t.records[0].height;
+    if (!isFinite(f) || f <= 0) return false;
+    t.records.forEach(function (rec) {
+      rec.height = Math.round(rec.height * f);
+      rec.x = Math.round(rec.x * f);
+      rec.y = Math.round(rec.y * f);
+      rec.glyphs.forEach(function (g) { g.adv = Math.round(g.adv * f); });
+    });
+    if (t.pitch) t.pitch = Math.round(t.pitch * f);
+    if (t.wrapWidth) t.wrapWidth = Math.round(t.wrapWidth * f);
+    if (t.spacing) t.spacing = Math.round(t.spacing * f);
+    if (dy) t.matrix = matMul(t.matrix, [1, 0, 0, 1, 0, dy]);
+    return true;
   }
 
   /** Re-wrap a block to a new box width using ONLY its stored records
@@ -374,13 +427,20 @@
           font: p.rec0.font, height: p.rec0.height,
           color: { r: p.rec0.color.r, g: p.rec0.color.g,
                    b: p.rec0.color.b, a: p.rec0.color.a },
-          x: p.rec0.x, y: y0 + lineNo * pitch,
+          x: 0, y: y0 + lineNo * pitch,
           glyphs: line.map(function (e2) { return { gi: e2.gi, adv: e2.adv }; })
         };
         if (li > 0) rec.soft = true; // presence-only, like the codecs
         out.push(rec);
         lineNo++;
       });
+    });
+    // re-apply the block's alignment inside the (possibly new) box
+    var boxW = width || Math.max.apply(null, out.map(function (rec) {
+      return lineWidth(rec.glyphs);
+    }));
+    out.forEach(function (rec) {
+      rec.x = alignX(t.align || 0, boxW, lineWidth(rec.glyphs));
     });
     t.records = out;
     t.wrapWidth = width || null;
@@ -472,6 +532,15 @@
       var pt = inp ? parseFloat(inp.value) || 24 : 24;
       return Math.round(pt * 20);
     }
+    function panelColor() {
+      var inp = document.getElementById("text-color");
+      if (inp && /^#[0-9a-f]{6}$/i.test(inp.value)) {
+        return { r: parseInt(inp.value.slice(1, 3), 16),
+                 g: parseInt(inp.value.slice(3, 5), 16),
+                 b: parseInt(inp.value.slice(5, 7), 16), a: 255 };
+      }
+      return { r: 0, g: 0, b: 0, a: 255 };
+    }
 
     function makeArea(x, y) {
       var area = document.createElement("textarea");
@@ -490,7 +559,7 @@
       var s = self.session;
       if (!s) return;
       var op = buildTextOp(s.ttf, s.meta, s.area.value, s.sizeTw, s.color,
-                           0, 0, s.wrapWidth);
+                           0, 0, s.wrapWidth, s.align, s.spacing);
       if (op) {
         var doc = { fonts: [], texts: [] };
         textApplyOp(doc, op);
@@ -553,12 +622,14 @@
         stash: null,
         original: "",
         wrapWidth: null,
+        align: 0,
+        spacing: 0,
         ttf: ttf,
         meta: { name: entry.family || label,
                 bold: style.indexOf("bold") >= 0,
                 italic: style.indexOf("italic") >= 0 || style.indexOf("oblique") >= 0 },
         sizeTw: sizeTw(),
-        color: { r: app.fillColor.r, g: app.fillColor.g, b: app.fillColor.b, a: app.fillColor.a }
+        color: panelColor()
       }, screen, "");
       app.setMsg("type; click away to place the text");
     }
@@ -618,6 +689,8 @@
         stash: block,
         original: str,
         wrapWidth: block.wrapWidth || null,
+        align: block.align || 0,
+        spacing: block.spacing || 0,
         ttf: ttf,
         meta: { name: font.name, bold: font.bold, italic: font.italic },
         sizeTw: block.records[0].height,
@@ -641,6 +714,10 @@
         app.doc.texts.splice(s.editIndex, 0, s.stash);
         var unchanged = str === s.original &&
           (s.wrapWidth || null) === (s.stash.wrapWidth || null) &&
+          (s.align || 0) === (s.stash.align || 0) &&
+          (s.spacing || 0) === (s.stash.spacing || 0) &&
+          s.sizeTw === s.stash.records[0].height &&
+          JSON.stringify(s.color) === JSON.stringify(s.stash.records[0].color) &&
           JSON.stringify(s.matrix) === JSON.stringify(s.stash.matrix);
         if (!commit || unchanged) {
           // nothing changed: drop the lift snapshot, record nothing
@@ -656,10 +733,11 @@
           return true;
         }
         var editOp = buildTextOp(s.ttf, s.meta, str, s.sizeTw, s.color,
-                                 0, 0, s.wrapWidth);
+                                 0, 0, s.wrapWidth, s.align, s.spacing);
         var edit = { op: "textEdit", index: s.editIndex,
                      font: editOp.font, records: editOp.records,
-                     wrapWidth: editOp.wrapWidth, pitch: editOp.pitch };
+                     wrapWidth: editOp.wrapWidth, pitch: editOp.pitch,
+                     align: editOp.align, spacing: editOp.spacing };
         if (JSON.stringify(s.matrix) !== JSON.stringify(s.stash.matrix)) {
           edit.matrix = s.matrix.slice(); // the left tab moved the origin
         }
@@ -672,7 +750,8 @@
 
       if (!commit || !str.length) { app.requestRender(); return false; }
       var op = buildTextOp(s.ttf, s.meta, str, s.sizeTw, s.color,
-                           s.matrix[4], s.matrix[5], s.wrapWidth);
+                           s.matrix[4], s.matrix[5], s.wrapWidth,
+                           s.align, s.spacing);
       if (!op) { app.requestRender(); return false; }
       app.record(op);
       app.history.push(app.doc);
@@ -683,6 +762,28 @@
     }
 
     self.commitPending = function () { return endSession(true); };
+
+    /** The properties panel pushes style changes into a live session. */
+    self.setSessionProps = function (props) {
+      var s = self.session;
+      if (!s) return false;
+      if (props.sizeTw) s.sizeTw = props.sizeTw;
+      if (props.color) s.color = props.color;
+      if (props.align !== undefined) s.align = props.align;
+      if (props.spacing !== undefined) s.spacing = props.spacing;
+      if (props.ttf) { s.ttf = props.ttf; s.meta = props.meta; }
+      rebuildPreview();
+      return true;
+    };
+
+    self.sessionProps = function () {
+      var s = self.session;
+      if (!s) return null;
+      return { sizeTw: s.sizeTw, color: s.color, align: s.align || 0,
+               spacing: s.spacing || 0, family: s.meta.name,
+               bold: s.meta.bold, italic: s.meta.italic,
+               wrapWidth: s.wrapWidth, matrix: s.matrix };
+    };
 
     /** The session box's side-tab positions in stage space. */
     function sessionTabs() {
@@ -841,6 +942,7 @@
   VB.textApplyOp = textApplyOp;
   VB.textBreakApply = textBreakApply;
   VB.textWrapApply = textWrapApply;
+  VB.textSizeApply = textSizeApply;
   VB.textEditApply = textEditApply;
   VB.textTransformApply = textTransformApply;
   VB.textDeleteApply = textDeleteApply;
