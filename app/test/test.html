@@ -52,6 +52,7 @@
 <script src="userlog2.js"></script>
 <script src="userlog3.js"></script>
 <script src="userlog4.js"></script>
+<script src="userlog20.js"></script>
 <script>
 (async function () {
   "use strict";
@@ -832,6 +833,25 @@
       check("brush session " + ses.name + " end state sane",
         res.doc.edges.length > ses.minEdges, res.doc.edges.length + " edges");
     }
+
+    // Log 20: brush + bucket fills + pencil, then a marquee move of the
+    // whole cluster. A plain translate must NOT change the edge count —
+    // the per-fill merge used to shred 25 records into 917 (sequential
+    // mask passes destabilizing shared borders). Threshold never goes
+    // back up.
+    var pre20 = (await VB.replayJournal(window.VBUserLog20.ops.slice(0, 10))).doc;
+    var post20 = (await VB.replayJournal(window.VBUserLog20.ops)).doc;
+    check("log20 marquee move replays consistent",
+      VB.integrityReport(post20).length === 0, VB.integrityReport(post20)[0]);
+    check("log20 marquee move does not shred (" + pre20.edges.length +
+      " -> " + post20.edges.length + " records)",
+      post20.edges.length <= pre20.edges.length + 15,
+      post20.edges.length + " records");
+    var micro20 = post20.edges.filter(function (e) {
+      return Math.hypot(e.bx - e.ax, e.by - e.ay) <= 5;
+    });
+    check("log20 leaves no micro-fragments", micro20.length === 0,
+      micro20.length + " sub-5tw records");
   })();
 
   // ======================= unit tests: shape primitives =====================

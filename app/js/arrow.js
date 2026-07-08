@@ -287,18 +287,41 @@
   function arrowTransformSel(doc, fillPicks, edgeKeys, m) {
     fillPicks = fillPicks || [];
     edgeKeys = edgeKeys || [];
-    // resolve everything against the pre-op document
-    var fills = [];
+    // resolve everything against the pre-op document into a standalone
+    // clip (its own planar map) so the re-merge is ONE mask pass —
+    // sequential per-fill passes destabilize shared borders (see
+    // mergeLifted)
+    var lifted = new VB.VBDocument();
+    lifted.width = doc.width; lifted.height = doc.height;
     fillPicks.forEach(function (p) {
       var got = faceLoopsAt(doc, p.x, p.y);
-      if (got) fills.push(got);
+      if (!got) return;
+      var src = doc.fills[got.fillIdx - 1];
+      var idx = lifted.addFillStyle({
+        type: "solid",
+        color: { r: src.color.r, g: src.color.g, b: src.color.b, a: src.color.a }
+      });
+      got.loops.forEach(function (loop) {
+        loop.forEach(function (e) {
+          lifted.edges.push(VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, 0, idx, 0));
+        });
+      });
     });
     var strokes = [];
     edgeKeys.forEach(function (k) {
       var i = findByKey(doc, k);
       if (i >= 0) strokes.push(doc.edges[i]);
     });
-    if (fills.length === 0 && strokes.length === 0) return false;
+    strokes.forEach(function (e) {
+      if (e.line === 0) return;
+      var ls = doc.lines[e.line - 1];
+      var lnIdx = lifted.addLineStyle({
+        width: ls.width,
+        color: { r: ls.color.r, g: ls.color.g, b: ls.color.b, a: ls.color.a }
+      });
+      lifted.edges.push(VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, 0, 0, lnIdx));
+    });
+    if (lifted.edges.length === 0) return false;
 
     // lift originals. Lifting a stroke OFF a fill boundary leaves the
     // fill intact behind a lineless edge (Flash: fills don't follow
@@ -315,61 +338,7 @@
     });
     doc.edges = rebuilt;
 
-    function txEdge(e, f0, f1, ln) {
-      var a = applyM(m, e.ax, e.ay);
-      var b = applyM(m, e.bx, e.by);
-      var c = e.cx === null ? null : applyM(m, e.cx, e.cy);
-      return VB.edge(Math.round(a.x), Math.round(a.y),
-        c === null ? null : Math.round(c.x), c === null ? null : Math.round(c.y),
-        Math.round(b.x), Math.round(b.y), f0, f1, ln);
-    }
-
-    // re-merge fills, each through the mask pipeline
-    fills.forEach(function (f) {
-      var fitted = [];
-      f.loops.forEach(function (loop) {
-        loop.forEach(function (e) {
-          var ne = txEdge(e, 0, 0, 0);
-          if (!VB.edgeIsDegenerate(ne)) fitted.push(ne);
-        });
-      });
-      if (fitted.length === 0) return;
-      var windingLoops = fitted.map(function (e) {
-        return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, 0, 0, 0);
-      });
-      function insideMoved(px, py) {
-        return VB.geom.windingNumber(windingLoops, px, py) !== 0;
-      }
-      var preOp = new VB.VBDocument();
-      preOp.width = doc.width; preOp.height = doc.height;
-      preOp.fills = doc.fills; preOp.lines = doc.lines;
-      preOp.edges = doc.edges.map(function (e) {
-        return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, e.fill0, e.fill1, e.line);
-      });
-      var adopted = VB.adoptIdenticalEdges(doc, fitted);
-      var pieces = VB.nodeEdges(doc, adopted.fresh);
-      for (var k = 0; k < pieces.length; k++) doc.edges.push(pieces[k]);
-      VB.applyRegionMask(doc, preOp, insideMoved, f.fillIdx,
-                         pieces.concat(adopted.twins));
-    });
-
-    // re-merge strokes: node in, inherit destination fills
-    var newStrokes = [];
-    strokes.forEach(function (e) {
-      var ne = txEdge(e, 0, 0, e.line);
-      if (!VB.edgeIsDegenerate(ne)) newStrokes.push(ne);
-    });
-    if (newStrokes.length) {
-      var pieces2 = VB.nodeEdges(doc, newStrokes);
-      pieces2.forEach(function (pc) {
-        var mid = VB.geom.evalEdge(pc, 0.5);
-        var f = VB.geom.fillAt(doc, mid.x, mid.y);
-        pc.fill0 = f; pc.fill1 = f;
-        doc.edges.push(pc);
-      });
-      VB.repairPlanar(doc);
-    }
-    return true;
+    return mergeLifted(doc, lifted, m);
   }
 
   // ---- region selection (marquee / lasso) -------------------------------------
@@ -464,7 +433,18 @@
     return mergeLifted(doc, lifted, m);
   }
 
-  /** Merge a lifted clip (a standalone document) into doc under matrix m. */
+  /** Merge a lifted clip (a standalone document) into doc under matrix m.
+   *
+   *  ONE insertion and ONE mask pass for the whole clip. The clip is
+   *  already a consistent planar map: its edges keep their claims (style
+   *  indices remapped into doc's tables), and the face stamping answers
+   *  "which moved fill owns this point" via winding oracles built from
+   *  the clip's own boundary loops. Per-fill sequential masking is what
+   *  shredded documents: each pass's micro-welds shifted shared borders
+   *  a few twips, so the next pass's identical border went
+   *  near-coincident and fragmented (25 edges became 917 on a plain
+   *  marquee move in user log 20).
+   */
   function mergeLifted(doc, lifted, m) {
     function txEdge(e, f0, f1, ln) {
       var a = applyM(m, e.ax, e.ay);
@@ -475,57 +455,72 @@
         Math.round(b.x), Math.round(b.y), f0, f1, ln);
     }
 
-    // fills: per fill style of the lifted clip, paint the transformed loops
+    // remap styles into the destination tables
+    var fillMap = [0];
+    lifted.fills.forEach(function (f) {
+      fillMap.push(doc.addFillStyle({
+        type: "solid",
+        color: { r: f.color.r, g: f.color.g, b: f.color.b, a: f.color.a }
+      }));
+    });
+    var lineMap = [0];
+    lifted.lines.forEach(function (l) {
+      lineMap.push(doc.addLineStyle({
+        width: l.width,
+        color: { r: l.color.r, g: l.color.g, b: l.color.b, a: l.color.a }
+      }));
+    });
+
+    // winding oracles per source fill, from the clip's own directed
+    // boundary loops (fill-on-right), transformed
+    var oracles = []; // {srcIdx, edges}
     for (var f = 1; f <= lifted.fills.length; f++) {
       var got = VB.fillLoops(lifted, f);
       if (!got.loops.length) continue;
-      var fitted = [];
+      var w = [];
       got.loops.forEach(function (loop) {
         loop.forEach(function (d) {
           var ne = txEdge(d, 0, 0, 0);
-          if (!VB.edgeIsDegenerate(ne)) fitted.push(ne);
+          if (!VB.edgeIsDegenerate(ne)) w.push(ne);
         });
       });
-      if (!fitted.length) continue;
-      var winding = fitted.map(function (e) {
-        return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, 0, 0, 0);
-      });
-      var fillIdx = doc.addFillStyle({
-        type: "solid",
-        color: {
-          r: lifted.fills[f - 1].color.r, g: lifted.fills[f - 1].color.g,
-          b: lifted.fills[f - 1].color.b, a: lifted.fills[f - 1].color.a
+      if (w.length) oracles.push({ src: f, edges: w });
+    }
+    function stampAt(x, y) {
+      for (var i = 0; i < oracles.length; i++) {
+        if (VB.geom.windingNumber(oracles[i].edges, x, y) !== 0) {
+          return fillMap[oracles[i].src];
         }
-      });
-      maskWith(doc, fitted, function (x, y) {
-        return VB.geom.windingNumber(winding, x, y) !== 0;
-      }, fillIdx);
+      }
+      return 0;
+    }
+    function insideMoved(x, y) {
+      for (var i = 0; i < oracles.length; i++) {
+        if (VB.geom.windingNumber(oracles[i].edges, x, y) !== 0) return true;
+      }
+      return false;
     }
 
-    // strokes: transform, re-node, inherit destination fills
-    var newStrokes = [];
+    // ALL clip edges, transformed, claims and styles intact
+    var moved = [];
     lifted.edges.forEach(function (e) {
-      if (e.line === 0) return;
-      var lnIdx = doc.addLineStyle({
-        width: lifted.lines[e.line - 1].width,
-        color: {
-          r: lifted.lines[e.line - 1].color.r, g: lifted.lines[e.line - 1].color.g,
-          b: lifted.lines[e.line - 1].color.b, a: lifted.lines[e.line - 1].color.a
-        }
-      });
-      var ne = txEdge(e, 0, 0, lnIdx);
-      if (!VB.edgeIsDegenerate(ne)) newStrokes.push(ne);
+      var ne = txEdge(e, fillMap[e.fill0] || 0, fillMap[e.fill1] || 0,
+                      lineMap[e.line] || 0);
+      if (!VB.edgeIsDegenerate(ne)) moved.push(ne);
     });
-    if (newStrokes.length) {
-      var pieces = VB.nodeEdges(doc, newStrokes);
-      pieces.forEach(function (pc) {
-        var mid = VB.geom.evalEdge(pc, 0.5);
-        var fl = VB.geom.fillAt(doc, mid.x, mid.y);
-        pc.fill0 = fl; pc.fill1 = fl;
-        doc.edges.push(pc);
-      });
-      VB.repairPlanar(doc);
-    }
+    if (moved.length === 0) return false;
+
+    var preOp = new VB.VBDocument();
+    preOp.width = doc.width; preOp.height = doc.height;
+    preOp.fills = doc.fills; preOp.lines = doc.lines;
+    preOp.edges = doc.edges.map(function (e) {
+      return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, e.fill0, e.fill1, e.line);
+    });
+    var adopted = VB.adoptIdenticalEdges(doc, moved);
+    var pieces = VB.nodeEdges(doc, adopted.fresh);
+    for (var k = 0; k < pieces.length; k++) doc.edges.push(pieces[k]);
+    VB.applyRegionMask(doc, preOp, insideMoved, stampAt,
+                       pieces.concat(adopted.twins));
     return true;
   }
 

@@ -39,6 +39,14 @@
     var before = doc.edges.length;
     var fence = new Set(fencePieces || []);
     var covered = coverInside || insideMask;
+    // maskFill may be a FUNCTION (x, y) -> fill index: multi-fill regions
+    // (a moved clip containing several fills) stamp in ONE pass instead
+    // of one mask per fill — sequential passes destabilize each other's
+    // shared borders (micro-welds shift nodes between passes and the
+    // next pass's identical border goes near-coincident and shreds).
+    var stampFor = typeof maskFill === "function"
+      ? maskFill
+      : function () { return maskFill; };
 
     // Everything the op covers goes: interior fill boundaries dissolve
     // into the region, covered strokes are erased.
@@ -228,7 +236,8 @@
     var stamps = built.faces.map(function (f) {
       var probe = faceProbe(f);
       var inMask = insideMask(probe.x, probe.y);
-      var stamp = inMask ? maskFill : VB.geom.fillAt(preOp, probe.x, probe.y);
+      var stamp = inMask ? stampFor(probe.x, probe.y)
+                         : VB.geom.fillAt(preOp, probe.x, probe.y);
       diag.push({
         probe: { x: Math.round(probe.x), y: Math.round(probe.y) },
         area: Math.round(f.area), inMask: inMask, stamp: stamp,
