@@ -129,22 +129,16 @@
 
   // stats (optional) is filled with Flash-grammar record counts so the
   // debug panel can show exactly what the document costs on the wire.
-  function encodeBody(doc, stats) {
-    stats = stats || {};
-    stats.styleChanges = 0;
-    stats.moveTos = 0;
-    stats.straightEdges = 0;
-    stats.curvedEdges = 0;
-    var hasText = (doc.texts && doc.texts.length) || (doc.fonts && doc.fonts.length);
-    var w = new VB.BitWriter();
-    w.u8(hasText ? 2 : 1); // v2 = v1 + a trailing text section
-    w.rect({ xmin: 0, xmax: doc.width, ymin: 0, ymax: doc.height });
-    writeColor(w, doc.background);
-
+  // The reusable cell payload: styles + shape records (+ text section).
+  // v1/v2 bodies contain exactly one (text presence implied by the
+  // version); v3 layer cells carry an explicit hasText flag byte.
+  function encodeCell(w, doc, stats, withTextFlag) {
+    var hasText = !!((doc.texts && doc.texts.length) ||
+                     (doc.fonts && doc.fonts.length));
     writeStyleCount(w, doc.fills.length);
     for (var i = 0; i < doc.fills.length; i++) {
       var f = doc.fills[i];
-      if (f.type !== "solid") throw new Error("VBD v1 encodes solid fills only");
+      if (f.type !== "solid") throw new Error("VBD encodes solid fills only");
       w.u8(0);
       writeColor(w, f.color);
     }
@@ -162,8 +156,70 @@
 
     writeShapeRecords(w, prepareShapeEdges(doc), numFillBits, numLineBits, stats);
     w.align();
-    if (hasText) writeTextSection(w, doc);
+    if (withTextFlag) {
+      w.u8(hasText ? 1 : 0);
+      if (hasText) writeTextSection(w, doc);
+    } else if (hasText) {
+      writeTextSection(w, doc);
+    }
+    return hasText;
+  }
+
+  function encodeBody(doc, stats) {
+    stats = stats || {};
+    stats.styleChanges = 0;
+    stats.moveTos = 0;
+    stats.straightEdges = 0;
+    stats.curvedEdges = 0;
+    var hasText = (doc.texts && doc.texts.length) || (doc.fonts && doc.fonts.length);
+    var w = new VB.BitWriter();
+    w.u8(hasText ? 2 : 1); // v2 = v1 + a trailing text section
+    w.rect({ xmin: 0, xmax: doc.width, ymin: 0, ymax: doc.height });
+    writeColor(w, doc.background);
+    encodeCell(w, doc, stats, false);
     return w.toUint8Array();
+  }
+
+  function writeStr(w, s) {
+    var utf8 = unescape(encodeURIComponent(s));
+    w.u8(Math.min(utf8.length, 255));
+    for (var i = 0; i < Math.min(utf8.length, 255); i++) w.u8(utf8.charCodeAt(i));
+  }
+
+  // v3: the whole Flash-style DOM — scenes -> layers -> frame cells.
+  function encodeProjectBody(project, stats) {
+    stats = stats || {};
+    stats.styleChanges = 0;
+    stats.moveTos = 0;
+    stats.straightEdges = 0;
+    stats.curvedEdges = 0;
+    var w = new VB.BitWriter();
+    w.u8(3);
+    w.rect({ xmin: 0, xmax: project.width, ymin: 0, ymax: project.height });
+    writeColor(w, project.background);
+    w.u8(project.scenes.length);
+    project.scenes.forEach(function (sc) {
+      writeStr(w, sc.name);
+      w.u16(sc.layers.length);
+      sc.layers.forEach(function (l) {
+        writeStr(w, l.name);
+        w.u8((l.visible ? 1 : 0) | (l.locked ? 2 : 0));
+        encodeCell(w, l.frames[0], stats, true);
+      });
+    });
+    w.u8(project.cur.scene);
+    w.u8(project.cur.layer);
+    return w.toUint8Array();
+  }
+
+  // A single default layer round-trips as plain v1/v2 (older builds can
+  // still open the file); anything structural forces v3.
+  function needsProjectFormat(project) {
+    if (project.scenes.length > 1) return true;
+    var sc = project.scenes[0];
+    if (sc.name !== "Scene 1" || sc.layers.length > 1) return true;
+    var l = sc.layers[0];
+    return l.name !== "Layer 1" || !l.visible || l.locked;
   }
 
   // ---- text section (v2) -----------------------------------------------------
@@ -344,9 +400,16 @@
     w.ub(1, 0); w.ub(5, 0); // end record
   }
 
-  async function encodeVBD(doc, opts) {
+  async function encodeVBD(target, opts) {
     var compress = !opts || opts.compress !== false;
-    var body = encodeBody(doc);
+    var body;
+    if (target.scenes) {
+      body = needsProjectFormat(target)
+        ? encodeProjectBody(target)
+        : encodeBody(target.activeCell());
+    } else {
+      body = encodeBody(target);
+    }
     var compressed = false;
     if (compress) {
       var deflated = await deflate(body);
@@ -377,24 +440,8 @@
     return n === 0xff ? r.u16() : n;
   }
 
-  async function decodeVBD(bytes) {
-    if (!isVBD(bytes)) throw new Error("Not a VBD file");
-    var flags = bytes[4];
-    var body = bytes.subarray(5);
-    if (flags & 1) body = await inflate(body);
-
-    var r = new VB.BitReader(body, 0);
-    var version = r.u8();
-    if (version !== 1 && version !== 2) {
-      throw new Error("Unsupported VBD version " + version);
-    }
-
-    var doc = new VB.VBDocument();
-    var stage = r.rect();
-    doc.width = stage.xmax - stage.xmin;
-    doc.height = stage.ymax - stage.ymin;
-    doc.background = readColor(r);
-
+  function decodeCell(r, doc, textMode) {
+    // textMode: "none" (v1) | "implicit" (v2) | "flagged" (v3 cells)
     var fillCount = readStyleCount(r);
     for (var i = 0; i < fillCount; i++) {
       var t = r.u8();
@@ -415,7 +462,7 @@
       if (r.ub(1) === 0) {
         var recFlags = r.ub(5);
         if (recFlags === 0) break;
-        if (recFlags & 16) throw new Error("VBD v1 must not contain NewStyles records");
+        if (recFlags & 16) throw new Error("VBD must not contain NewStyles records");
         if (recFlags & 1) { var n = r.ub(5); penX = r.sb(n); penY = r.sb(n); }
         if (recFlags & 2) f0 = r.ub(numFillBits);
         if (recFlags & 4) f1 = r.ub(numFillBits);
@@ -437,10 +484,74 @@
       }
     }
 
-    if (version >= 2) {
+    if (textMode === "implicit") {
       r.align();
       readTextSection(r, doc);
+    } else if (textMode === "flagged") {
+      r.align();
+      if (r.u8() === 1) readTextSection(r, doc);
     }
+  }
+
+  function readStr(r) {
+    var len = r.u8();
+    var raw = "";
+    for (var i = 0; i < len; i++) raw += String.fromCharCode(r.u8());
+    try { return decodeURIComponent(escape(raw)); } catch (e) { return raw; }
+  }
+
+  async function decodeVBD(bytes) {
+    if (!isVBD(bytes)) throw new Error("Not a VBD file");
+    var flags = bytes[4];
+    var body = bytes.subarray(5);
+    if (flags & 1) body = await inflate(body);
+
+    var r = new VB.BitReader(body, 0);
+    var version = r.u8();
+    if (version < 1 || version > 3) {
+      throw new Error("Unsupported VBD version " + version);
+    }
+
+    if (version === 3) {
+      var stage3 = r.rect();
+      var project = new VB.Project(stage3.xmax - stage3.xmin,
+                                   stage3.ymax - stage3.ymin);
+      project.background = readColor(r);
+      project.scenes = [];
+      var nScenes = r.u8();
+      for (var si = 0; si < nScenes; si++) {
+        var scene = { name: readStr(r), layers: [] };
+        var nLayers = r.u16();
+        for (var li = 0; li < nLayers; li++) {
+          var lname = readStr(r);
+          var lflags = r.u8();
+          var cell = new VB.VBDocument();
+          cell.width = project.width;
+          cell.height = project.height;
+          cell.background = project.background;
+          decodeCell(r, cell, "flagged");
+          scene.layers.push({
+            name: lname, visible: !!(lflags & 1), locked: !!(lflags & 2),
+            frames: [cell]
+          });
+        }
+        project.scenes.push(scene);
+      }
+      project.cur.scene = Math.min(r.u8(), project.scenes.length - 1);
+      project.cur.layer = Math.min(r.u8(),
+        project.scenes[project.cur.scene].layers.length - 1);
+      return {
+        doc: project.activeCell(), project: project,
+        info: { version: 3, compressed: !!(flags & 1) }
+      };
+    }
+
+    var doc = new VB.VBDocument();
+    var stage = r.rect();
+    doc.width = stage.xmax - stage.xmin;
+    doc.height = stage.ymax - stage.ymin;
+    doc.background = readColor(r);
+    decodeCell(r, doc, version === 2 ? "implicit" : "none");
 
     return { doc: doc, info: { version: version, compressed: !!(flags & 1) } };
   }

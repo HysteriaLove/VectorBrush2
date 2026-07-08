@@ -41,6 +41,7 @@
 <script src="../js/planarity.js"></script>
 <script src="../js/journal.js"></script>
 <script src="../js/history.js"></script>
+<script src="../js/project.js"></script>
 <script src="../js/debug.js"></script>
 <script src="../js/pencil.js"></script>
 <script src="../js/shapes.js"></script>
@@ -1527,6 +1528,108 @@
     hist.undo(doc1);
     check("history restores text blocks", doc1.texts.length === savedTexts,
       doc1.texts.length + " texts");
+  })();
+
+  // ================== unit tests: project DOM (scenes/layers) ==================
+  // The Flash-style containment chain (docs/JSFL.pdf): Project -> scenes
+  // -> layers -> frame cells. Geometry ops target the ACTIVE layer's
+  // planar map; layer/scene switches are journal ops.
+  log("project DOM (scenes/layers):");
+  await (async function () {
+    var red = { r: 204, g: 102, b: 102, a: 255 };
+    var blue = { r: 102, g: 204, b: 255, a: 255 };
+    var base = [
+      { op: "new", width: 11000, height: 8000 },
+      { op: "rect", x0: 2000, y0: 2000, x1: 5000, y1: 4000, fill: red, line: null },
+      { op: "layerAdd" }, // inserts ABOVE the active layer and selects it
+      { op: "rect", x0: 3000, y0: 2500, x1: 6000, y1: 4500, fill: blue, line: null }
+    ];
+    var res = await VB.replayJournal(base);
+    var layers = res.project.scene().layers;
+    check("layers isolate their planar maps",
+      layers.length === 2 &&
+      VB.geom.fillAt(layers[1].frames[0], 2200, 2200) === 1 && // red below
+      VB.geom.fillAt(layers[0].frames[0], 2200, 2200) === 0 && // top empty there
+      VB.geom.fillAt(layers[0].frames[0], 5500, 4200) === 1,   // blue above
+      layers.map(function (l) { return l.frames[0].edges.length; }).join(","));
+    check("active cell is the new top layer",
+      res.doc === layers[0].frames[0]);
+
+    // render stacking: overlap shows the TOP layer's blue; uncovered
+    // area shows the bottom red; hiding the bottom layer removes it
+    var cv = document.createElement("canvas");
+    cv.width = 550; cv.height = 400;
+    VB.renderProject(cv.getContext("2d"), res.project, { zoom: 1, panX: 0, panY: 0 });
+    var pOver = cv.getContext("2d").getImageData(200, 150, 1, 1).data;  // (4000,3000)tw
+    var pRed = cv.getContext("2d").getImageData(110, 110, 1, 1).data;   // (2200,2200)tw
+    check("top layer renders over bottom",
+      pOver[2] > 200 && pOver[0] < 150, Array.from(pOver).join(","));
+    check("bottom layer shows where uncovered",
+      pRed[0] > 180 && pRed[2] < 150, Array.from(pRed).join(","));
+    var resHidden = await VB.replayJournal(
+      base.concat([{ op: "layerVisible", index: 1, on: false }]));
+    VB.renderProject(cv.getContext("2d"), resHidden.project, { zoom: 1, panX: 0, panY: 0 });
+    var pHid = cv.getContext("2d").getImageData(110, 110, 1, 1).data;
+    check("hidden layer does not render",
+      pHid[0] > 230 && pHid[1] > 230 && pHid[2] > 230, Array.from(pHid).join(","));
+
+    // undo unwinds structure: two undos = before blue rect, before layerAdd
+    var resUndo = await VB.replayJournal(
+      base.concat([{ op: "undo" }, { op: "undo" }]));
+    check("undo unwinds layer structure",
+      resUndo.project.scene().layers.length === 1 &&
+      VB.geom.fillAt(resUndo.doc, 2200, 2200) === 1,
+      resUndo.project.scene().layers.length + " layers");
+
+    // vbd: multi-layer forces v3 and round-trips; single default stays v1
+    var bytes3 = await VB.encodeVBD(res.project, { compress: true });
+    var back3 = await VB.decodeVBD(bytes3);
+    check("vbd v3 round-trips the layer DOM",
+      back3.info.version === 3 &&
+      back3.project.scene().layers.length === 2 &&
+      back3.project.scene().layers[0].frames[0].edges.length ===
+        layers[0].frames[0].edges.length &&
+      back3.project.scene().layers[1].frames[0].edges.length ===
+        layers[1].frames[0].edges.length &&
+      VB.geom.fillAt(back3.project.scene().layers[1].frames[0], 2200, 2200) === 1,
+      "v" + back3.info.version);
+    var resSingle = await VB.replayJournal(base.slice(0, 2));
+    var bytes1 = await VB.encodeVBD(resSingle.project, { compress: false });
+    check("single default layer still saves as v1/v2",
+      (await VB.decodeVBD(bytes1)).info.version <= 2);
+
+    // SWF export: one DefineShape per layer, bottom to top
+    var swf = VB.encodeSWF(res.project);
+    var imp = await VB.parseSWF(swf.buffer);
+    check("layered SWF export defines a shape per layer",
+      imp.info.shapesDefined === 2 && imp.info.shapesPlaced === 2,
+      JSON.stringify(imp.info));
+
+    // scenes hold independent drawings
+    var res5 = await VB.replayJournal([
+      { op: "new", width: 11000, height: 8000 },
+      { op: "rect", x0: 2000, y0: 2000, x1: 5000, y1: 4000, fill: red, line: null },
+      { op: "sceneAdd" },
+      { op: "rect", x0: 6000, y0: 5000, x1: 9000, y1: 7000, fill: blue, line: null },
+      { op: "sceneSelect", index: 0 }
+    ]);
+    check("scenes hold independent drawings",
+      res5.project.scenes.length === 2 &&
+      res5.project.cur.scene === 0 &&
+      VB.geom.fillAt(res5.doc, 2200, 2200) === 1 &&
+      VB.geom.fillAt(res5.project.scenes[1].layers[0].frames[0], 6500, 5500) === 1 &&
+      VB.geom.fillAt(res5.project.scenes[1].layers[0].frames[0], 2200, 2200) === 0);
+
+    // layer delete / move replay deterministically
+    var res6 = await VB.replayJournal(base.concat([
+      { op: "layerMove", from: 0, to: 1 },   // blue layer to the bottom
+      { op: "layerDelete", index: 0 }        // delete red (now on top)
+    ]));
+    check("layer move + delete replay",
+      res6.project.scene().layers.length === 1 &&
+      VB.geom.fillAt(res6.doc, 5500, 4200) === 1 && // blue survives
+      VB.geom.fillAt(res6.doc, 2100, 2100) === 0,
+      res6.project.scene().layers.length + " layers");
   })();
 
   // ======================= SWF export round-trip ===========================

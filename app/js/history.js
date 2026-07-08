@@ -13,7 +13,7 @@
     this.redoStack = [];
   }
 
-  function snapshot(doc) {
+  function snapshotDoc(doc) {
     return {
       width: doc.width,
       height: doc.height,
@@ -30,7 +30,7 @@
     };
   }
 
-  function restore(doc, snap) {
+  function restoreDoc(doc, snap) {
     doc.width = snap.width;
     doc.height = snap.height;
     doc.background = snap.background;
@@ -39,6 +39,53 @@
     doc.edges = snap.edges;
     doc.fonts = snap.fonts || [];
     doc.texts = snap.texts || [];
+  }
+
+  // A snapshot target is either a bare VBDocument or a whole VB.Project
+  // (scenes -> layers -> frame cells). Undo/redo restores the entire
+  // structure, so layer add/delete/reorder are single undo steps.
+  function snapshot(target) {
+    if (!target.scenes) return snapshotDoc(target);
+    return {
+      project: true,
+      width: target.width, height: target.height,
+      background: JSON.parse(JSON.stringify(target.background)),
+      cur: { scene: target.cur.scene, layer: target.cur.layer },
+      scenes: target.scenes.map(function (sc) {
+        return {
+          name: sc.name,
+          layers: sc.layers.map(function (l) {
+            return {
+              name: l.name, visible: l.visible, locked: l.locked,
+              frames: l.frames.map(snapshotDoc)
+            };
+          })
+        };
+      })
+    };
+  }
+
+  function restore(target, snap) {
+    if (!snap.project) { restoreDoc(target, snap); return; }
+    target.width = snap.width;
+    target.height = snap.height;
+    target.background = snap.background;
+    target.cur = { scene: snap.cur.scene, layer: snap.cur.layer };
+    target.scenes = snap.scenes.map(function (sc) {
+      return {
+        name: sc.name,
+        layers: sc.layers.map(function (l) {
+          return {
+            name: l.name, visible: l.visible, locked: l.locked,
+            frames: l.frames.map(function (cellSnap) {
+              var d = new VB.VBDocument();
+              restoreDoc(d, cellSnap);
+              return d;
+            })
+          };
+        })
+      };
+    });
   }
 
   History.prototype.push = function (doc) {

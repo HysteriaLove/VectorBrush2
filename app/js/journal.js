@@ -38,115 +38,163 @@
    *  hooks: optional { onOp(index, op, doc) } called AFTER each op —
    *         throw from it to abort (used by the replay harness to run
    *         integrity checks and pinpoint the corrupting op).
-   * Returns { doc, history }.
+   * Returns { doc (the active layer's cell), project, history }.
+   *
+   * Geometry ops always target the ACTIVE layer's cell; layer and scene
+   * switches are ops themselves, so replay is deterministic. Journals
+   * from before the DOM existed have no layer ops and replay into a
+   * single-layer project — identical behavior.
    */
   async function replayJournal(ops, hooks) {
-    var doc = new VB.VBDocument();
+    var project = new VB.Project();
     var history = new VB.History();
+    var doc = project.activeCell();
+
+    function sync() { doc = project.activeCell(); }
 
     for (var i = 0; i < ops.length; i++) {
       var op = ops[i];
       switch (op.op) {
         case "new":
-          doc = new VB.VBDocument();
-          if (op.width) doc.width = op.width;
-          if (op.height) doc.height = op.height;
+          project = new VB.Project(op.width, op.height);
           history.clear();
+          sync();
           break;
         case "load": {
           var bytes = b64ToBytes(op.b64);
           var result = VB.isVBD(bytes)
             ? await VB.decodeVBD(bytes)
             : await VB.parseSWF(bytes.buffer);
-          doc = result.doc;
+          project = result.project || VB.wrapDoc(result.doc);
           history.clear();
+          sync();
           break;
         }
+        case "layerAdd":
+          history.push(project);
+          project.addLayer(op.name);
+          sync();
+          break;
+        case "layerDelete":
+          history.push(project);
+          project.deleteLayer(op.index);
+          sync();
+          break;
+        case "layerMove":
+          history.push(project);
+          project.moveLayer(op.from, op.to);
+          sync();
+          break;
+        case "layerRename":
+          history.push(project);
+          project.scene().layers[op.index].name = op.name;
+          break;
+        case "layerSelect":
+          project.selectLayer(op.index);
+          sync();
+          break;
+        case "layerVisible":
+          project.scene().layers[op.index].visible = !!op.on;
+          break;
+        case "layerLock":
+          project.scene().layers[op.index].locked = !!op.on;
+          break;
+        case "sceneAdd":
+          history.push(project);
+          project.addScene(op.name);
+          sync();
+          break;
+        case "sceneSelect":
+          project.selectScene(op.index);
+          sync();
+          break;
         case "pencil":
-          history.push(doc);
+          history.push(project);
           VB.pencilCommit(doc, op.points, op.style,
             op.tolerance === null ? undefined : op.tolerance,
             op.snapTol);
           break;
         case "bucket": {
-          history.push(doc);
+          history.push(project);
           var r = VB.bucketFill(doc, op.x, op.y, { color: op.color });
           if (r.stamped === 0) history.undoStack.pop(); // mirror the tool
           break;
         }
         case "erase": {
-          history.push(doc);
+          history.push(project);
           var re = VB.eraseStroke(doc, op.points, op.radius);
           if (re.removed === 0 && re.boundary === 0) history.undoStack.pop();
           break;
         }
         case "brush":
-          history.push(doc);
+          history.push(project);
           VB.brushStroke(doc, op.points, op.radius, op.color);
           break;
         case "line":
-          history.push(doc);
+          history.push(project);
           VB.lineCommit(doc, op.a, op.b, op.style, op.snapTol);
           break;
         case "oval":
-          history.push(doc);
+          history.push(project);
           VB.shapeCommit(doc, VB.ellipseLoop(
             (op.x0 + op.x1) / 2, (op.y0 + op.y1) / 2,
             (op.x1 - op.x0) / 2, (op.y1 - op.y0) / 2), op.fill, op.line);
           break;
         case "rect":
-          history.push(doc);
+          history.push(project);
           VB.shapeCommit(doc, VB.rectLoop(op.x0, op.y0, op.x1, op.y1),
             op.fill, op.line);
           break;
         case "reshape":
-          history.push(doc);
+          history.push(project);
           VB.arrowReshape(doc, op.key, op.t, op.x, op.y);
           break;
         case "moveNode":
-          history.push(doc);
+          history.push(project);
           VB.arrowMoveNode(doc, op.x, op.y, op.nx, op.ny);
           break;
         case "moveFill":
-          history.push(doc);
+          history.push(project);
           VB.arrowMoveFill(doc, op.x, op.y, op.dx, op.dy);
           break;
         case "deleteFill":
-          history.push(doc);
+          history.push(project);
           VB.arrowDeleteFill(doc, op.x, op.y);
           break;
         case "deleteEdge":
-          history.push(doc);
+          history.push(project);
           VB.arrowDeleteEdge(doc, op.key);
           break;
         case "transformSel":
-          history.push(doc);
+          history.push(project);
           VB.arrowTransformSel(doc, op.fills, op.edgeKeys, op.m);
           break;
         case "deleteSel":
-          history.push(doc);
+          history.push(project);
           VB.arrowDeleteSel(doc, op.fills, op.edgeKeys);
           break;
         case "regionTransform":
-          history.push(doc);
+          history.push(project);
           VB.regionTransform(doc, op.points, op.m);
           break;
         case "regionDelete":
-          history.push(doc);
+          history.push(project);
           VB.regionDelete(doc, op.points);
           break;
         case "undo":
-          history.undo(doc);
+          history.undo(project);
+          sync();
           break;
         case "redo":
-          history.redo(doc);
+          history.redo(project);
+          sync();
           break;
         default:
           throw new Error("unknown journal op: " + op.op);
       }
       if (hooks && hooks.onOp) hooks.onOp(i, op, doc);
     }
-    return { doc: doc, history: history };
+    return { doc: project.activeCell(), project: project, history: history };
   }
 
   // Standard integrity sweep used by the replay harness and tests.

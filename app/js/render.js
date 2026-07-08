@@ -13,6 +13,22 @@
 
   // view: { zoom (screen px per stage px), panX, panY (screen px), dpr }
   function render(ctx, doc, view) {
+    setupStage(ctx, doc, view);
+    drawDocContent(ctx, doc, view);
+  }
+
+  // A whole project: the active scene's layers, bottom to top
+  // (layers[0] is the TOP layer, JSFL's convention).
+  function renderProject(ctx, project, view) {
+    setupStage(ctx, project, view);
+    var layers = project.scene().layers;
+    for (var i = layers.length - 1; i >= 0; i--) {
+      if (!layers[i].visible) continue;
+      drawDocContent(ctx, layers[i].frames[0], view);
+    }
+  }
+
+  function setupStage(ctx, stage, view) {
     var canvas = ctx.canvas;
     var dpr = view.dpr || 1;
     var s = view.zoom * dpr / VB.TWIPS; // screen device px per twip
@@ -30,9 +46,14 @@
     ctx.save();
     ctx.shadowColor = "rgba(0,0,0,0.45)";
     ctx.shadowBlur = 18 / s;
-    ctx.fillStyle = VB.colorToCSS(doc.background);
-    ctx.fillRect(0, 0, doc.width, doc.height);
+    ctx.fillStyle = VB.colorToCSS(stage.background);
+    ctx.fillRect(0, 0, stage.width, stage.height);
     ctx.restore();
+  }
+
+  function drawDocContent(ctx, doc, view) {
+    var dpr = view.dpr || 1;
+    var s = view.zoom * dpr / VB.TWIPS;
 
     var fillPaths = VB.buildFillPaths(doc);
     var strokePaths = VB.buildStrokePaths(doc);
@@ -126,4 +147,5 @@
 
   window.VB = window.VB || {};
   VB.render = render;
+  VB.renderProject = renderProject;
 })();

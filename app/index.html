@@ -90,6 +90,48 @@
 
   #canvaswrap { flex: 1; position: relative; min-width: 0; }
   #stage-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #layerspanel {
+    width: 168px;
+    background: var(--panel);
+    border-left: 1px solid var(--panel-edge);
+    display: flex; flex-direction: column;
+    font-size: 12px;
+    user-select: none;
+  }
+  #scenebar {
+    display: flex; gap: 4px; padding: 6px;
+    border-bottom: 1px solid var(--panel-edge);
+  }
+  #scenebar select { flex: 1; min-width: 0; background: #2b2d31; color: var(--text); border: 1px solid var(--panel-edge); border-radius: 3px; }
+  #layerhead {
+    display: flex; align-items: center; gap: 2px;
+    padding: 4px 6px; border-bottom: 1px solid var(--panel-edge);
+    color: var(--text-dim);
+  }
+  #layerhead .spacer { flex: 1; }
+  #layerspanel button {
+    background: #2b2d31; color: var(--text);
+    border: 1px solid var(--panel-edge); border-radius: 3px;
+    width: 22px; height: 20px; font-size: 11px; line-height: 1;
+    cursor: pointer; padding: 0;
+  }
+  #layerspanel button:hover { background: #3a3d42; }
+  #layerlist { flex: 1; overflow-y: auto; }
+  .layerrow {
+    display: flex; align-items: center; gap: 4px;
+    padding: 4px 6px; cursor: pointer;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    color: var(--text);
+  }
+  .layerrow.active { background: #3d5a80; }
+  .layerrow .toggle {
+    width: 16px; text-align: center; cursor: pointer; opacity: 0.85;
+  }
+  .layerrow .toggle.off { opacity: 0.3; }
+  .layerrow .lname {
+    flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
   #debugpanel {
     width: 280px;
     background: var(--panel);
@@ -211,6 +253,21 @@
       <canvas id="stage-canvas"></canvas>
       <div id="toast"></div>
     </div>
+    <div id="layerspanel">
+      <div id="scenebar">
+        <select id="scene-select" title="Scene"></select>
+        <button id="btn-scene-add" title="Add scene">+</button>
+      </div>
+      <div id="layerhead">
+        <span>Layers</span>
+        <span class="spacer"></span>
+        <button id="btn-layer-add" title="New layer">+</button>
+        <button id="btn-layer-del" title="Delete layer">−</button>
+        <button id="btn-layer-up" title="Move layer up">▲</button>
+        <button id="btn-layer-down" title="Move layer down">▼</button>
+      </div>
+      <div id="layerlist"></div>
+    </div>
     <div id="debugpanel" class="hidden">
       <div id="dbg-edge"></div>
       <div id="dbg-stream"></div>
@@ -257,6 +314,7 @@
   <script src="js/transform.js"></script>
   <script src="js/lasso.js"></script>
   <script src="js/ttf.js"></script>
+  <script src="js/project.js"></script>
   <script src="js/main.js"></script>
 </body>
 </html>

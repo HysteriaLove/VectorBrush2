@@ -81,7 +81,8 @@
    * Encode the document as an SWF v7 movie. Returns a Uint8Array.
    * Solid fills only (matching the editor's current feature set).
    */
-  function encodeSWF(doc) {
+  // One DefineShape body for one planar map (a layer's cell).
+  function shapeTagFor(doc) {
     // Pick the lowest shape version that can express the document —
     // the MX 2004 reference files are all DefineShape v1 (RGB), and the
     // MX 2004 IMPORTER rejects files the player happily runs, so match
@@ -94,14 +95,14 @@
       if (doc.lines[aj].color.a !== 255) hasAlpha = true;
     }
     var needExt = doc.fills.length >= 0xff || doc.lines.length >= 0xff;
-    var shapeTag = hasAlpha ? TAG_DEFINE_SHAPE3
-                 : needExt ? TAG_DEFINE_SHAPE2
-                 : TAG_DEFINE_SHAPE;
-    var rgba = hasAlpha;
+    return hasAlpha ? TAG_DEFINE_SHAPE3
+         : needExt ? TAG_DEFINE_SHAPE2
+         : TAG_DEFINE_SHAPE;
+  }
 
-    // ---- DefineShape body ---------------------------------------------------
+  function shapeBody(doc, id, rgba) {
     var sw = new VB.BitWriter();
-    sw.u16(1); // shape id
+    sw.u16(id);
     sw.rect(shapeBounds(doc));
     writeStyleCount(sw, doc.fills.length);
     for (var i = 0; i < doc.fills.length; i++) {
@@ -123,34 +124,61 @@
     sw.ub(4, numFillBits);
     sw.ub(4, numLineBits);
     VB.writeShapeRecords(sw, VB.prepareShapeEdges(doc), numFillBits, numLineBits);
-    var shapeBody = sw.toUint8Array();
+    return sw.toUint8Array();
+  }
 
-    // ---- PlaceObject2: character 1 at depth 1, identity matrix -------------
-    // Byte-for-byte what the MX 2004 reference files contain
-    // (06 01 00 01 00 00): the importer requires the explicit matrix
-    // even though the player defaults to identity without it.
+  // PlaceObject2 with an explicit identity matrix. Byte-for-byte what
+  // the MX 2004 reference files contain (06 <depth> <id> 00): the
+  // importer requires the explicit matrix even though the player
+  // defaults to identity without it.
+  function placeBody(depth, id) {
     var pw = new VB.BitWriter();
     pw.u8(0x06); // PlaceFlagHasCharacter | PlaceFlagHasMatrix
-    pw.u16(1);   // depth
-    pw.u16(1);   // character id
+    pw.u16(depth);
+    pw.u16(id);
     pw.ub(1, 0); // no scale
     pw.ub(1, 0); // no rotate
     pw.ub(5, 0); // translate nbits = 0 (identity)
     pw.align();
-    var placeBody = pw.toUint8Array();
+    return pw.toUint8Array();
+  }
+
+  /** Accepts a bare VBDocument or a VB.Project. A project exports its
+   *  ACTIVE scene: each visible non-empty layer becomes its own
+   *  DefineShape at its own depth, bottom to top — the same flat
+   *  depth-list Flash itself produces from layered authoring files. */
+  function encodeSWF(target) {
+    var cells, stage;
+    if (target.scenes) {
+      stage = target;
+      cells = [];
+      var layers = target.scene().layers;
+      for (var li = layers.length - 1; li >= 0; li--) {
+        if (!layers[li].visible) continue;
+        if (layers[li].frames[0].edges.length === 0) continue;
+        cells.push(layers[li].frames[0]);
+      }
+      if (cells.length === 0) cells = [target.activeCell()];
+    } else {
+      stage = target;
+      cells = [target];
+    }
 
     var bw = new VB.BitWriter();
-    writeRGB(bw, doc.background);
+    writeRGB(bw, stage.background);
     var bgBody = bw.toUint8Array();
 
     // ---- movie body ---------------------------------------------------------
     var b = new VB.BitWriter();
-    b.rect({ xmin: 0, xmax: doc.width, ymin: 0, ymax: doc.height });
+    b.rect({ xmin: 0, xmax: stage.width, ymin: 0, ymax: stage.height });
     b.u16(12 << 8); // frame rate 12.0 (8.8 fixed, fraction in the low byte)
     b.u16(1);       // frame count
     appendTag(b, TAG_SET_BACKGROUND, bgBody);
-    appendTag(b, shapeTag, shapeBody);
-    appendTag(b, TAG_PLACE_OBJECT2, placeBody);
+    for (var c = 0; c < cells.length; c++) {
+      var tag = shapeTagFor(cells[c]);
+      appendTag(b, tag, shapeBody(cells[c], c + 1, tag === TAG_DEFINE_SHAPE3));
+      appendTag(b, TAG_PLACE_OBJECT2, placeBody(c + 1, c + 1));
+    }
     appendTag(b, TAG_SHOW_FRAME, []);
     appendTag(b, TAG_END, []);
     var body = b.toUint8Array();

@@ -12,12 +12,11 @@
   var ctx = canvas.getContext("2d");
 
   var app = {
-    doc: new VB.VBDocument(),
+    project: new VB.Project(),
     fileName: null,
     sourceBytes: 0,
     tool: "select",
     view: { zoom: 1, panX: 40, panY: 40, dpr: window.devicePixelRatio || 1 },
-    history: new VB.History(),
     strokeColor: { r: 0, g: 0, b: 0, a: 255 },
     strokeWidth: 20,          // twips (1 px), Flash's default pencil width
     fillColor: { r: 102, g: 204, b: 255, a: 255 },
@@ -43,6 +42,29 @@
     docChanged: docChanged
   };
 
+  // Every tool and the boolean core edit ONE planar map: the active
+  // layer's frame cell. Assigning a bare document (file loads) wraps it
+  // as a single-layer project.
+  Object.defineProperty(app, "doc", {
+    get: function () { return app.project.activeCell(); },
+    set: function (d) { app.project = VB.wrapDoc(d); }
+  });
+
+  // Undo snapshots capture the WHOLE project, so layer add/delete/move
+  // are single undo steps. Tools call app.history.push(app.doc) — the
+  // wrapper ignores the argument and snapshots the project.
+  var projectHistory = new VB.History();
+  app.history = {
+    push: function () { projectHistory.push(app.project); },
+    undo: function () { return projectHistory.undo(app.project); },
+    redo: function () { return projectHistory.redo(app.project); },
+    canUndo: function () { return projectHistory.canUndo(); },
+    canRedo: function () { return projectHistory.canRedo(); },
+    clear: function () { projectHistory.clear(); },
+    get undoStack() { return projectHistory.undoStack; },
+    get redoStack() { return projectHistory.redoStack; }
+  };
+
   var tools = {
     select: VB.ArrowTool(app),
     transform: VB.FreeTransformTool(app),
@@ -64,7 +86,7 @@
     renderQueued = true;
     requestAnimationFrame(function () {
       renderQueued = false;
-      VB.render(ctx, app.doc, app.view);
+      VB.renderProject(ctx, app.project, app.view);
       var tool = tools[app.tool];
       // a pending transform session stays visible while a sibling
       // selection tool is active
@@ -93,6 +115,7 @@
     // a pending free-transform session's picks are stale now — drop it
     // WITHOUT committing (its own commit calls docChanged after landing)
     if (tools.transform && tools.transform.discard) tools.transform.discard();
+    refreshLayers(); // undo/redo/load can change the layer structure
     app.debugPin = -1;
     app.debugHover = -1;
     refreshDebugPanel();
@@ -178,8 +201,11 @@
 
   function updateStatus() {
     var s = app.doc.stats();
+    var layers = app.project.scene().layers;
     document.getElementById("status-doc").textContent =
       (app.doc.width / VB.TWIPS) + "×" + (app.doc.height / VB.TWIPS) + " px · " +
+      app.project.activeLayer().name +
+      (layers.length > 1 ? " (of " + layers.length + ")" : "") + " · " +
       s.edges + " edges (" + s.straight + " straight, " + s.curved + " curved) · " +
       s.fills + " fills · " + s.lines + " line styles" +
       (app.doc.texts && app.doc.texts.length
@@ -217,7 +243,8 @@
         result = await VB.parseSWF(buf);
         kind = "SWF v" + result.info.version;
       }
-      app.doc = result.doc;
+      if (result.project) app.project = result.project;
+      else app.doc = result.doc; // wraps as a single-layer project
       app.fileName = name;
       app.sourceBytes = bytes.length;
       app.history.clear();
@@ -281,7 +308,7 @@
 
   document.getElementById("btn-save").addEventListener("click", async function () {
     try {
-      var bytes = await VB.encodeVBD(app.doc, { compress: true });
+      var bytes = await VB.encodeVBD(app.project, { compress: true });
       var base = app.fileName ? app.fileName.replace(/\.[^.]+$/, "") : "drawing";
       var blob = new Blob([bytes], { type: "application/octet-stream" });
       var a = document.createElement("a");
@@ -301,11 +328,13 @@
 
   document.getElementById("btn-save-swf").addEventListener("click", function () {
     try {
-      if (app.doc.texts && app.doc.texts.length) {
-        toast("Note: " + app.doc.texts.length + " text block(s) are not yet " +
+      var textCount = 0;
+      app.project.eachCell(function (cell) { textCount += cell.texts.length; });
+      if (textCount) {
+        toast("Note: " + textCount + " text block(s) are not yet " +
           "written to SWF (coming next) — the .vbd save keeps them", 6000);
       }
-      var bytes = VB.encodeSWF(app.doc);
+      var bytes = VB.encodeSWF(app.project);
       var base = app.fileName ? app.fileName.replace(/\.[^.]+$/, "") : "drawing";
       var blob = new Blob([bytes], { type: "application/x-shockwave-flash" });
       var a = document.createElement("a");
@@ -375,6 +404,10 @@
       return;
     }
     if (ev.button === 0) {
+      if (app.project.activeLayer().locked) {
+        toast("Layer “" + app.project.activeLayer().name + "” is locked");
+        return;
+      }
       var tool = tools[app.tool];
       // a pending transform session stays GRABBABLE across the selection
       // family: presses on its frame route to the transform tool; a
@@ -603,6 +636,152 @@
     selectTool(returnTool && tools[returnTool] ? returnTool : "select");
   };
 
+  // ---- layers & scenes panel ---------------------------------------------------
+
+  // Pending selections (arrow float, transform session) belong to the
+  // ACTIVE cell — land them before the active cell changes.
+  function flushSelections() {
+    if (tools.select && tools.select.commitFloat) tools.select.commitFloat();
+    if (tools.transform && tools.transform.adopt) tools.transform.adopt(null);
+    if (tools.select && tools.select.clearSelection) tools.select.clearSelection();
+  }
+
+  function refreshLayers() {
+    var sel = document.getElementById("scene-select");
+    sel.innerHTML = "";
+    app.project.scenes.forEach(function (sc, i) {
+      var o = document.createElement("option");
+      o.value = i;
+      o.textContent = sc.name;
+      sel.appendChild(o);
+    });
+    sel.value = app.project.cur.scene;
+
+    var list = document.getElementById("layerlist");
+    list.innerHTML = "";
+    app.project.scene().layers.forEach(function (l, i) {
+      var row = document.createElement("div");
+      row.className = "layerrow" + (i === app.project.cur.layer ? " active" : "");
+
+      var eye = document.createElement("span");
+      eye.className = "toggle" + (l.visible ? "" : " off");
+      eye.textContent = "◉"; // ◉
+      eye.title = "Show/hide layer";
+      eye.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        app.record({ op: "layerVisible", index: i, on: !l.visible });
+        l.visible = !l.visible;
+        refreshLayers();
+        requestRender();
+      });
+
+      var lock = document.createElement("span");
+      lock.className = "toggle" + (l.locked ? "" : " off");
+      lock.textContent = "🔒"; // 🔒
+      lock.title = "Lock/unlock layer";
+      lock.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        app.record({ op: "layerLock", index: i, on: !l.locked });
+        l.locked = !l.locked;
+        refreshLayers();
+      });
+
+      var name = document.createElement("span");
+      name.className = "lname";
+      name.textContent = l.name;
+      name.title = l.name + " (double-click to rename)";
+      name.addEventListener("dblclick", function (ev) {
+        ev.stopPropagation();
+        var newName = prompt("Layer name:", l.name);
+        if (newName && newName !== l.name) {
+          app.record({ op: "layerRename", index: i, name: newName });
+          app.history.push();
+          l.name = newName;
+          refreshLayers();
+        }
+      });
+
+      row.appendChild(eye);
+      row.appendChild(lock);
+      row.appendChild(name);
+      row.addEventListener("click", function () {
+        if (i === app.project.cur.layer) return;
+        flushSelections();
+        app.record({ op: "layerSelect", index: i });
+        app.project.selectLayer(i);
+        app.debugPin = -1;
+        refreshLayers();
+        refreshDebugPanel();
+        requestRender();
+        updateStatus();
+      });
+      list.appendChild(row);
+    });
+  }
+
+  document.getElementById("btn-layer-add").addEventListener("click", function () {
+    flushSelections();
+    app.record({ op: "layerAdd" });
+    app.history.push();
+    app.project.addLayer();
+    refreshLayers();
+    requestRender();
+    updateStatus();
+  });
+
+  document.getElementById("btn-layer-del").addEventListener("click", function () {
+    if (app.project.scene().layers.length <= 1) {
+      toast("A scene keeps at least one layer");
+      return;
+    }
+    flushSelections();
+    var index = app.project.cur.layer;
+    app.record({ op: "layerDelete", index: index });
+    app.history.push();
+    app.project.deleteLayer(index);
+    docChanged();
+  });
+
+  function moveActiveLayer(delta) {
+    var from = app.project.cur.layer;
+    var to = from + delta;
+    if (to < 0 || to >= app.project.scene().layers.length) return;
+    app.record({ op: "layerMove", from: from, to: to });
+    app.history.push();
+    app.project.moveLayer(from, to);
+    refreshLayers();
+    requestRender();
+  }
+  document.getElementById("btn-layer-up").addEventListener("click", function () {
+    moveActiveLayer(-1); // up in the panel = toward the top (index 0)
+  });
+  document.getElementById("btn-layer-down").addEventListener("click", function () {
+    moveActiveLayer(1);
+  });
+
+  document.getElementById("scene-select").addEventListener("change", function () {
+    var i = parseInt(this.value, 10);
+    if (i === app.project.cur.scene) return;
+    flushSelections();
+    app.record({ op: "sceneSelect", index: i });
+    app.project.selectScene(i);
+    app.debugPin = -1;
+    refreshLayers();
+    refreshDebugPanel();
+    requestRender();
+    updateStatus();
+  });
+
+  document.getElementById("btn-scene-add").addEventListener("click", function () {
+    flushSelections();
+    app.record({ op: "sceneAdd" });
+    app.history.push();
+    app.project.addScene();
+    refreshLayers();
+    requestRender();
+    updateStatus();
+  });
+
   // Empty-space drags in the transform tool draw a fresh region band —
   // shaped like the selection tool the user came from.
   app.regionSelectStyle = function () {
@@ -613,6 +792,7 @@
 
   resizeCanvas();
   fitView();
+  refreshLayers();
 
   // #demo: synthetic document with the debug view on — used by headless
   // screenshots and handy for demonstrating the record inspector.
