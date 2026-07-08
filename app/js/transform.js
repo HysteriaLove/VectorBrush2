@@ -17,6 +17,14 @@
 (function () {
   "use strict";
 
+  // Rotation cursor: circular arrow (no native CSS equivalent).
+  var ROTATE_CURSOR = 'url("data:image/svg+xml,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22">' +
+    '<path d="M11 3 a8 8 0 1 1 -7.4 4.9" fill="none" stroke="white" stroke-width="4.5"/>' +
+    '<path d="M11 3 a8 8 0 1 1 -7.4 4.9" fill="none" stroke="black" stroke-width="2"/>' +
+    '<path d="M10 0 L16 3 L10 6.5 Z" fill="black" stroke="white" stroke-width="0.8"/>' +
+    '</svg>') + '") 11 11, crosshair';
+
   function FreeTransformTool(app) {
     var self = {
       app: app,
@@ -182,7 +190,16 @@
      *  journaled, so nothing reaches the history). Back at zero the
      *  clip un-lifts and the selection stays adopted. */
     self.undoPending = function () {
-      if (!self.gestures.length) return false;
+      if (!self.gestures.length) {
+        // an untouched lift (selection picked, nothing transformed):
+        // put it back exactly, record nothing — like the arrow float
+        if (!self.float) return false;
+        unlift();
+        refreshGhosts();
+        app.requestRender();
+        app.setMsg("selection put back");
+        return true;
+      }
       self.gestures.pop();
       if (!self.gestures.length) unlift();
       refreshGhosts();
@@ -216,6 +233,10 @@
       }
       self.box = self.pristine ? bboxOf(self.pristine) : null;
       refreshGhosts();
+      // lift RIGHT AWAY: the selection floats from the moment it is
+      // picked, so the very first gesture (rotate, scale, move) renders
+      // the content live instead of a hollow outline
+      ensureLifted();
       app.requestRender();
     };
 
@@ -245,52 +266,91 @@
       return null;
     }
 
+    /** The rotation handle: a knob floating a fixed screen distance
+     *  outward from the frame's mid-top edge (it rides the rotation). */
+    function rotKnob(m) {
+      var b = self.box;
+      if (!b) return null;
+      var mx = (b.x0 + b.x1) / 2;
+      var P = applyPt(m, mx, b.y0);
+      var C = applyPt(m, mx, (b.y0 + b.y1) / 2);
+      var dx = P.x - C.x, dy = P.y - C.y;
+      var len = Math.hypot(dx, dy) || 1;
+      var off = 26 * VB.TWIPS / app.view.zoom;
+      return { x: P.x + dx / len * off, y: P.y + dy / len * off,
+               sx: P.x, sy: P.y };
+    }
+
+    function armRotate(pos, acc) {
+      var b = self.box;
+      var c0 = applyPt(acc, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2);
+      self.drag = { kind: "rotate", center: c0,
+                    a0: Math.atan2(pos.y - c0.y, pos.x - c0.x),
+                    cur: pos, m: null };
+    }
+
+    /** What a press/drag at pos would do: "knob"/"scale"/"move"/
+     *  "rotate" (near-corner) or null (nothing under the pointer). */
+    function hitTest(pos, tol, acc, accInv) {
+      var knob = rotKnob(acc);
+      if (knob && Math.hypot(pos.x - knob.x, pos.y - knob.y) <= tol * 1.2) {
+        return { kind: "knob" };
+      }
+      var hit = accInv && pickHandle(pos, tol, acc);
+      if (hit) return { kind: "scale", hit: hit };
+      if (!accInv) return null;
+      // inside/near tests run in pristine space (map the pointer back
+      // through the session) so they respect the rotated frame
+      var b = self.box;
+      var q = applyPt(accInv, pos.x, pos.y);
+      // pointer tolerance in pristine units: undo the average scale
+      var s = (Math.hypot(acc[0], acc[1]) + Math.hypot(acc[2], acc[3])) / 2 || 1;
+      var margin = 3 * tol / s;
+      if (q.x > b.x0 && q.x < b.x1 && q.y > b.y0 && q.y < b.y1) {
+        return { kind: "move" };
+      }
+      if (q.x > b.x0 - margin && q.x < b.x1 + margin &&
+          q.y > b.y0 - margin && q.y < b.y1 + margin) {
+        return { kind: "rotate" };
+      }
+      return null;
+    }
+
     self.onDown = function (pos, ev) {
       var tol = 8 * VB.TWIPS / app.view.zoom;
       if (self.box) {
         var acc = composedM();
         var accInv = invert(acc);
-        var hit = pickHandle(pos, tol, acc);
-        if (hit && accInv) {
-          // anchor = opposite handle, held fixed in pristine space
-          var hs = handles();
-          var opp = hs[(hit.index + 4) % 8];
-          self.drag = { kind: "scale", h: hit.h, anchor: opp,
-                        acc: acc, accInv: accInv, cur: pos, m: null };
-          return;
-        }
-        // inside/near tests run in pristine space (map the pointer back
-        // through the session) so they respect the rotated frame
-        if (accInv) {
-          var b = self.box;
-          var q = applyPt(accInv, pos.x, pos.y);
-          // pointer tolerance in pristine units: undo the average scale
-          var s = (Math.hypot(acc[0], acc[1]) + Math.hypot(acc[2], acc[3])) / 2 || 1;
-          var margin = 3 * tol / s;
-          var inside = q.x > b.x0 && q.x < b.x1 && q.y > b.y0 && q.y < b.y1;
-          var nearBox = q.x > b.x0 - margin && q.x < b.x1 + margin &&
-                        q.y > b.y0 - margin && q.y < b.y1 + margin;
-          if (inside) {
+        var what = hitTest(pos, tol, acc, accInv);
+        if (what) {
+          // a press that manipulates re-lifts if needed (the selection
+          // can sit adopted-but-unlifted after an undo-to-zero)
+          ensureLifted();
+          if (what.kind === "knob" || what.kind === "rotate") {
+            armRotate(pos, acc);
+          } else if (what.kind === "scale") {
+            // anchor = opposite handle, held fixed in pristine space
+            var hs = handles();
+            var opp = hs[(what.hit.index + 4) % 8];
+            self.drag = { kind: "scale", h: what.hit.h, anchor: opp,
+                          acc: acc, accInv: accInv, cur: pos, m: null };
+          } else {
             self.drag = { kind: "move", from: pos, cur: pos, m: null };
-            return;
           }
-          if (nearBox) {
-            var c0 = applyPt(acc, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2);
-            self.drag = { kind: "rotate", center: c0,
-                          a0: Math.atan2(pos.y - c0.y, pos.x - c0.x),
-                          cur: pos, m: null };
-            return;
-          }
+          return;
         }
       }
       // clicked away from the selection: the accumulated session lands
       // as ONE op FIRST, so the pick below sees the post-commit document
       // (the originals only now leave their old location)
       self.commitPending();
-      // (re)pick a selection: fill or attached-stroke chain under cursor
+      // (re)pick a selection: fill or attached-stroke chain under cursor.
+      // The press keeps going as a MOVE — pick up and drag in one motion,
+      // like the arrow tool.
       var fillIdx = VB.geom.fillAt(app.doc, pos.x, pos.y);
       if (fillIdx > 0) {
         self.adopt({ fills: [{ x: pos.x, y: pos.y }], edgeKeys: [] });
+        if (self.box) self.drag = { kind: "move", from: pos, cur: pos, m: null };
         return;
       }
       var tol2 = 6 * VB.TWIPS / app.view.zoom;
@@ -298,10 +358,40 @@
         if (VB.geom.distToEdge(app.doc.edges[i], pos.x, pos.y) < tol2 &&
             app.doc.edges[i].line > 0) {
           self.adopt({ fills: [], edgeKeys: VB.connectedStrokeKeys(app.doc, i) });
+          if (self.box) self.drag = { kind: "move", from: pos, cur: pos, m: null };
           return;
         }
       }
+      // nothing here: the session is over — hand control back to the
+      // tool the user came from (lasso, arrow, ...)
       self.adopt(null);
+      if (app.transformDone) app.transformDone();
+    };
+
+    self.onHover = function (pos) {
+      if (!app.setCursor) return;
+      if (!self.box) { app.setCursor(""); return; }
+      var tol = 8 * VB.TWIPS / app.view.zoom;
+      var acc = composedM();
+      var what = hitTest(pos, tol, acc, invert(acc));
+      if (!what) { app.setCursor(""); return; }
+      if (what.kind === "knob" || what.kind === "rotate") {
+        app.setCursor(ROTATE_CURSOR);
+      } else if (what.kind === "move") {
+        app.setCursor("move");
+      } else {
+        // resize arrows follow the handle's WORLD direction (they ride
+        // the rotated frame): quantize handle->anchor to 4 axes
+        var hs = handles();
+        var opp = hs[(what.hit.index + 4) % 8];
+        var hw = applyPt(acc, what.hit.h.x, what.hit.h.y);
+        var aw = applyPt(acc, opp.x, opp.y);
+        var ang = Math.atan2(hw.y - aw.y, hw.x - aw.x) * 180 / Math.PI;
+        ang = ((ang % 180) + 180) % 180;
+        app.setCursor(ang < 22.5 || ang >= 157.5 ? "ew-resize" :
+                      ang < 67.5 ? "nwse-resize" :
+                      ang < 112.5 ? "ns-resize" : "nesw-resize");
+      }
     };
 
     function currentMatrix() {
@@ -482,6 +572,21 @@
         var p = mp(h.x, h.y);
         ctx.fillRect(p.x - r, p.y - r, 2 * r, 2 * r);
       });
+      // rotation knob on a stem off the mid-top edge
+      var knob = rotKnob(total);
+      if (knob) {
+        ctx.strokeStyle = "rgba(0,0,0,0.85)";
+        ctx.lineWidth = hair;
+        ctx.beginPath();
+        ctx.moveTo(knob.sx, knob.sy);
+        ctx.lineTo(knob.x, knob.y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(knob.x, knob.y, 4.5 * hair, 0, Math.PI * 2);
+        ctx.fillStyle = "#fff";
+        ctx.fill();
+        ctx.stroke();
+      }
     };
 
     return self;

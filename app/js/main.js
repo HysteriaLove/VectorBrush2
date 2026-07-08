@@ -524,8 +524,14 @@
 
   // ---- tool palette -----------------------------------------------------------------
 
+  // The tool the user came FROM when entering the transform tool —
+  // clicking away from a finished transform returns there (lasso a
+  // region, transform it, land back in the lasso).
+  var returnTool = null;
+
   function selectTool(tool) {
     canvas.style.cursor = "";
+    if (tool === "transform" && app.tool !== "transform") returnTool = app.tool;
     if (tools.select && tools.select.commitFloat) tools.select.commitFloat();
     if (tool === "transform" && tools.select.exportSelection) {
       tools.transform.adopt(tools.select.exportSelection());
@@ -549,6 +555,11 @@
   document.querySelectorAll("#tools button").forEach(function (b) {
     b.addEventListener("click", function () { selectTool(b.dataset.tool); });
   });
+
+  app.transformDone = function () {
+    if (app.tool !== "transform") return;
+    selectTool(returnTool && tools[returnTool] ? returnTool : "select");
+  };
 
   // ---- boot ------------------------------------------------------------------------
 

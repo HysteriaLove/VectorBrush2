@@ -3,8 +3,8 @@
  * Drag a freehand outline; on release it closes into a polygon and
  * becomes a REGION selection — exactly like the arrow's marquee, it
  * cuts through geometry (the selected content is the drawing clipped
- * to the region). The selection is handed to the arrow tool, which
- * owns region move/delete, and Q transforms it.
+ * to the region). The region goes straight to the TRANSFORM tool
+ * (which lifts it live); clicking away there returns to the lasso.
  */
 (function () {
   "use strict";
@@ -37,8 +37,8 @@
           arrow.setRegionSelection(pts.map(function (p) {
             return { x: Math.round(p.x), y: Math.round(p.y) };
           }));
-          if (app.switchTool) app.switchTool("select");
-          app.setMsg("lasso region selected — drag to move, Delete to erase, Q to transform");
+          if (app.switchTool) app.switchTool("transform");
+          app.setMsg("lasso region lifted — transform it; click away to apply and return to the lasso");
         }
       },
       cancel: function () { this.points = null; app.requestRender(); },
