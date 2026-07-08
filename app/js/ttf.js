@@ -121,20 +121,22 @@
       return cmapLookup(code);
     }
 
-    // ---- name: family (nameID 1), Windows Unicode preferred ----
-    var family = "";
+    // ---- name: family (nameID 1) + subfamily/style (nameID 2),
+    // Windows Unicode preferred ----
+    var family = "", subfamily = "";
     if (tables.name) {
       var nm = tables.name.off;
       var count = r.u16(nm + 2);
       var strBase = nm + r.u16(nm + 4);
-      var bestScore = -1;
+      var bestScore = [-1, -1];
       for (i = 0; i < count; i++) {
         var e = nm + 6 + 12 * i;
-        if (r.u16(e + 6) !== 1) continue; // nameID 1 = family
+        var nameId = r.u16(e + 6);
+        if (nameId !== 1 && nameId !== 2) continue;
         var p = r.u16(e), enc = r.u16(e + 2);
         var score = (p === 3 && enc === 1) ? 2 : (p === 1 ? 1 : 0);
-        if (score <= bestScore) continue;
-        bestScore = score;
+        if (score <= bestScore[nameId - 1]) continue;
+        bestScore[nameId - 1] = score;
         var len = r.u16(e + 8), off = strBase + r.u16(e + 10);
         var s = "";
         if (p === 3) {
@@ -142,7 +144,7 @@
         } else {
           for (k = 0; k < len; k++) s += String.fromCharCode(r.u8(off + k));
         }
-        family = s;
+        if (nameId === 1) family = s; else subfamily = s;
       }
     }
 
@@ -335,6 +337,7 @@
       unitsPerEm: unitsPerEm,
       numGlyphs: numGlyphs,
       family: family,
+      subfamily: subfamily,
       ascent: ascent,
       descent: descent,
       lineGap: lineGap,

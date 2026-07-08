@@ -50,6 +50,7 @@
 <script src="../js/transform.js"></script>
 <script src="../js/lasso.js"></script>
 <script src="../js/ttf.js"></script>
+<script src="../js/fonts-builtin.js"></script>
 <script src="fixtures.js"></script>
 <script src="ttffixture.js"></script>
 <script src="fontswf.js"></script>
@@ -1914,6 +1915,36 @@
       Math.abs(adoc.texts[0].matrix[3] - 1) < 0.01 &&
       toolA.sel.text === 0,
       JSON.stringify(adoc.texts[0].matrix));
+
+    // ---- bundled DejaVu fonts (fonts-builtin.js) ----
+    check("builtin fonts registered",
+      VB.textFonts.entries.length >= 10 &&
+      !!VB.textFonts.find("DejaVu Sans") &&
+      !!VB.textFonts.find("DejaVu Sans Bold") &&
+      !!VB.textFonts.find("DejaVu Serif Italic") &&
+      !!VB.textFonts.find("DejaVu Sans Mono"),
+      "errors=[" + (VB.builtinFontErrors || []).join(" ; ") + "] labels=[" +
+      VB.textFonts.entries.map(function (e) { return e.label; }).join(" | ") + "]");
+    if (!VB.textFonts.find("DejaVu Sans")) return; // don't cascade
+    var dj = await VB.textFonts.ensureParsed("DejaVu Sans");
+    check("DejaVu Sans parses with style metadata",
+      dj.family === "DejaVu Sans" && dj.unitsPerEm === 2048 &&
+      dj.winAscent > 0 && dj.glyphIndex(65) > 0,
+      dj.family + "/" + dj.subfamily + "/" + dj.unitsPerEm);
+    check("legacy kern table survived subsetting",
+      dj.kern(dj.glyphIndex(65), dj.glyphIndex(86)) < 0, // A·V
+      dj.kern(dj.glyphIndex(65), dj.glyphIndex(86)));
+    var djb = await VB.textFonts.ensureParsed("DejaVu Sans Bold");
+    check("bold face is its own entry with style",
+      djb.subfamily === "Bold" &&
+      VB.textFonts.find("DejaVu Sans Bold").style === "Bold");
+    var djOp = VB.buildTextOp(dj, { name: "DejaVu Sans" }, "Hello",
+                              480, red, 1000, 1000);
+    check("builtin font lays out text",
+      djOp && djOp.records[0].glyphs.length === 5 &&
+      djOp.records[0].glyphs[0].adv > 0 &&
+      djOp.font.glyphs[0].contours.length > 0,
+      djOp && JSON.stringify(djOp.records[0].glyphs.map(function (g) { return g.adv; })));
   })();
 
   // ======================= SWF export round-trip ===========================

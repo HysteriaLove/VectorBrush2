@@ -311,10 +311,15 @@
     },
     addBuffer: function (name, buf) {
       var parsed = VB.parseTTF(buf);
-      var label = parsed.family || name.replace(/\.[^.]+$/, "");
+      var family = parsed.family || name.replace(/\.[^.]+$/, "");
+      var style = parsed.subfamily || "Regular";
+      // Bold/Italic faces are their own dropdown entries; the regular
+      // weight goes by many names (DejaVu says "Book")
+      var isRegular = /^(regular|book|roman|normal)$/i.test(style);
+      var label = isRegular ? family : family + " " + style;
       var e = this.find(label);
       if (!e) {
-        e = { label: label, family: parsed.family, style: "Regular" };
+        e = { label: label, family: family, style: style };
         this.entries.push(e);
       }
       e.parsed = parsed;

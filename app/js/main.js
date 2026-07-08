@@ -766,8 +766,10 @@
       sel.appendChild(o);
     });
     if (keep && VB.textFonts.find(keep)) sel.value = keep;
+    else if (VB.textFonts.find("DejaVu Sans")) sel.value = "DejaVu Sans";
   }
   VB.textFonts.onChange(refreshFontList);
+  refreshFontList(); // the bundled DejaVu faces registered before boot
 
   document.getElementById("btn-fonts").addEventListener("click", async function () {
     try {
