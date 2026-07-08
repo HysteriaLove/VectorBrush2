@@ -119,6 +119,14 @@
           history.push(doc);
           VB.arrowDeleteEdge(doc, op.key);
           break;
+        case "transformSel":
+          history.push(doc);
+          VB.arrowTransformSel(doc, op.fills, op.edgeKeys, op.m);
+          break;
+        case "deleteSel":
+          history.push(doc);
+          VB.arrowDeleteSel(doc, op.fills, op.edgeKeys);
+          break;
         case "undo":
           history.undo(doc);
           break;

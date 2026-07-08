@@ -45,6 +45,7 @@
 <script src="../js/pencil.js"></script>
 <script src="../js/shapes.js"></script>
 <script src="../js/arrow.js"></script>
+<script src="../js/transform.js"></script>
 <script src="fixtures.js"></script>
 <script src="userlog.js"></script>
 <script src="userlog2.js"></script>
@@ -970,6 +971,83 @@
       VB.geom.fillAt(res.doc, 6500, 4000) === 0 &&
       VB.geom.fillAt(res.doc, 4000, 3000) === 0,
       VB.integrityReport(res.doc)[0]);
+
+    // 5. connected strokes: a pencil zig-zag is one attached chain
+    var doc5 = new VB.VBDocument();
+    doc5.width = 11000; doc5.height = 8000;
+    VB.lineCommit(doc5, { x: 1000, y: 1000 }, { x: 3000, y: 2000 }, blk, 0);
+    VB.lineCommit(doc5, { x: 3000, y: 2000 }, { x: 5000, y: 1000 }, blk, 0);
+    VB.lineCommit(doc5, { x: 5000, y: 1000 }, { x: 7000, y: 2200 }, blk, 0);
+    VB.lineCommit(doc5, { x: 1000, y: 6000 }, { x: 7000, y: 6000 }, blk, 0); // detached
+    var chain = VB.connectedStrokeKeys(doc5, 0);
+    check("double-click selects attached strokes", chain.length === 3,
+      chain.length + " records");
+
+    // 6. deleting a shared stroked border collapses same-color fills
+    var doc6 = new VB.VBDocument();
+    doc6.width = 11000; doc6.height = 8000;
+    VB.shapeCommit(doc6, VB.rectLoop(2000, 2000, 5000, 5000), red, blk);
+    VB.shapeCommit(doc6, VB.rectLoop(5000, 2000, 8000, 5000), red, blk);
+    var borderKeys = [];
+    doc6.edges.forEach(function (e) {
+      if (e.line > 0 && e.ax === 5000 && e.bx === 5000) {
+        borderKeys.push(VB.arrowEdgeKey(e));
+      }
+    });
+    check("shared border found", borderKeys.length > 0, borderKeys.length + " records");
+    VB.arrowDeleteSel(doc6, [], borderKeys);
+    var borderLeft = doc6.edges.some(function (e) {
+      if (e.ax !== 5000 || e.bx !== 5000) return false;
+      var m6 = VB.geom.evalEdge(e, 0.5);
+      return m6.y > 2100 && m6.y < 4900;
+    });
+    check("same-color fills collapsed (border gone)", !borderLeft);
+    check("merged region still filled",
+      VB.geom.fillAt(doc6, 3500, 3500) === VB.geom.fillAt(doc6, 6500, 3500) &&
+      VB.geom.fillAt(doc6, 3500, 3500) > 0);
+    check("collapse consistent", VB.integrityReport(doc6).length === 0,
+      VB.integrityReport(doc6)[0]);
+
+    // 7. free transform: rotate 90° + scale 1.5 about the fill's center
+    var doc7 = new VB.VBDocument();
+    doc7.width = 11000; doc7.height = 8000;
+    VB.shapeCommit(doc7, VB.rectLoop(3000, 3000, 5000, 4000), red, null);
+    var cx7 = 4000, cy7 = 3500, s7 = 1.5;
+    var m7 = [0, s7, -s7, 0, cx7 + s7 * cy7, cy7 - s7 * cx7];
+    VB.arrowTransformSel(doc7, [{ x: 4000, y: 3500 }], [], m7);
+    check("transform: center stays filled", VB.geom.fillAt(doc7, 4000, 3500) === 1);
+    check("transform: rotated extent",
+      VB.geom.fillAt(doc7, 4000, 3500 + 1200) === 1 &&
+      VB.geom.fillAt(doc7, 4000 + 1200, 3500) === 0);
+    check("transform consistent", VB.integrityReport(doc7).length === 0,
+      VB.integrityReport(doc7)[0]);
+
+    // 8. transformSel replay determinism (fill + stroke moved together)
+    var ops8 = [
+      { op: "new", width: 11000, height: 8000 },
+      { op: "rect", x0: 2000, y0: 2000, x1: 4000, y1: 4000, fill: red, line: null },
+      { op: "line", a: { x: 2000, y: 5000 }, b: { x: 4000, y: 5000 },
+        style: blk, snapTol: 0 }
+    ];
+    var res8a = await VB.replayJournal(ops8);
+    var strokeKey = null;
+    res8a.doc.edges.forEach(function (e) {
+      if (e.line > 0) strokeKey = VB.arrowEdgeKey(e);
+    });
+    ops8.push({ op: "transformSel", fills: [{ x: 3000, y: 3000 }],
+                edgeKeys: [strokeKey], m: [1, 0, 0, 1, 4000, 0] });
+    ops8.push({ op: "undo" });
+    ops8.push({ op: "redo" });
+    var res8 = await VB.replayJournal(ops8);
+    check("transformSel moves fill+stroke together",
+      VB.geom.fillAt(res8.doc, 7000, 3000) === 1 &&
+      VB.geom.fillAt(res8.doc, 3000, 3000) === 0 &&
+      res8.doc.edges.some(function (e) {
+        return e.line > 0 && e.ay === 5000 && e.ax >= 6000;
+      }),
+      "fill/stroke placement");
+    check("transformSel replay consistent",
+      VB.integrityReport(res8.doc).length === 0, VB.integrityReport(res8.doc)[0]);
   })();
 
   // ======================= SWF export round-trip ===========================

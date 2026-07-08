@@ -43,6 +43,7 @@
 
   var tools = {
     select: VB.ArrowTool(app),
+    transform: VB.FreeTransformTool(app),
     pencil: new VB.PencilTool(app),
     brush: new VB.BrushTool(app),
     bucket: new VB.BucketTool(app),
@@ -75,6 +76,7 @@
   // debug panel's style tables and record-stream stats, which are too
   // costly to rebuild on every pointer move.
   function docChanged() {
+    if (tools.select && tools.select.clearSelection) tools.select.clearSelection();
     app.debugPin = -1;
     app.debugHover = -1;
     refreshDebugPanel();
@@ -332,7 +334,7 @@
       if (tool && tool.onDown) {
         activePointerTool = tool;
         canvas.setPointerCapture(ev.pointerId);
-        tool.onDown(clientToTwips(ev));
+        tool.onDown(clientToTwips(ev), ev);
         ev.preventDefault();
       }
     }
@@ -369,6 +371,11 @@
     document.getElementById("status-pos").textContent =
       "(" + Math.round(p.x * VB.TWIPS) + ", " + Math.round(p.y * VB.TWIPS) + ") tw · " +
       p.x.toFixed(1) + ", " + p.y.toFixed(1) + " px";
+  });
+
+  canvas.addEventListener("dblclick", function (ev) {
+    var tool = tools[app.tool];
+    if (tool && tool.onDblClick) tool.onDblClick(clientToTwips(ev));
   });
 
   canvas.addEventListener("pointerup", function (ev) {
@@ -415,7 +422,8 @@
     // Flash-accurate bindings: B = brush, K = paint bucket, N = line,
     // O = oval, R = rectangle
     var toolKeys = { v: "select", p: "pencil", b: "brush", k: "bucket",
-                     e: "eraser", n: "line", o: "oval", r: "rect" };
+                     e: "eraser", n: "line", o: "oval", r: "rect",
+                     q: "transform" };
     if (toolKeys[k]) selectTool(toolKeys[k]);
   });
   window.addEventListener("keyup", function (ev) {
@@ -483,6 +491,12 @@
 
   function selectTool(tool) {
     canvas.style.cursor = "";
+    if (tool === "transform" && tools.select.exportSelection) {
+      tools.transform.adopt(tools.select.exportSelection());
+      if (tools.select.clearSelection) tools.select.clearSelection();
+    } else if (tools.transform && tools.transform.adopt) {
+      tools.transform.adopt(null);
+    }
     if (activePointerTool && activePointerTool.cancel) activePointerTool.cancel();
     activePointerTool = null;
     app.tool = tool;

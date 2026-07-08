@@ -169,7 +169,11 @@
     return true;
   }
 
-  /** Delete a stroke record: strip the line style; cull if claim-free. */
+  /** Delete a stroke record: strip the line style; cull if claim-free.
+   *  Interior strokes vanish leaving the fills they crossed intact; a
+   *  stroke between two SAME-fill regions dissolves entirely so the
+   *  fills collapse into one; a border between DIFFERENT fills keeps
+   *  separating them (lineless). */
   function arrowDeleteEdge(doc, key) {
     var idx = findByKey(doc, key);
     if (idx < 0) return false;
@@ -177,6 +181,137 @@
     if (e.line === 0) return false; // lineless borders belong to their fills
     e.line = 0;
     if (e.fill0 === e.fill1) doc.edges.splice(idx, 1);
+    return true;
+  }
+
+  /** All stroke records connected to edges[startIdx] through shared
+   *  nodes ("attached strokes" — Flash's double-click selection).
+   *  Returns edge keys. */
+  function connectedStrokeKeys(doc, startIdx) {
+    var start = doc.edges[startIdx];
+    if (!start || start.line === 0) return [];
+    var byNode = new Map();
+    doc.edges.forEach(function (e, i) {
+      if (e.line === 0) return;
+      [e.ax + "," + e.ay, e.bx + "," + e.by].forEach(function (k) {
+        var arr = byNode.get(k);
+        if (!arr) { arr = []; byNode.set(k, arr); }
+        arr.push(i);
+      });
+    });
+    var seen = new Set([startIdx]);
+    var queue = [startIdx];
+    while (queue.length) {
+      var i = queue.pop();
+      var e = doc.edges[i];
+      [e.ax + "," + e.ay, e.bx + "," + e.by].forEach(function (k) {
+        (byNode.get(k) || []).forEach(function (j) {
+          if (!seen.has(j)) { seen.add(j); queue.push(j); }
+        });
+      });
+    }
+    var keys = [];
+    seen.forEach(function (i) { keys.push(edgeKey(doc.edges[i])); });
+    return keys;
+  }
+
+  /** Delete a whole selection: fill faces + stroke records. */
+  function arrowDeleteSel(doc, fillPicks, edgeKeys) {
+    (edgeKeys || []).forEach(function (k) { arrowDeleteEdge(doc, k); });
+    (fillPicks || []).forEach(function (p) { arrowDeleteFill(doc, p.x, p.y); });
+    return true;
+  }
+
+  function applyM(m, x, y) {
+    return { x: m[0] * x + m[2] * y + m[4], y: m[1] * x + m[3] * y + m[5] };
+  }
+
+  /**
+   * Affine-transform a selection (free transform / multi-move). Affine
+   * maps take quads to quads exactly, so records stay records.
+   *  fillPicks: [{x,y}] — face pick points (resolved against the doc
+   *             BEFORE any mutation)
+   *  edgeKeys:  stroke record keys
+   *  m:         [a,b,c,d,tx,ty] — SWF-style 2x3 matrix
+   * Originals are lifted (faces deleted, strokes removed), transformed,
+   * and re-merged: fills paint over what they land on (the boolean-mask
+   * pipeline), strokes re-node and inherit destination fills.
+   */
+  function arrowTransformSel(doc, fillPicks, edgeKeys, m) {
+    fillPicks = fillPicks || [];
+    edgeKeys = edgeKeys || [];
+    // resolve everything against the pre-op document
+    var fills = [];
+    fillPicks.forEach(function (p) {
+      var got = faceLoopsAt(doc, p.x, p.y);
+      if (got) fills.push(got);
+    });
+    var strokes = [];
+    edgeKeys.forEach(function (k) {
+      var i = findByKey(doc, k);
+      if (i >= 0) strokes.push(doc.edges[i]);
+    });
+    if (fills.length === 0 && strokes.length === 0) return false;
+
+    // lift originals
+    fillPicks.forEach(function (p) { arrowDeleteFill(doc, p.x, p.y); });
+    var strokeSet = new Set(strokes);
+    doc.edges = doc.edges.filter(function (e) { return !strokeSet.has(e); });
+
+    function txEdge(e, f0, f1, ln) {
+      var a = applyM(m, e.ax, e.ay);
+      var b = applyM(m, e.bx, e.by);
+      var c = e.cx === null ? null : applyM(m, e.cx, e.cy);
+      return VB.edge(Math.round(a.x), Math.round(a.y),
+        c === null ? null : Math.round(c.x), c === null ? null : Math.round(c.y),
+        Math.round(b.x), Math.round(b.y), f0, f1, ln);
+    }
+
+    // re-merge fills, each through the mask pipeline
+    fills.forEach(function (f) {
+      var fitted = [];
+      f.loops.forEach(function (loop) {
+        loop.forEach(function (e) {
+          var ne = txEdge(e, 0, 0, 0);
+          if (!VB.edgeIsDegenerate(ne)) fitted.push(ne);
+        });
+      });
+      if (fitted.length === 0) return;
+      var windingLoops = fitted.map(function (e) {
+        return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, 0, 0, 0);
+      });
+      function insideMoved(px, py) {
+        return VB.geom.windingNumber(windingLoops, px, py) !== 0;
+      }
+      var preOp = new VB.VBDocument();
+      preOp.width = doc.width; preOp.height = doc.height;
+      preOp.fills = doc.fills; preOp.lines = doc.lines;
+      preOp.edges = doc.edges.map(function (e) {
+        return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, e.fill0, e.fill1, e.line);
+      });
+      var adopted = VB.adoptIdenticalEdges(doc, fitted);
+      var pieces = VB.nodeEdges(doc, adopted.fresh);
+      for (var k = 0; k < pieces.length; k++) doc.edges.push(pieces[k]);
+      VB.applyRegionMask(doc, preOp, insideMoved, f.fillIdx,
+                         pieces.concat(adopted.twins));
+    });
+
+    // re-merge strokes: node in, inherit destination fills
+    var newStrokes = [];
+    strokes.forEach(function (e) {
+      var ne = txEdge(e, 0, 0, e.line);
+      if (!VB.edgeIsDegenerate(ne)) newStrokes.push(ne);
+    });
+    if (newStrokes.length) {
+      var pieces2 = VB.nodeEdges(doc, newStrokes);
+      pieces2.forEach(function (pc) {
+        var mid = VB.geom.evalEdge(pc, 0.5);
+        var f = VB.geom.fillAt(doc, mid.x, mid.y);
+        pc.fill0 = f; pc.fill1 = f;
+        doc.edges.push(pc);
+      });
+      VB.repairPlanar(doc);
+    }
     return true;
   }
 
@@ -209,22 +344,25 @@
   function ArrowTool(app) {
     var self = {
       app: app,
-      sel: null,       // {kind:"fill",x,y,loops} | {kind:"edge",idx} | null
-      drag: null,      // active drag state
+      // selection: fills as pick points (+loops snapshot for overlay),
+      // strokes as record keys
+      sel: { fills: [], edgeKeys: [] },
+      drag: null,
       hoverPos: null
     };
 
     function pickTol() { return 6 * VB.TWIPS / app.view.zoom; }
-
-    function cursorFor(pos) {
-      if (pickAnchor(pos)) return CURSORS.vertex;
-      if (pickEdge(pos) >= 0) return CURSORS.curve;
-      if (VB.geom.fillAt(app.doc, pos.x, pos.y) > 0) return CURSORS.move;
-      return CURSORS.marquee;
+    function selEmpty() {
+      return self.sel.fills.length === 0 && self.sel.edgeKeys.length === 0;
     }
-
-    self.onHover = function (pos) {
-      if (app.setCursor) app.setCursor(cursorFor(pos));
+    self.clearSelection = function () {
+      self.sel = { fills: [], edgeKeys: [] };
+    };
+    self.exportSelection = function () {
+      return {
+        fills: self.sel.fills.map(function (f) { return { x: f.x, y: f.y }; }),
+        edgeKeys: self.sel.edgeKeys.slice()
+      };
     };
 
     function pickAnchor(pos) {
@@ -248,32 +386,125 @@
       return best;
     }
 
-    self.onDown = function (pos) {
-      var anchor = pickAnchor(pos);
-      if (anchor) {
-        self.drag = { kind: "node", from: anchor, cur: pos };
+    function cursorFor(pos) {
+      if (fillSelected(pos)) return CURSORS.move;
+      if (pickAnchor(pos)) return CURSORS.vertex;
+      if (pickEdge(pos) >= 0) return CURSORS.curve;
+      if (VB.geom.fillAt(app.doc, pos.x, pos.y) > 0) return CURSORS.move;
+      return CURSORS.marquee;
+    }
+
+    self.onHover = function (pos) {
+      if (app.setCursor) app.setCursor(cursorFor(pos));
+    };
+
+    function fillSelected(pos) {
+      return self.sel.fills.some(function (f) {
+        var all = [];
+        f.loops.forEach(function (l) { l.forEach(function (e) { all.push(e); }); });
+        return VB.geom.windingNumber(all, pos.x, pos.y) !== 0;
+      });
+    }
+
+    function addFillToSel(pos) {
+      var picked = faceLoopsAt(app.doc, pos.x, pos.y);
+      if (!picked) return false;
+      self.sel.fills.push({ x: pos.x, y: pos.y, loops: picked.loops, face: picked.face });
+      return true;
+    }
+
+    self.onDown = function (pos, ev) {
+      var shift = !!(ev && ev.shiftKey);
+      var ei = pickEdge(pos);
+      var overSelFill = fillSelected(pos);
+      var overSelEdge = ei >= 0 &&
+        self.sel.edgeKeys.indexOf(edgeKey(app.doc.edges[ei])) >= 0;
+
+      // Press on an already-selected item arms a SELECTION MOVE.
+      if (!shift && (overSelFill || overSelEdge)) {
+        self.drag = { kind: "moveSel", from: pos, cur: pos, moved: false,
+                      items: self.exportSelection(),
+                      ghosts: selGhostEdges() };
         return;
       }
-      var ei = pickEdge(pos);
+      var anchor = pickAnchor(pos);
+      if (anchor) {
+        if (!shift) self.clearSelection();
+        self.drag = { kind: "node", from: anchor, cur: pos };
+        app.requestRender();
+        return;
+      }
       if (ei >= 0) {
         var e = app.doc.edges[ei];
+        if (shift) {
+          var k = edgeKey(e);
+          var at = self.sel.edgeKeys.indexOf(k);
+          if (at >= 0) self.sel.edgeKeys.splice(at, 1);
+          else self.sel.edgeKeys.push(k);
+          app.requestRender();
+          return;
+        }
         var q = VB.geom.nearestOnEdge(e, pos.x, pos.y);
-        self.drag = { kind: "edge", key: edgeKey(e), edge: e, t: q.t, cur: pos, moved: false };
+        self.drag = { kind: "edge", key: edgeKey(e), edge: e, t: q.t,
+                      cur: pos, moved: false };
         return;
       }
       var fillIdx = VB.geom.fillAt(app.doc, pos.x, pos.y);
       if (fillIdx > 0) {
-        var picked = faceLoopsAt(app.doc, pos.x, pos.y);
-        if (picked) {
-          self.drag = { kind: "fill", from: pos, cur: pos, loops: picked.loops, moved: false };
-          self.sel = { kind: "fill", x: pos.x, y: pos.y, loops: picked.loops };
+        if (!shift) self.clearSelection();
+        if (addFillToSel(pos)) {
+          self.drag = shift ? null
+            : { kind: "moveSel", from: pos, cur: pos, moved: false,
+                items: self.exportSelection(), ghosts: selGhostEdges() };
           app.requestRender();
           return;
         }
       }
-      self.sel = null;
+      if (!shift) self.clearSelection();
       app.requestRender();
     };
+
+    // Double-click: on a stroke, select ALL attached strokes; on a fill,
+    // the face plus its outline strokes.
+    self.onDblClick = function (pos) {
+      var ei = pickEdge(pos);
+      if (ei >= 0 && app.doc.edges[ei].line > 0) {
+        self.sel = { fills: [], edgeKeys: VB.connectedStrokeKeys(app.doc, ei) };
+        app.setMsg(self.sel.edgeKeys.length + " attached stroke records selected");
+        app.requestRender();
+        return;
+      }
+      var fillIdx = VB.geom.fillAt(app.doc, pos.x, pos.y);
+      if (fillIdx > 0) {
+        self.clearSelection();
+        var picked = faceLoopsAt(app.doc, pos.x, pos.y);
+        if (picked) {
+          self.sel.fills.push({ x: pos.x, y: pos.y, loops: picked.loops });
+          [picked.face.outer].concat(picked.face.holes).forEach(function (cyc) {
+            cyc.forEach(function (h) {
+              var e = app.doc.edges[h.edge];
+              if (e.line > 0) {
+                var k = edgeKey(e);
+                if (self.sel.edgeKeys.indexOf(k) < 0) self.sel.edgeKeys.push(k);
+              }
+            });
+          });
+        }
+        app.requestRender();
+      }
+    };
+
+    function selGhostEdges() {
+      var out = [];
+      self.sel.fills.forEach(function (f) {
+        f.loops.forEach(function (l) { l.forEach(function (e) { out.push(e); }); });
+      });
+      self.sel.edgeKeys.forEach(function (k) {
+        var i = findByKey(app.doc, k);
+        if (i >= 0) out.push(app.doc.edges[i]);
+      });
+      return out;
+    }
 
     self.onMove = function (pos) {
       if (!self.drag) return;
@@ -289,14 +520,16 @@
       if (!drag) return;
       pos = pos || drag.cur;
 
-      if (drag.kind === "node" && drag.cur &&
-          Math.hypot(pos.x - drag.from.x, pos.y - drag.from.y) > 8) {
-        app.record({ op: "moveNode", x: drag.from.x, y: drag.from.y,
-                     nx: Math.round(pos.x), ny: Math.round(pos.y) });
-        app.history.push(app.doc);
-        arrowMoveNode(app.doc, drag.from.x, drag.from.y, pos.x, pos.y);
-        app.docChanged();
-        app.setMsg("node moved");
+      if (drag.kind === "node") {
+        if (Math.hypot(pos.x - drag.from.x, pos.y - drag.from.y) > 8) {
+          app.record({ op: "moveNode", x: drag.from.x, y: drag.from.y,
+                       nx: Math.round(pos.x), ny: Math.round(pos.y) });
+          app.history.push(app.doc);
+          arrowMoveNode(app.doc, drag.from.x, drag.from.y, pos.x, pos.y);
+          self.clearSelection();
+          app.docChanged();
+          app.setMsg("node moved");
+        }
         return;
       }
       if (drag.kind === "edge") {
@@ -305,54 +538,49 @@
                        x: Math.round(pos.x), y: Math.round(pos.y) });
           app.history.push(app.doc);
           arrowReshape(app.doc, drag.key, drag.t, pos.x, pos.y);
+          self.clearSelection();
           app.docChanged();
           app.setMsg("edge reshaped");
         } else {
           var idx = findByKey(app.doc, drag.key);
-          self.sel = idx >= 0 ? { kind: "edge", idx: idx } : null;
+          self.sel = { fills: [], edgeKeys: idx >= 0 ? [drag.key] : [] };
           if (idx >= 0 && app.onEdgeSelected) app.onEdgeSelected(idx);
           app.requestRender();
         }
         return;
       }
-      if (drag.kind === "fill" && drag.moved) {
+      if (drag.kind === "moveSel") {
+        if (!drag.moved) { app.requestRender(); return; }
         var dx = Math.round(pos.x - drag.from.x);
         var dy = Math.round(pos.y - drag.from.y);
-        app.record({ op: "moveFill", x: Math.round(drag.from.x),
-                     y: Math.round(drag.from.y), dx: dx, dy: dy });
+        var m = [1, 0, 0, 1, dx, dy];
+        app.record({ op: "transformSel", fills: drag.items.fills,
+                     edgeKeys: drag.items.edgeKeys, m: m });
         app.history.push(app.doc);
-        arrowMoveFill(app.doc, drag.from.x, drag.from.y, dx, dy);
-        self.sel = null;
+        arrowTransformSel(app.doc, drag.items.fills, drag.items.edgeKeys, m);
+        self.clearSelection();
         app.docChanged();
-        app.setMsg("fill moved");
+        app.setMsg("selection moved");
       }
     };
 
     self.onDeleteKey = function () {
-      if (!self.sel) return false;
-      if (self.sel.kind === "fill") {
-        app.record({ op: "deleteFill", x: Math.round(self.sel.x), y: Math.round(self.sel.y) });
-        app.history.push(app.doc);
-        arrowDeleteFill(app.doc, self.sel.x, self.sel.y);
-        app.setMsg("fill deleted");
-      } else {
-        var e = app.doc.edges[self.sel.idx];
-        if (!e) { self.sel = null; return false; }
-        app.record({ op: "deleteEdge", key: edgeKey(e) });
-        app.history.push(app.doc);
-        arrowDeleteEdge(app.doc, edgeKey(e));
-        app.setMsg("stroke deleted");
-      }
-      self.sel = null;
+      if (selEmpty()) return false;
+      var items = self.exportSelection();
+      app.record({ op: "deleteSel", fills: items.fills, edgeKeys: items.edgeKeys });
+      app.history.push(app.doc);
+      arrowDeleteSel(app.doc, items.fills, items.edgeKeys);
+      self.clearSelection();
       app.docChanged();
+      app.setMsg("selection deleted");
       return true;
     };
 
     self.cancel = function () { self.drag = null; app.requestRender(); };
 
-    function strokeLoop(ctx, loop, dx, dy) {
+    function strokeEdges(ctx, edges, dx, dy) {
       ctx.beginPath();
-      loop.forEach(function (e) {
+      edges.forEach(function (e) {
         ctx.moveTo(e.ax + dx, e.ay + dy);
         if (e.cx === null) ctx.lineTo(e.bx + dx, e.by + dy);
         else ctx.quadraticCurveTo(e.cx + dx, e.cy + dy, e.bx + dx, e.by + dy);
@@ -360,30 +588,56 @@
       ctx.stroke();
     }
 
+    // Flash-style selection hatch (dot pattern), built once.
+    var hatch = null;
+    function hatchPattern(ctx) {
+      if (hatch) return hatch;
+      var cv = document.createElement("canvas");
+      cv.width = 4; cv.height = 4;
+      var c2 = cv.getContext("2d");
+      c2.fillStyle = "rgba(0,0,0,0.45)";
+      c2.fillRect(0, 0, 1, 1);
+      c2.fillRect(2, 2, 1, 1);
+      hatch = ctx.createPattern(cv, "repeat");
+      return hatch;
+    }
+
     self.drawOverlay = function (ctx) {
       var hair = VB.TWIPS / app.view.zoom;
-      if (self.sel && self.sel.kind === "fill") {
-        ctx.strokeStyle = "rgba(0,160,255,0.9)";
-        ctx.lineWidth = 2 * hair;
-        ctx.setLineDash([6 * hair, 4 * hair]);
-        self.sel.loops.forEach(function (l) { strokeLoop(ctx, l, 0, 0); });
-        ctx.setLineDash([]);
+      if (self.sel.fills.length) {
+        ctx.save();
+        ctx.fillStyle = hatchPattern(ctx);
+        self.sel.fills.forEach(function (f) {
+          ctx.beginPath();
+          f.loops.forEach(function (l) {
+            l.forEach(function (e, i2) {
+              if (i2 === 0) ctx.moveTo(e.ax, e.ay);
+              if (e.cx === null) ctx.lineTo(e.bx, e.by);
+              else ctx.quadraticCurveTo(e.cx, e.cy, e.bx, e.by);
+            });
+            ctx.closePath();
+          });
+          ctx.fill("evenodd");
+        });
+        ctx.restore();
       }
-      if (self.sel && self.sel.kind === "edge") {
-        var e = app.doc.edges[self.sel.idx];
-        if (e) {
-          ctx.strokeStyle = "rgba(0,160,255,0.9)";
-          ctx.lineWidth = 3 * hair;
-          strokeLoop(ctx, [e], 0, 0);
-        }
+      if (self.sel.edgeKeys.length) {
+        ctx.strokeStyle = "rgba(0,160,255,0.9)";
+        ctx.lineWidth = 3 * hair;
+        var edges = [];
+        self.sel.edgeKeys.forEach(function (k) {
+          var i2 = findByKey(app.doc, k);
+          if (i2 >= 0) edges.push(app.doc.edges[i2]);
+        });
+        strokeEdges(ctx, edges, 0, 0);
       }
       if (!self.drag || !self.drag.moved) return;
       ctx.strokeStyle = "rgba(255,120,0,0.9)";
       ctx.lineWidth = 2 * hair;
-      if (self.drag.kind === "fill") {
+      if (self.drag.kind === "moveSel") {
         var dx = self.drag.cur.x - self.drag.from.x;
         var dy = self.drag.cur.y - self.drag.from.y;
-        self.drag.loops.forEach(function (l) { strokeLoop(ctx, l, dx, dy); });
+        strokeEdges(ctx, self.drag.ghosts, dx, dy);
       } else if (self.drag.kind === "edge") {
         var e2 = self.drag.edge;
         var t = Math.min(0.8, Math.max(0.2, self.drag.t));
@@ -411,5 +665,8 @@
   VB.arrowMoveFill = arrowMoveFill;
   VB.arrowDeleteFill = arrowDeleteFill;
   VB.arrowDeleteEdge = arrowDeleteEdge;
+  VB.arrowDeleteSel = arrowDeleteSel;
+  VB.arrowTransformSel = arrowTransformSel;
+  VB.connectedStrokeKeys = connectedStrokeKeys;
   VB.arrowEdgeKey = edgeKey;
 })();
