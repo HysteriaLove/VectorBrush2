@@ -1082,8 +1082,10 @@
         ctx.save();
         ctx.translate(fl.dx + extraX, fl.dy + extraY);
         // true fills — chains carry quad controls (cx/cy); flattening
-        // them broke the lifted shapes visually
-        var fillPaths = VB.buildFillPaths(fl.doc);
+        // them broke the lifted shapes visually. Cached: the float doc
+        // never changes, and rebuilding per frame janks long drags.
+        if (!fl.paths) fl.paths = VB.buildFillPaths(fl.doc);
+        var fillPaths = fl.paths;
         function traceChains(chains) {
           ctx.beginPath();
           chains.forEach(function (chain) {

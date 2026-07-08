@@ -66,7 +66,10 @@
       renderQueued = false;
       VB.render(ctx, app.doc, app.view);
       var tool = tools[app.tool];
-      if (tool && tool.drawOverlay) tool.drawOverlay(ctx);
+      if (tool && tool.drawOverlay) {
+        try { tool.drawOverlay(ctx); }
+        catch (err) { trapError("overlay: " + err.message, err.stack); }
+      }
       if (app.debug) {
         VB.renderDebug(ctx, app.doc, app.view,
           app.debugPin >= 0 ? app.debugPin : app.debugHover);
@@ -234,9 +237,28 @@
     fileInput.click();
   });
 
+  // Crash black box: any uncaught exception is captured (with stack and
+  // the current op count) and shipped inside the exported log, so a
+  // "the app crashed" report carries its own diagnosis. Replay ignores
+  // the errors field.
+  app.errors = [];
+  function trapError(msg, stack) {
+    app.errors.push({ atOp: app.journal.length, msg: String(msg),
+                      stack: String(stack || "").split("
+").slice(0, 8).join(" | ") });
+    setMsg("✖ internal error: " + msg + " — use Save log to export a report");
+  }
+  window.addEventListener("error", function (ev) {
+    trapError(ev.message, ev.error && ev.error.stack);
+  });
+  window.addEventListener("unhandledrejection", function (ev) {
+    trapError(ev.reason && ev.reason.message || ev.reason,
+              ev.reason && ev.reason.stack);
+  });
+
   document.getElementById("btn-log").addEventListener("click", function () {
     var blob = new Blob(
-      [JSON.stringify({ version: 1, ops: app.journal })],
+      [JSON.stringify({ version: 1, ops: app.journal, errors: app.errors })],
       { type: "application/json" });
     var a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
