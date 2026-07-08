@@ -84,6 +84,21 @@
           history.push(doc);
           VB.brushStroke(doc, op.points, op.radius, op.color);
           break;
+        case "line":
+          history.push(doc);
+          VB.lineCommit(doc, op.a, op.b, op.style, op.snapTol);
+          break;
+        case "oval":
+          history.push(doc);
+          VB.shapeCommit(doc, VB.ellipseLoop(
+            (op.x0 + op.x1) / 2, (op.y0 + op.y1) / 2,
+            (op.x1 - op.x0) / 2, (op.y1 - op.y0) / 2), op.fill, op.line);
+          break;
+        case "rect":
+          history.push(doc);
+          VB.shapeCommit(doc, VB.rectLoop(op.x0, op.y0, op.x1, op.y1),
+            op.fill, op.line);
+          break;
         case "undo":
           history.undo(doc);
           break;

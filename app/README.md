@@ -12,7 +12,7 @@ Drop a `.swf` or `.vbd` onto the canvas, or use **Open…**.
 
 - Mouse wheel: zoom around the cursor
 - Middle-drag or Space+drag: pan
-- `V`/`P`/`B`/`E`: tool shortcuts
+- `V`/`P`/`B`/`E`/`N`/`O`/`R`/`K`: tool shortcuts
 - **Pencil** (`P`): draw; stroke color/width in the toolbar; strokes are
   smoothed to lines+quads and merged into the planar map (crossed edges
   split, fills inherited) exactly like Flash. Stroke endpoints snap
@@ -26,6 +26,12 @@ Drop a `.swf` or `.vbd` onto the canvas, or use **Open…**.
   different colors split at crossings with two-sided F|G borders and the
   new color owning the overlap; crossed pencil strokes survive as
   interior edges
+- **Line** (`N`) / **Oval** (`O`) / **Rectangle** (`R`): Flash's geometric
+  primitives. Filled shapes replace everything beneath their interior
+  (planar paint-over, same boolean-mask pipeline as the brush) with the
+  stroke stamped on the boundary; stroke-only shapes merge like pencil
+  strokes. An oval is 8 quad records, a rectangle 4 — Flash-lean by
+  construction
 - **Bucket** (`K`): click a region to fill it with the toolbar fill color.
   Finds the planar-map face under the cursor (half-edge walk with hole
   assignment, so islands keep their fill), stamps the facing side of every
@@ -81,6 +87,7 @@ no epsilons.
 | `js/history.js` | Snapshot undo/redo |
 | `js/debug.js` | Vector debug overlay + hover edge inspector |
 | `js/pencil.js` | Pencil tool: capture → fit → merge, with raw-trail preview |
+| `js/shapes.js` | Line/Oval/Rectangle tools: shape loops through the boolean-mask pipeline (filled) or planar merge (stroke-only) |
 | `js/main.js` | GUI shell: viewport, toolbar, tool routing, file I/O |
 
 The document model is deliberately **not** an object/layer scene graph: like
@@ -117,7 +124,7 @@ The `<title>`/final line reads `VBTEST DONE pass=N fail=M`.
 verification (bounded faces must equal E − V + C), wavy-grid bucket
 containment, and the casual-drawing gap scenarios.
 
-Current status: 322 checks, 0 failures — the SWF/VBD pipeline suite plus
+Current status: 337 checks, 0 failures — the SWF/VBD pipeline suite plus
 the journal-replay regression (pencil square → bucket fill → erase across
 it, the case that exposed the concave-join bowtie bug) and
 eraser unit tests (band erase splitting a fill, dab holes with

@@ -37,7 +37,10 @@
     pencil: new VB.PencilTool(app),
     brush: new VB.BrushTool(app),
     bucket: new VB.BucketTool(app),
-    eraser: new VB.EraserTool(app)
+    eraser: new VB.EraserTool(app),
+    line: VB.LineTool(app),
+    oval: VB.OvalTool(app),
+    rect: VB.RectTool(app)
   };
 
   // ---- rendering loop ------------------------------------------------------
@@ -403,8 +406,10 @@
     if (ev.ctrlKey || ev.altKey) return;
     var k = ev.key.toLowerCase();
     if (k === "d") { toggleDebug(); return; }
-    // Flash-accurate bindings: B = brush, K = paint bucket
-    var toolKeys = { v: "select", p: "pencil", b: "brush", k: "bucket", e: "eraser" };
+    // Flash-accurate bindings: B = brush, K = paint bucket, N = line,
+    // O = oval, R = rectangle
+    var toolKeys = { v: "select", p: "pencil", b: "brush", k: "bucket",
+                     e: "eraser", n: "line", o: "oval", r: "rect" };
     if (toolKeys[k]) selectTool(toolKeys[k]);
   });
   window.addEventListener("keyup", function (ev) {

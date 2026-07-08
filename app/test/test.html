@@ -43,6 +43,7 @@
 <script src="../js/history.js"></script>
 <script src="../js/debug.js"></script>
 <script src="../js/pencil.js"></script>
+<script src="../js/shapes.js"></script>
 <script src="fixtures.js"></script>
 <script src="userlog.js"></script>
 <script src="userlog2.js"></script>
@@ -828,6 +829,70 @@
       check("brush session " + ses.name + " end state sane",
         res.doc.edges.length > ses.minEdges, res.doc.edges.length + " edges");
     }
+  })();
+
+  // ======================= unit tests: shape primitives =====================
+  // Line (N) / Oval (O) / Rectangle (R): filled shapes run the brush's
+  // boolean-mask pipeline (paint-over beneath, stroke stamped on the
+  // fence); stroke-only shapes and lines are planar merges.
+  log("shape primitives:");
+  await (async function () {
+    var red = { r: 204, g: 102, b: 102, a: 255 };
+    var blue = { r: 102, g: 204, b: 255, a: 255 };
+    var blk = { width: 40, color: { r: 0, g: 0, b: 0, a: 255 } };
+
+    // 1. filled + stroked oval on a blank canvas
+    var doc = new VB.VBDocument();
+    doc.width = 11000; doc.height = 8000;
+    var n = VB.shapeCommit(doc, VB.ellipseLoop(4000, 3000, 2000, 1500), red, blk);
+    check("oval is 8 records", n === 8, n + " records");
+    check("oval filled inside", VB.geom.fillAt(doc, 4000, 3000) === 1);
+    check("oval empty outside", VB.geom.fillAt(doc, 500, 500) === 0);
+    check("oval boundary carries the stroke",
+      doc.edges.length > 0 && doc.edges.every(function (e) { return e.line === 1; }));
+    check("oval consistent", VB.integrityReport(doc).length === 0,
+      VB.integrityReport(doc)[0]);
+
+    // 2. filled no-stroke rect PAINTS OVER underlying art
+    VB.brushStroke(doc, [{ x: 1000, y: 6000 }, { x: 9000, y: 6000 }], 400, blue);
+    var blueIdx = VB.geom.fillAt(doc, 5000, 6000);
+    check("brush band painted", blueIdx > 0);
+    VB.shapeCommit(doc, VB.rectLoop(4000, 5000, 7000, 7000), red, null);
+    check("rect filled inside", VB.geom.fillAt(doc, 5500, 6000) === 1);
+    check("rect replaced covered paint", VB.geom.fillAt(doc, 5500, 6000) !== blueIdx);
+    check("band outside rect survives", VB.geom.fillAt(doc, 2000, 6000) === blueIdx);
+    check("rect consistent", VB.integrityReport(doc).length === 0,
+      VB.integrityReport(doc)[0]);
+    var phantom = doc.edges.filter(function (e) {
+      return e.cx === null && e.line === 0 &&
+        Math.hypot(e.bx - e.ax, e.by - e.ay) > 300;
+    });
+    check("lineless rect boundary is all-quad (census-safe)", phantom.length === 0,
+      phantom.length + " straight lineless");
+
+    // 3. line tool: merges into the map, splitting what it crosses
+    var before = doc.edges.length;
+    VB.lineCommit(doc, { x: 3000, y: 4600 }, { x: 8000, y: 4600 }, blk);
+    check("line merged", doc.edges.length > before,
+      doc.edges.length + " vs " + before);
+    check("line consistent", VB.integrityReport(doc).length === 0,
+      VB.integrityReport(doc)[0]);
+
+    // 4. journal replay of all three primitives + undo/redo
+    var ops = [
+      { op: "new", width: 11000, height: 8000 },
+      { op: "oval", x0: 2000, y0: 1500, x1: 6000, y1: 4500, fill: red, line: blk },
+      { op: "rect", x0: 4000, y0: 5000, x1: 7000, y1: 7000, fill: red, line: null },
+      { op: "line", a: { x: 1000, y: 1000 }, b: { x: 9000, y: 1000 },
+        style: blk, snapTol: 55 },
+      { op: "undo" },
+      { op: "redo" }
+    ];
+    var res = await VB.replayJournal(ops);
+    check("primitives replay deterministically",
+      res.doc.edges.length > 10 && VB.integrityReport(res.doc).length === 0,
+      res.doc.edges.length + " edges; " + VB.integrityReport(res.doc)[0]);
+    check("replayed oval still filled", VB.geom.fillAt(res.doc, 4000, 3000) === 1);
   })();
 
   // ======================= SWF export round-trip ===========================
