@@ -62,7 +62,7 @@
    * they come back clockwise like outers, i.e. filled, and the stroke's
    * loop interior floods.)
    */
-  function sweptRegion(pathPts, radius) {
+  function buildCapsules(pathPts, radius) {
     var kids = [];
     if (pathPts.length === 1) {
       kids.push(capsule(pathPts[0], pathPts[0], radius));
@@ -70,6 +70,28 @@
     for (var i = 0; i + 1 < pathPts.length; i++) {
       kids.push(capsule(pathPts[i], pathPts[i + 1], radius));
     }
+    return kids;
+  }
+
+  // Slow-but-sturdy union: accumulate one capsule at a time. Each step
+  // unites the growing blob with ONE small convex operand that overlaps
+  // it fatly (the shared joint disc), which paper's tracer handles far
+  // more reliably than blob-vs-blob unions. Used as the fallback when
+  // the fast tree union carves (see sweptOutline).
+  function sweptRegionLinear(pathPts, radius) {
+    var kids = buildCapsules(pathPts, radius);
+    var u = kids[0];
+    for (var i = 1; i < kids.length; i++) {
+      var n = u.unite(kids[i], { insert: false });
+      u.remove();
+      kids[i].remove();
+      u = n;
+    }
+    return u;
+  }
+
+  function sweptRegion(pathPts, radius) {
+    var kids = buildCapsules(pathPts, radius);
     var diag = { capsules: kids.length, rounds: [] };
     VB._sweptDiag = diag;
     while (kids.length > 1) {
@@ -121,19 +143,33 @@
     if (!region) return [];
     // A capsule chain is connected by construction, and every pen point
     // is covered by its capsules. If a pen point is NOT contained in the
-    // united region, a pairwise unite carved the joint away (a paper.js
-    // near-tangent artifact that renders as an unpainted/unerased notch
-    // ON the drag). Re-cover each carved joint with a slightly fat
-    // bridge capsule — fat overlap unites reliably, and the +2tw bulge
-    // (0.1 px) only exists on this rare repair path.
+    // united region, a pairwise unite carved geometry away (a paper.js
+    // near-tangent artifact that renders as unpainted/unerased notches
+    // ON the drag — heavy strokes have shattered into 5 components with
+    // 100 uncovered points). Repair ladder, rare path only:
+    //   1. rebuild with the linear accumulator (one convex capsule at a
+    //      time — far sturdier than blob-vs-blob tree unions);
+    //   2. any straggler joints get a slightly fat bridge capsule
+    //      (+2tw, 0.1 px, invisible).
     var s = ensureScope();
+    function firstUncovered(reg) {
+      for (var pi = 0; pi < pathPts.length; pi++) {
+        if (!reg.contains(new s.Point(pathPts[pi].x, pathPts[pi].y))) return pi;
+      }
+      return -1;
+    }
+    VB._sweptLinear = false;
+    if (firstUncovered(region) >= 0) {
+      VB._sweptLinear = true;
+      region.remove();
+      region = sweptRegionLinear(pathPts, radius);
+    }
     var repaired = 0;
-    for (var pi = 0; pi < pathPts.length && repaired < 6; pi++) {
-      var pp = pathPts[pi];
-      if (region.contains(new s.Point(pp.x, pp.y))) continue;
+    for (var pi2 = firstUncovered(region); pi2 >= 0 && repaired < 8;
+         pi2 = firstUncovered(region)) {
       repaired++;
-      var a = pathPts[Math.max(0, pi - 1)];
-      var b = pathPts[Math.min(pathPts.length - 1, pi + 1)];
+      var a = pathPts[Math.max(0, pi2 - 1)];
+      var b = pathPts[Math.min(pathPts.length - 1, pi2 + 1)];
       var bridge = capsule(a, b, radius + 2);
       var u = region.unite(bridge, { insert: false });
       bridge.remove();
