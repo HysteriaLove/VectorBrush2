@@ -113,6 +113,14 @@
 
   // Closed loops of a path item as point lists (integer twips), sampled
   // by arclength. Degenerate slivers are dropped.
+  // KNOWN LIMIT (log11 op#58): on boolean output containing degenerate
+  // curves, path.getPointAt can walk unreliably and the sampled ring
+  // distorts (an outer ring measured 2.5x its source child's area, and
+  // the fit-faithfulness guard cannot see it because the guard compares
+  // against these same samples). A per-curve parameter-space sampler
+  // fixes that case but perturbs fitted straight walls enough to break
+  // integer-exact same-color coincidence (union test) — needs a sampler
+  // that keeps straight runs exact before it can land.
   function itemLoops(item, step) {
     var paths = item.children ? item.children : [item];
     var loops = [];
@@ -217,12 +225,14 @@
       return loop;
     }
 
-    // The true union contour never self-crosses, but smoothing a sharp
-    // wiggle can fold the FIT across itself — the crossing lens has
-    // winding 0 and leaves an unpainted (or unerased) notch ON the drag.
-    // Self-noding detects a crossing exactly (a split changes the piece
-    // count); the repair refits tighter, then falls back to the raw
-    // contour samples. The common, healthy path is untouched.
+    // A fitted loop must be FAITHFUL to its source ring:
+    //  - it must not self-cross (the true union contour never does; a
+    //    fold has winding 0 inside and leaves a notch ON the drag);
+    //  - it must preserve the ring's signed area (a cuspy little pocket
+    //    hole fitted to 3-6 quads can collapse — the hole then vanishes
+    //    from the winding mask and its whole pocket floods).
+    // On violation: refit tighter, then fall back to the raw contour
+    // samples. The common, healthy path is untouched.
     function selfCrosses(loop) {
       if (loop.length < 3) return false;
       var temp = new VB.VBDocument();
@@ -231,18 +241,46 @@
       }));
       return pieces.length !== loop.length;
     }
+    function ringArea(pts) {
+      var a = 0;
+      for (var i = 0; i < pts.length; i++) {
+        var q = pts[(i + 1) % pts.length];
+        a += pts[i].x * q.y - q.x * pts[i].y;
+      }
+      return a / 2;
+    }
+    function loopArea(loop) {
+      var a = 0;
+      loop.forEach(function (e) {
+        var prev = { x: e.ax, y: e.ay };
+        for (var t = 0.25; t <= 1.001; t += 0.25) {
+          var pt = VB.geom.evalEdge(e, Math.min(1, t));
+          a += prev.x * pt.y - pt.x * prev.y;
+          prev = pt;
+        }
+      });
+      return a / 2;
+    }
+    function unfaithful(loop, srcArea) {
+      if (loop.length === 0) return true;
+      var fa = loopArea(loop);
+      var err = Math.abs(fa - srcArea);
+      if (err > Math.abs(srcArea) * 0.2 && err > 30000) return true;
+      return selfCrosses(loop);
+    }
 
     var out = [];
     var repairs = { loops: 0, refit: 0, raw: 0 };
     VB._outlineRepairs = repairs;
     loops.forEach(function (pts) {
       repairs.loops++;
+      var srcArea = ringArea(pts);
       pts.push({ x: pts[0].x, y: pts[0].y }); // close for the fitter
       var loop = geomsToLoop(VB.fitStroke(pts, fitTol || 12));
-      if (loop.length && selfCrosses(loop)) {
+      if (unfaithful(loop, srcArea)) {
         repairs.refit++;
         var tight = geomsToLoop(VB.fitStroke(pts, 3));
-        if (tight.length && !selfCrosses(tight)) {
+        if (tight.length && !unfaithful(tight, srcArea)) {
           loop = tight;
         } else {
           repairs.raw++;
