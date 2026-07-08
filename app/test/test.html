@@ -1230,9 +1230,15 @@
     check("first gesture lifts the selection out of the doc",
       !!tool15.float && VB.geom.fillAt(doc15, 3500, 3000) === 0,
       "fillAt=" + VB.geom.fillAt(doc15, 3500, 3000));
+    var fq15 = tool15.frameQuad();
+    check("frame followed the gestures",
+      Math.abs(fq15[0].x - 3000) < 2 && Math.abs(fq15[0].y - 2500) < 2,
+      JSON.stringify(fq15[0]));
+    fq15 = (tool15.undoPending(), tool15.frameQuad());
     check("session undo pops one gesture",
-      tool15.undoPending() === true && !!tool15.float &&
-      Math.abs(tool15.box.y0 - 2000) < 2, "y0=" + (tool15.box && tool15.box.y0));
+      !!tool15.float &&
+      Math.abs(fq15[0].x - 3000) < 2 && Math.abs(fq15[0].y - 2000) < 2,
+      JSON.stringify(fq15[0]));
     check("session undo to zero un-lifts and restores the doc",
       tool15.undoPending() === true && tool15.float === null &&
       doc15.edges.length === edges15 && VB.geom.fillAt(doc15, 3500, 3000) === 1 &&
@@ -1265,6 +1271,41 @@
       "x0=" + (tool15.box && tool15.box.x0) + " edges=" + doc15.edges.length);
     tool15.onDown({ x: 10500, y: 7500 }, {});
     check("session revert commits nothing", journal15.length === 1,
+      journal15.length + " ops");
+    // ROTATED FRAME: the box remembers its rotation for the whole
+    // session (Flash), and scaling then runs along the rotated axes.
+    // Rect sits at 3000..6000 x 2500..4500 (center 4500,3500).
+    tool15.adopt({ fills: [{ x: 4500, y: 3500 }], edgeKeys: [] });
+    tool15.onDown({ x: 2600, y: 2300 }, {}); // outside corner: rotate zone
+    check("near-corner grab arms rotation",
+      tool15.drag && tool15.drag.kind === "rotate",
+      tool15.drag && tool15.drag.kind);
+    // drag to the down-point rotated 90 deg about the center
+    tool15.onMove({ x: 5700, y: 1600 });
+    tool15.onUp({ x: 5700, y: 1600 });
+    var rq = tool15.frameQuad();
+    check("frame stays rotated after the gesture",
+      Math.abs(rq[0].x - 5500) < 2 && Math.abs(rq[0].y - 2000) < 2 &&
+      Math.abs(rq[1].x - 5500) < 2 && Math.abs(rq[1].y - 5000) < 2,
+      JSON.stringify([rq[0], rq[1]]));
+    // grab the mid-top handle (now at world 5500,3500) and pull along
+    // the ROTATED axis: pristine y scales 1.5 about the opposite edge
+    tool15.onDown({ x: 5500, y: 3500 }, {});
+    check("rotated handle picked up",
+      tool15.drag && tool15.drag.kind === "scale",
+      tool15.drag && tool15.drag.kind);
+    tool15.onMove({ x: 6500, y: 3500 });
+    tool15.onUp({ x: 6500, y: 3500 });
+    rq = tool15.frameQuad();
+    check("scale runs along the rotated frame axis",
+      Math.abs(rq[0].x - 6500) < 2 && Math.abs(rq[0].y - 2000) < 2,
+      JSON.stringify(rq[0]));
+    check("rotated session reverts clean",
+      tool15.revertPending() === true &&
+      VB.integrityReport(doc15).length === 0 &&
+      VB.geom.fillAt(doc15, 4500, 3500) === 1);
+    tool15.onDown({ x: 10500, y: 7500 }, {});
+    check("rotated session committed nothing", journal15.length === 1,
       journal15.length + " ops");
   })();
 

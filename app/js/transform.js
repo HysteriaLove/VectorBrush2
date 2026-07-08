@@ -91,8 +91,14 @@
     function applyPt(m, x, y) {
       return { x: m[0] * x + m[2] * y + m[4], y: m[1] * x + m[3] * y + m[5] };
     }
+    function invert(m) {
+      var det = m[0] * m[3] - m[1] * m[2];
+      if (Math.abs(det) < 1e-9) return null;
+      var a = m[3] / det, b = -m[1] / det, c = -m[2] / det, d = m[0] / det;
+      return [a, b, c, d, -(a * m[4] + c * m[5]), -(b * m[4] + d * m[5])];
+    }
     function refreshGhosts() {
-      if (!self.pristine) { self.ghosts = null; self.box = null; return; }
+      if (!self.pristine) { self.ghosts = null; return; }
       var m = composedM();
       self.ghosts = self.pristine.map(function (e) {
         var a = applyPt(m, e.ax, e.ay), b = applyPt(m, e.bx, e.by);
@@ -100,8 +106,19 @@
         return VB.edge(a.x, a.y, c === null ? null : c.x,
                        c === null ? null : c.y, b.x, b.y, 0, 0, 0);
       });
-      self.box = bboxOf(self.ghosts);
     }
+
+    /** The frame's world-space corners: the pristine box mapped through
+     *  the session — the box ROTATES WITH the content and keeps that
+     *  orientation until the selection is dropped (Flash's behavior),
+     *  instead of refitting to an upright bbox after every gesture. */
+    self.frameQuad = function (total) {
+      var b = self.box;
+      if (!b) return null;
+      var m = total || composedM();
+      return [applyPt(m, b.x0, b.y0), applyPt(m, b.x1, b.y0),
+              applyPt(m, b.x1, b.y1), applyPt(m, b.x0, b.y1)];
+    };
 
     /** First gesture: lift the selection out of the live document into
      *  a floating clip (un-journaled, exactly the arrow float's lift).
@@ -197,10 +214,14 @@
       } else {
         self.items = null; self.pristine = null;
       }
+      self.box = self.pristine ? bboxOf(self.pristine) : null;
       refreshGhosts();
       app.requestRender();
     };
 
+    // Handles live in PRISTINE space (ax/ay say which frame axes the
+    // handle scales); their world positions come from the session
+    // matrix, so they ride the rotated frame.
     function handles() {
       var b = self.box;
       if (!b) return [];
@@ -213,10 +234,11 @@
       ];
     }
 
-    function pickHandle(pos, tol) {
+    function pickHandle(pos, tol, acc) {
       var hs = handles();
       for (var i = 0; i < hs.length; i++) {
-        if (Math.abs(pos.x - hs[i].x) <= tol && Math.abs(pos.y - hs[i].y) <= tol) {
+        var p = applyPt(acc, hs[i].x, hs[i].y);
+        if (Math.abs(pos.x - p.x) <= tol && Math.abs(pos.y - p.y) <= tol) {
           return { index: i, h: hs[i] };
         }
       }
@@ -226,27 +248,39 @@
     self.onDown = function (pos, ev) {
       var tol = 8 * VB.TWIPS / app.view.zoom;
       if (self.box) {
-        var hit = pickHandle(pos, tol);
-        if (hit) {
-          // anchor = opposite handle
+        var acc = composedM();
+        var accInv = invert(acc);
+        var hit = pickHandle(pos, tol, acc);
+        if (hit && accInv) {
+          // anchor = opposite handle, held fixed in pristine space
           var hs = handles();
           var opp = hs[(hit.index + 4) % 8];
-          self.drag = { kind: "scale", h: hit.h, anchor: opp, cur: pos, m: null };
+          self.drag = { kind: "scale", h: hit.h, anchor: opp,
+                        acc: acc, accInv: accInv, cur: pos, m: null };
           return;
         }
-        var b = self.box;
-        var inside = pos.x > b.x0 && pos.x < b.x1 && pos.y > b.y0 && pos.y < b.y1;
-        var nearBox = pos.x > b.x0 - 3 * tol && pos.x < b.x1 + 3 * tol &&
-                      pos.y > b.y0 - 3 * tol && pos.y < b.y1 + 3 * tol;
-        if (inside) {
-          self.drag = { kind: "move", from: pos, cur: pos, m: null };
-          return;
-        }
-        if (nearBox) {
-          var cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
-          self.drag = { kind: "rotate", center: { x: cx, y: cy },
-                        a0: Math.atan2(pos.y - cy, pos.x - cx), cur: pos, m: null };
-          return;
+        // inside/near tests run in pristine space (map the pointer back
+        // through the session) so they respect the rotated frame
+        if (accInv) {
+          var b = self.box;
+          var q = applyPt(accInv, pos.x, pos.y);
+          // pointer tolerance in pristine units: undo the average scale
+          var s = (Math.hypot(acc[0], acc[1]) + Math.hypot(acc[2], acc[3])) / 2 || 1;
+          var margin = 3 * tol / s;
+          var inside = q.x > b.x0 && q.x < b.x1 && q.y > b.y0 && q.y < b.y1;
+          var nearBox = q.x > b.x0 - margin && q.x < b.x1 + margin &&
+                        q.y > b.y0 - margin && q.y < b.y1 + margin;
+          if (inside) {
+            self.drag = { kind: "move", from: pos, cur: pos, m: null };
+            return;
+          }
+          if (nearBox) {
+            var c0 = applyPt(acc, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2);
+            self.drag = { kind: "rotate", center: c0,
+                          a0: Math.atan2(pos.y - c0.y, pos.x - c0.x),
+                          cur: pos, m: null };
+            return;
+          }
         }
       }
       // clicked away from the selection: the accumulated session lands
@@ -277,13 +311,18 @@
         return [1, 0, 0, 1, d.cur.x - d.from.x, d.cur.y - d.from.y];
       }
       if (d.kind === "scale") {
+        // scaling happens ALONG THE FRAME'S AXES: pull the pointer back
+        // to pristine space, scale about the pristine anchor, and wrap
+        // the result as a world gesture (acc . S . accInv) — dragging a
+        // rotated frame's edge handle stretches along that rotated edge
+        var p = applyPt(d.accInv, d.cur.x, d.cur.y);
         var ax = d.anchor.x, ay = d.anchor.y;
-        var sx = d.h.ax ? (d.cur.x - ax) / (d.h.x - ax || 1) : 1;
-        var sy = d.h.ay ? (d.cur.y - ay) / (d.h.y - ay || 1) : 1;
+        var sx = d.h.ax ? (p.x - ax) / (d.h.x - ax || 1) : 1;
+        var sy = d.h.ay ? (p.y - ay) / (d.h.y - ay || 1) : 1;
         if (!isFinite(sx) || Math.abs(sx) < 0.02) sx = 0.02;
         if (!isFinite(sy) || Math.abs(sy) < 0.02) sy = 0.02;
-        // scale about the anchor
-        return [sx, 0, 0, sy, ax - sx * ax, ay - sy * ay];
+        var S = [sx, 0, 0, sy, ax - sx * ax, ay - sy * ay];
+        return matMul(d.acc, matMul(S, d.accInv));
       }
       if (d.kind === "rotate") {
         var a = Math.atan2(d.cur.y - d.center.y, d.cur.x - d.center.x) - d.a0;
@@ -343,15 +382,16 @@
         if (!m) return { x: x, y: y };
         return { x: m[0] * x + m[2] * y + m[4], y: m[1] * x + m[3] * y + m[5] };
       }
+      // the whole session: live drag on top of the accumulated gestures
+      var total = m ? matMul(m, composedM()) : composedM();
+      function mp(x, y) {
+        return { x: total[0] * x + total[2] * y + total[4],
+                 y: total[1] * x + total[3] * y + total[5] };
+      }
       if (self.float) {
         // the lifted clip renders here with its REAL fills (it no longer
         // exists in the doc) — the untransformed clip mapped through the
-        // whole session: live drag on top of the accumulated gestures
-        var total = m ? matMul(m, composedM()) : composedM();
-        function mp(x, y) {
-          return { x: total[0] * x + total[2] * y + total[4],
-                   y: total[1] * x + total[3] * y + total[5] };
-        }
+        // whole session
         var fl = self.float;
         if (!fl.paths) fl.paths = VB.buildFillPaths(fl.doc);
         function traceChains(chains) {
@@ -421,14 +461,16 @@
         });
         ctx.stroke();
       }
-      // box + handles
+      // box + handles: the pristine frame mapped through the session —
+      // it stays glued to the content, rotation and all; the handle
+      // squares themselves stay screen-aligned (Flash's look)
       var b2 = self.box;
       var corners = [[b2.x0, b2.y0], [b2.x1, b2.y0], [b2.x1, b2.y1], [b2.x0, b2.y1]];
       ctx.strokeStyle = "rgba(0,0,0,0.85)";
       ctx.lineWidth = hair;
       ctx.beginPath();
       corners.forEach(function (c, i) {
-        var p = tx(c[0], c[1]);
+        var p = mp(c[0], c[1]);
         if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
       });
       ctx.closePath();
@@ -437,7 +479,7 @@
       var r = 4 * hair;
       ctx.fillStyle = "#000";
       hs.forEach(function (h) {
-        var p = tx(h.x, h.y);
+        var p = mp(h.x, h.y);
         ctx.fillRect(p.x - r, p.y - r, 2 * r, 2 * r);
       });
     };
