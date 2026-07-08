@@ -598,15 +598,19 @@
     }
 
     /** The session's box in block-LOCAL space: hugs the text but never
-     *  narrower than the set wrap width (Flash shows the box you set). */
+     *  narrower than the set wrap width (Flash shows the box you set).
+     *  It FOLLOWS the caret: every line in the textarea counts — blank
+     *  lines produce no glyph records but still take a line of room. */
     function sessionBox() {
       var s = self.session;
       if (!s) return null;
       var scale = s.sizeTw / s.ttf.unitsPerEm;
+      var pitch = Math.round((s.ttf.winAscent + s.ttf.winDescent) * scale);
+      var lineCount = s.area ? s.area.value.split("\n").length : 1;
       var box = {
         x0: 0, y0: 0,
         x1: s.wrapWidth || Math.round(s.sizeTw),
-        y1: Math.round((s.ttf.winAscent + s.ttf.winDescent) * scale)
+        y1: Math.max(pitch, lineCount * pitch)
       };
       if (s.preview) {
         var bb = textBlockBounds(s.preview.doc, s.preview.block);
