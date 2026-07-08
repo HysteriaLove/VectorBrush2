@@ -34,22 +34,33 @@
       color: { r: color.r, g: color.g, b: color.b, a: color.a }
     });
 
-    // ---- 1. exact swept region, Flash-lean fitted outline ----------------
-    var loops = VB.sweptOutline(swath.path, radius, FIT_TOL);
+    // ---- 1. region boolean in paper space ---------------------------------
+    // The new fill-f region = swept capsules UNITED with the existing
+    // fill-f region. Where the boundary is unchanged, paper reuses the
+    // input curves and the exact original integer quads come back — so
+    // near-coincident re-fitted duplicates cannot exist, which was the
+    // root of every pocket-flood / invisible-stroke bug.
+    var pu = VB.paintUnion(doc, swath.path, radius, fillIdx);
     var fitted = [];
-    loops.forEach(function (loop) {
+    pu.loops.forEach(function (loop) {
       loop.forEach(function (e) { fitted.push(e); });
     });
     if (fitted.length === 0) return { painted: 0, boundary: 0 };
 
-    // The painted region IS the fitted outline: pristine copies for the
-    // winding test (outer loops and pocket holes cancel correctly under
-    // the nonzero rule, whatever their orientation).
-    var windingLoops = fitted.map(function (e) {
+    var unionLoops = fitted.map(function (e) {
       return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, 0, 0, 0);
     });
-    function insidePaint(x, y) {
-      return VB.geom.windingNumber(windingLoops, x, y) !== 0;
+    function insideUnion(x, y) {
+      return VB.geom.windingNumber(unionLoops, x, y) !== 0;
+    }
+    var strokeEdges = [];
+    pu.strokeLoops.forEach(function (loop) {
+      loop.forEach(function (e) { strokeEdges.push(e); });
+    });
+    // Paint-over covering (erasing strokes/other colors) applies only
+    // under the STROKE itself, never under pre-existing paint.
+    function insideStroke(x, y) {
+      return VB.geom.windingNumber(strokeEdges, x, y) !== 0;
     }
 
     // Ground truth for faces outside the paint: the pre-op document is
@@ -61,12 +72,16 @@
       return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, e.fill0, e.fill1, e.line);
     });
 
-    // ---- 2. node the lean outline into the map ---------------------------
+    // ---- 2. replace the old fill-f boundary wholesale ---------------------
+    doc.edges = doc.edges.filter(function (e) { return !pu.replaced.has(e); });
+
+    // ---- 3. node the new boundary into the map -----------------------------
     var pieces = VB.nodeEdges(doc, fitted);
     for (var k = 0; k < pieces.length; k++) doc.edges.push(pieces[k]);
 
-    // ---- 3. boolean mask: faces decide everything ------------------------
-    var removed = VB.applyRegionMask(doc, preOp, insidePaint, fillIdx, pieces);
+    // ---- 4. boolean mask: faces decide everything --------------------------
+    var removed = VB.applyRegionMask(doc, preOp, insideUnion, fillIdx, pieces,
+                                     insideStroke);
 
     return { painted: removed, boundary: fitted.length };
   }

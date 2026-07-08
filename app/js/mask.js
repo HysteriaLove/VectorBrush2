@@ -23,33 +23,29 @@
   /**
    * @param doc        document AFTER the mask outline has been noded in
    * @param preOp      snapshot of the document BEFORE the operation
-   * @param insideMask function(x, y) -> bool, the exact region test
+   * @param insideMask function(x, y) -> bool, the region faces resolve to
+   *                   maskFill inside of
    * @param maskFill   fill index the region resolves to (0 = eraser)
    * @param fencePieces the mask outline's own noded pieces (protected)
+   * @param coverInside optional function(x, y) -> bool: where covered
+   *                   edges are deleted (defaults to insideMask). The
+   *                   brush passes the STROKE region here — paint-over
+   *                   erases only under the stroke, while the stamping
+   *                   mask is the whole united fill region.
    * Returns the number of edges removed (covered strokes + dissolved
    * boundaries).
    */
-  function applyRegionMask(doc, preOp, insideMask, maskFill, fencePieces) {
+  function applyRegionMask(doc, preOp, insideMask, maskFill, fencePieces, coverInside) {
     var before = doc.edges.length;
     var fence = new Set(fencePieces || []);
+    var covered = coverInside || insideMask;
 
-    // Everything the mask covers OR overlaps goes: interior edges, and —
-    // crucially — old edges lying exactly ON the mask boundary (two
-    // same-color tube walls are collinear-coincident there; duplicate
-    // overlapping edges cannot be noded and scramble the face walk).
-    // The new fence replaces them. Edges hugging within the 2tw probe
-    // get absorbed the same way Flash absorbs sub-twip slivers.
+    // Everything the op covers goes: interior fill boundaries dissolve
+    // into the region, covered strokes are erased.
     doc.edges = doc.edges.filter(function (e) {
       if (fence.has(e)) return true;
       var m = VB.geom.evalEdge(e, 0.5);
-      if (insideMask(m.x, m.y)) return false;
-      var ahead = VB.geom.evalEdge(e, 0.55);
-      var tx = ahead.x - m.x, ty = ahead.y - m.y;
-      var tl = Math.hypot(tx, ty);
-      if (tl === 0) return false;
-      tx /= tl; ty /= tl;
-      return !insideMask(m.x - ty * 2, m.y + tx * 2) &&
-             !insideMask(m.x + ty * 2, m.y - tx * 2);
+      return !covered(m.x, m.y);
     });
 
     // Rounding can turn grazing contacts into real crossings; the face
@@ -73,6 +69,23 @@
       return stamp;
     });
 
+    // Optional debug: record the stamp decision for the face containing
+    // VB._maskDebugPt (diagnostics only).
+    if (VB._maskDebugPt) {
+      var dp = VB._maskDebugPt;
+      VB._maskDebugFace = null;
+      built.faces.forEach(function (f, fi) {
+        var crossings = 0;
+        var cycles = [f.outer].concat(f.holes);
+        cycles.forEach(function (cyc) {
+          cyc.forEach(function (h) {
+            crossings += VB.edgeRayCrossings(doc.edges[h.edge], dp.x, dp.y);
+          });
+        });
+        if (crossings & 1) VB._maskDebugFace = Object.assign({ face: fi }, diag[fi]);
+      });
+    }
+
     // Regenerate all claims from the faces. Half-edges on the infinite
     // face are never stamped, leaving 0 there — exactly right.
     doc.edges.forEach(function (e) { e.fill0 = 0; e.fill1 = 0; });
@@ -88,9 +101,16 @@
     });
 
     // Flash output invariants: no lineless 0|0, no lineless fill|fill.
+    var dissolved = [];
     doc.edges = doc.edges.filter(function (e) {
-      return !(e.fill0 === e.fill1 && e.line === 0);
+      if (!(e.fill0 === e.fill1 && e.line === 0)) return true;
+      if (fence.has(e)) {
+        var m = VB.geom.evalEdge(e, 0.5);
+        dissolved.push({ x: Math.round(m.x), y: Math.round(m.y), f: e.fill0 });
+      }
+      return false;
     });
+    VB._maskFenceDissolved = dissolved;
 
     return before - doc.edges.length;
   }

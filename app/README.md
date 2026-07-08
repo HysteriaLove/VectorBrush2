@@ -135,15 +135,25 @@ files.
 4. ~~Eraser (swath subtraction, stroke trimming, boundary re-siding)~~
 5. ~~Brush tool (paint the swath as a fill)~~
 6. ~~Region-boolean erase/brush core~~ — done, powered by paper.js
-   (vendored checkout; prebuilt v0.12.18 in `lib/paper-core.min.js`):
-   the swept region is the paper.js union of per-segment capsules
-   (`js/paperglue.js`), curve-fit to Flash-lean quad loops (the Brush*.swf
-   references store a whole stroke as 14-26 fitted quads), noded into the
-   map, and reconciled by the boolean mask face walk (`js/mask.js`):
-   one probe per face — inside the mask → the mask fill, outside → the
-   pre-op snapshot — and every edge claim regenerated from its two faces.
-   Consistency is by construction; all four captured user-session logs
-   replay with zero phantom chords and zero integrity problems.
-7. Use paper.js `getIntersections`/`divide` for planar noding in
+   (vendored checkout; prebuilt v0.12.18 in `lib/paper-core.min.js`).
+   The brush computes the NEW fill region as a true paper.js boolean:
+   swept per-segment capsules UNITED with the existing fill region
+   (`paintUnion` in `js/paperglue.js` — the old region goes in as one
+   CompoundPath so pockets survive). Where the boundary is unchanged,
+   paper reuses the input curves and quad recovery returns the exact
+   original integer records (signature match), so near-coincident
+   re-fitted duplicates cannot exist; new stretches are curve-fit to
+   Flash-lean quads (a single stroke is ~14-30 quads, matching the
+   Brush*.swf references). The old fill boundary is replaced wholesale,
+   the new one noded in, and the boolean-mask face walk (`js/mask.js`)
+   regenerates every edge claim from its two faces: one probe per face —
+   inside the region -> the paint, outside -> the pre-op snapshot. All
+   captured user-session logs replay with zero phantom chords and zero
+   integrity problems.
+7. Move the eraser onto the same per-fill region boolean (subtract
+   instead of unite); chase the residual micro flood/vanish events
+   (1-13 grid cells on the heavy sessions) and the partial-underpaint
+   ops in logs 8/9/11
+8. Use paper.js `getIntersections`/`divide` for planar noding in
    `merge.js` (replacing the hand-rolled quad-quad intersector)
-8. Pixi.js rendering backend
+9. Pixi.js rendering backend
