@@ -96,11 +96,18 @@
       return { x: pts[v].x + radius * Math.cos(angle), y: pts[v].y + radius * Math.sin(angle) };
     }
 
+    // The miter point — the intersection of the two offset lines — lies
+    // EXACTLY on the swept region's contour (distance r from both legs),
+    // so it is true boundary at any turn sharpness. What is NOT on the
+    // contour is a long straight segment leading to a far miter point:
+    // it sags inside and its pieces then classify as interior and drop,
+    // leaving boundary gaps that render as fill wedges. Hence sharp
+    // concave turns are subdivided into small steps (see buildSide).
     function miterPt(v, a0, a1) {
       var n0x = Math.cos(a0), n0y = Math.sin(a0);
       var n1x = Math.cos(a1), n1y = Math.sin(a1);
       var denom = 1 + n0x * n1x + n0y * n1y;
-      if (denom < 0.3) return null; // too sharp — caller falls back to a chord
+      if (denom < 0.05) return null; // ~180°: legs fold onto themselves
       var s = radius / denom;
       return { x: pts[v].x + (n0x + n1x) * s, y: pts[v].y + (n0y + n1y) * s };
     }
@@ -135,10 +142,23 @@
           arcQuads(raw, pts[vertex].x, pts[vertex].y, radius, a, a + sweep);
           cur = offsetPt(vertex, aNext);
         } else {
-          var mp = miterPt(vertex, a, aNext);
-          var joinTo = mp || offsetPt(vertex, aNext); // chord fallback
-          raw.push({ ax: cur.x, ay: cur.y, cx: null, cy: null, bx: joinTo.x, by: joinTo.y });
-          cur = joinTo;
+          // Concave join: a subdivided miter fan, trimmed like a single
+          // miter (offsets run straight to the first sub-miter — the
+          // overshoot past the crossing is never emitted). Each
+          // sub-miter point sits exactly on the contour; ≤20° steps keep
+          // the connecting segments' inward sag under ~2tw so every
+          // piece stays ON the boundary and survives classification.
+          var steps = Math.max(1, Math.ceil(Math.abs(sweep) / (Math.PI / 9)));
+          var prevA = a;
+          for (var st = 1; st <= steps; st++) {
+            var ai = a + sweep * (st / steps);
+            var mp = miterPt(vertex, prevA, ai);
+            if (mp) {
+              raw.push({ ax: cur.x, ay: cur.y, cx: null, cy: null, bx: mp.x, by: mp.y });
+              cur = mp;
+            }
+            prevA = ai;
+          }
         }
       }
     }
@@ -173,6 +193,11 @@
   }
 
   // Round to integer twips and force exact continuity around the loop.
+  // Also cancels out-and-back jitter: joins can round into A→B followed
+  // immediately by B→A (a zero-width spur). Such a pair is parity-null
+  // but poisons the fill-chain welder — both pieces normalize to the
+  // SAME direction, so traversal dead-ends at the spur tip and the
+  // boundary fragments (rendered as chord wedges once stitched).
   function roundLoop(raw) {
     var out = [];
     var px = null, py = null;
@@ -194,12 +219,91 @@
       px = bx; py = by;
       if (e.ax === e.bx && e.ay === e.by &&
           (e.cx === null || (e.cx === e.ax && e.cy === e.ay))) continue;
+      var prev = out[out.length - 1];
+      if (prev && prev.ax === e.bx && prev.ay === e.by &&
+          prev.bx === e.ax && prev.by === e.ay) {
+        out.pop(); // A→B, B→A: cancel the spur; continuity holds at A
+        continue;
+      }
       out.push(e);
     }
     return out;
   }
 
+  // Cancels micro out-and-back pairs among classified boundary pieces:
+  // noding + rounding can leave two tiny pieces spanning the same 1-2tw
+  // segment in opposite directions. Such a pair nulls the boundary's
+  // parity locally AND dead-ends the fill-chain welder (both normalize
+  // to the same direction), fragmenting the boundary into open chains.
+  // Removing both restores continuity through their shared base point.
+  function cancelMicroSpurs(piecesList) {
+    var MAX_SPUR = 6; // twips
+    var byKey = new Map();
+    var dead = new Set();
+    for (var i = 0; i < piecesList.length; i++) {
+      var e = piecesList[i];
+      if (Math.hypot(e.bx - e.ax, e.by - e.ay) > MAX_SPUR) continue;
+      var revKey = e.bx + "," + e.by + "|" + e.ax + "," + e.ay;
+      var partner = byKey.get(revKey);
+      if (partner !== undefined && !dead.has(partner)) {
+        dead.add(partner);
+        dead.add(i);
+        continue;
+      }
+      byKey.set(e.ax + "," + e.ay + "|" + e.bx + "," + e.by, i);
+    }
+    if (dead.size === 0) return piecesList;
+    return piecesList.filter(function (_, i) { return !dead.has(i); });
+  }
+
+  // Prunes dead-end boundary whiskers among classified pieces. Noding +
+  // rounding over retraced outline stretches can leave short knots whose
+  // strands point INTO a tip (2-in/0-out when normalized to walk with
+  // their fill on the right) — the chain welder dead-ends there and the
+  // boundary fragments. Iteratively remove short single-sided pieces
+  // whose normalized end no other piece continues.
+  function pruneDeadEnds(piecesList, doc) {
+    var MAX_WHISKER = 40; // twips
+    var alive = piecesList.slice();
+    for (var pass = 0; pass < 8; pass++) {
+      // fill -> Set of normalized start keys a chain can continue from:
+      // the alive pieces AND the existing document (boundary chains hand
+      // off onto surviving old edges — those junctions are NOT dead ends).
+      var starts = new Map();
+      function addStart(f, key) {
+        var set = starts.get(f);
+        if (!set) { set = new Set(); starts.set(f, set); }
+        set.add(key);
+      }
+      alive.forEach(function (e) {
+        if (e.fill1 > 0) addStart(e.fill1, e.ax + "," + e.ay);
+        if (e.fill0 > 0) addStart(e.fill0, e.bx + "," + e.by);
+      });
+      if (doc) {
+        doc.edges.forEach(function (e) {
+          if (e.fill1 > 0) addStart(e.fill1, e.ax + "," + e.ay);
+          if (e.fill0 > 0) addStart(e.fill0, e.bx + "," + e.by);
+        });
+      }
+      var removed = false;
+      alive = alive.filter(function (e) {
+        var single = (e.fill0 > 0) !== (e.fill1 > 0);
+        if (!single) return true;
+        if (Math.hypot(e.bx - e.ax, e.by - e.ay) > MAX_WHISKER) return true;
+        var f = e.fill1 > 0 ? e.fill1 : e.fill0;
+        var endKey = e.fill1 > 0 ? (e.bx + "," + e.by) : (e.ax + "," + e.ay);
+        if (starts.get(f) && starts.get(f).has(endKey)) return true;
+        removed = true;
+        return false;
+      });
+      if (!removed) break;
+    }
+    return alive;
+  }
+
   window.VB = window.VB || {};
   VB.buildSwath = buildSwath;
   VB.distToPath = distToPath;
+  VB.cancelMicroSpurs = cancelMicroSpurs;
+  VB.pruneDeadEnds = pruneDeadEnds;
 })();

@@ -609,7 +609,37 @@
     check("paint-over consistent", VB.integrityReport(doc5).length === 0,
       VB.integrityReport(doc5)[0]);
 
-    // 6. Same color painted twice over itself is stable (idempotent-ish).
+    // 6. Long self-crossing scribble (the reported wedge corruption):
+    //    heavy self-overlap must yield a clean union with closed
+    //    boundaries and no phantom chord edges.
+    (function () {
+      var lcg = 777;
+      function rr() { lcg = (lcg * 1103515245 + 12345) & 0x7fffffff; return lcg / 0x7fffffff; }
+      var sdoc = new VB.VBDocument();
+      var x = 3000, y = 3000, heading = rr() * Math.PI * 2;
+      var spts = [];
+      for (var i = 0; i < 180; i++) {
+        spts.push({ x: x, y: y });
+        heading += (rr() - 0.5) * 0.6;
+        x += Math.cos(heading) * 80;
+        y += Math.sin(heading) * 80;
+        if (x < 800 || x > 10200) heading = Math.PI - heading;
+        if (y < 800 || y > 7200) heading = -heading;
+      }
+      VB.brushStroke(sdoc, spts, 100, { r: 102, g: 204, b: 255, a: 255 });
+      var probs = VB.integrityReport(sdoc);
+      check("scribble consistent", probs.length === 0, probs[0]);
+      var phantom = sdoc.edges.filter(function (e) {
+        return e.cx === null && e.line === 0 &&
+          Math.hypot(e.bx - e.ax, e.by - e.ay) > 250;
+      });
+      check("scribble has no phantom chords", phantom.length === 0,
+        phantom.length + " long straight lineless edges");
+      check("scribble paints its path", VB.geom.fillAt(sdoc,
+        spts[90].x, spts[90].y) === 1);
+    })();
+
+    // 7. Same color painted twice over itself is stable (idempotent-ish).
     var before6 = doc2.edges.length;
     VB.brushStroke(doc2, [{ x: 3000, y: 4000 }, { x: 6000, y: 4000 }], 300, red);
     check("repaint keeps single style", doc2.fills.length === 1);

@@ -97,6 +97,8 @@
       kept.push(e);
     }
 
+    kept = VB.pruneDeadEnds(VB.cancelMicroSpurs(kept), doc);
+
     // Submerge what the paint covers: lineless fill boundaries inside the
     // swath disappear (the paint replaces those fills there); strokes
     // survive as interior edges of the paint, exactly like a pencil line
