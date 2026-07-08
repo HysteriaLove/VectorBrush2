@@ -284,16 +284,12 @@
    * and re-merged: fills paint over what they land on (the boolean-mask
    * pipeline), strokes re-node and inherit destination fills.
    */
-  function arrowTransformSel(doc, fillPicks, edgeKeys, m) {
-    fillPicks = fillPicks || [];
-    edgeKeys = edgeKeys || [];
-    // resolve everything against the pre-op document into a standalone
-    // clip (its own planar map) so the re-merge is ONE mask pass —
-    // sequential per-fill passes destabilize shared borders (see
-    // mergeLifted)
+  /** Standalone clip doc from a fill/stroke selection, resolved against
+   *  the CURRENT doc (call BEFORE any lifting). */
+  function liftSelDoc(doc, fillPicks, edgeKeys) {
     var lifted = new VB.VBDocument();
     lifted.width = doc.width; lifted.height = doc.height;
-    fillPicks.forEach(function (p) {
+    (fillPicks || []).forEach(function (p) {
       var got = faceLoopsAt(doc, p.x, p.y);
       if (!got) return;
       var src = doc.fills[got.fillIdx - 1];
@@ -307,12 +303,10 @@
         });
       });
     });
-    var strokes = [];
-    edgeKeys.forEach(function (k) {
+    (edgeKeys || []).forEach(function (k) {
       var i = findByKey(doc, k);
-      if (i >= 0) strokes.push(doc.edges[i]);
-    });
-    strokes.forEach(function (e) {
+      if (i < 0) return;
+      var e = doc.edges[i];
       if (e.line === 0) return;
       var ls = doc.lines[e.line - 1];
       var lnIdx = lifted.addLineStyle({
@@ -321,12 +315,22 @@
       });
       lifted.edges.push(VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, 0, 0, lnIdx));
     });
-    if (lifted.edges.length === 0) return false;
+    return lifted;
+  }
 
-    // lift originals. Lifting a stroke OFF a fill boundary leaves the
-    // fill intact behind a lineless edge (Flash: fills don't follow
-    // their outline strokes) — only claim-free strokes vanish entirely.
-    fillPicks.forEach(function (p) { arrowDeleteFill(doc, p.x, p.y); });
+  /** Remove a selection's originals from doc. Lifting a stroke OFF a
+   *  fill boundary leaves the fill intact behind a lineless edge
+   *  (Flash: fills don't follow their outline strokes) — only
+   *  claim-free strokes vanish entirely. Strokes resolve to objects
+   *  BEFORE the fills go: deleting a face restamps boundary claims,
+   *  which changes edge keys. */
+  function removeSelOriginals(doc, fillPicks, edgeKeys) {
+    var strokes = [];
+    (edgeKeys || []).forEach(function (k) {
+      var i = findByKey(doc, k);
+      if (i >= 0) strokes.push(doc.edges[i]);
+    });
+    (fillPicks || []).forEach(function (p) { arrowDeleteFill(doc, p.x, p.y); });
     var strokeSet = new Set(strokes);
     var rebuilt = [];
     doc.edges.forEach(function (e) {
@@ -337,7 +341,15 @@
       }
     });
     doc.edges = rebuilt;
+  }
 
+  function arrowTransformSel(doc, fillPicks, edgeKeys, m) {
+    // resolve into a standalone clip (its own planar map) so the
+    // re-merge is ONE mask pass — sequential per-fill passes
+    // destabilize shared borders (see mergeLifted)
+    var lifted = liftSelDoc(doc, fillPicks, edgeKeys);
+    if (lifted.edges.length === 0) return false;
+    removeSelOriginals(doc, fillPicks, edgeKeys);
     return mergeLifted(doc, lifted, m);
   }
 
@@ -1193,6 +1205,8 @@
   VB.arrowDeleteEdge = arrowDeleteEdge;
   VB.arrowDeleteSel = arrowDeleteSel;
   VB.arrowTransformSel = arrowTransformSel;
+  VB.arrowLiftSelDoc = liftSelDoc;
+  VB.arrowRemoveSel = removeSelOriginals;
   VB.connectedStrokeKeys = connectedStrokeKeys;
   VB.regionLift = regionLift;
   VB.regionDelete = regionDelete;

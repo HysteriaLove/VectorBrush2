@@ -5,11 +5,14 @@
  * handles, rotates when grabbed just outside a corner, moves when
  * dragged from inside. The tool stays live between gestures: each
  * release accumulates its matrix and the box follows, so the user can
- * scale, rotate and move in any order. Nothing touches the document
- * until the selection is clicked away (or the tool switches) — then
- * the composed matrix lands as ONE transform op through the same
- * lift/paint-over pipeline as the arrow's move. Affine maps take quad
- * records to quad records exactly, so records stay records.
+ * scale, rotate and move in any order. On the first gesture the
+ * selection LIFTS out of the document into a floating clip (same
+ * un-journaled lift as the arrow's float, history snapshot taken
+ * here), which renders with its real fills under the composed matrix —
+ * the drawing updates live, not just on commit. Clicking away (or
+ * switching tools) merges the clip back as ONE transform op through
+ * the boolean-mask pipeline. Affine maps take quad records to quad
+ * records exactly, so records stay records.
  */
 (function () {
   "use strict";
@@ -22,6 +25,7 @@
       gestures: [],   // accumulated per-gesture matrices (uncommitted)
       ghosts: null,   // pristine mapped through the composed matrix
       box: null,      // {x0,y0,x1,y1} of ghosts
+      float: null,    // lifted clip {doc, paths} once a gesture landed
       drag: null
     };
 
@@ -99,39 +103,71 @@
       self.box = bboxOf(self.ghosts);
     }
 
-    /** Land the accumulated session on the document as ONE journal op. */
+    /** First gesture: lift the selection out of the live document into
+     *  a floating clip (un-journaled, exactly the arrow float's lift).
+     *  The history snapshot taken here is the session's ONE undo step;
+     *  the drawing then renders the truth — originals gone, clip
+     *  floating under the composed matrix. */
+    function ensureLifted() {
+      if (self.float || !self.items) return;
+      // the clip builders only READ the doc — build first, snapshot,
+      // then remove the originals
+      var clip = self.items.region
+        ? VB.regionLift(app.doc, self.items.region)
+        : VB.arrowLiftSelDoc(app.doc, self.items.fills, self.items.edgeKeys);
+      if (clip.edges.length === 0) return;
+      app.history.push(app.doc);
+      if (self.items.region) VB.regionDelete(app.doc, self.items.region);
+      else VB.arrowRemoveSel(app.doc, self.items.fills, self.items.edgeKeys);
+      self.float = { doc: clip, paths: null };
+    }
+
+    /** Put a lifted clip back untouched: the lift was never journaled,
+     *  so restore the snapshot directly and record nothing. */
+    function unlift() {
+      if (!self.float) return;
+      self.float = null;
+      app.history.undo(app.doc);
+    }
+
+    /** Land the accumulated session on the document as ONE journal op.
+     *  No history push here — the lift-time snapshot IS the undo step. */
     self.commitPending = function () {
-      if (!self.items || !self.gestures.length) { self.gestures = []; return false; }
+      if (!self.items || !self.gestures.length) {
+        self.gestures = []; unlift(); return false;
+      }
       var m = composedM();
+      var fl = self.float;
       self.gestures = []; // before mutating: docChanged() discards us
-      if (isIdentity(m)) return false;
+      if (isIdentity(m) || !fl) { unlift(); return false; }
+      self.float = null;
       if (self.items.region) {
         app.record({ op: "regionTransform", points: self.items.region, m: m });
-        app.history.push(app.doc);
-        VB.regionTransform(app.doc, self.items.region, m);
       } else {
         app.record({ op: "transformSel", fills: self.items.fills,
                      edgeKeys: self.items.edgeKeys, m: m });
-        app.history.push(app.doc);
-        VB.arrowTransformSel(app.doc, self.items.fills, self.items.edgeKeys, m);
       }
+      VB.regionMergeLifted(app.doc, fl.doc, m);
       app.docChanged();
       app.setMsg("selection transformed");
       return true;
     };
 
     /** Drop the session without committing — the document changed under
-     *  us (load, undo/redo, another tool), so the picks are stale. */
+     *  us (load, undo/redo, another tool), so the picks are stale. The
+     *  float is NOT restored: the change replaced the doc wholesale. */
     self.discard = function () {
       self.items = null; self.pristine = null; self.gestures = [];
-      self.ghosts = null; self.box = null; self.drag = null;
+      self.ghosts = null; self.box = null; self.float = null; self.drag = null;
     };
 
     /** Ctrl+Z during a session: step back ONE gesture (nothing was
-     *  journaled, so nothing reaches the history). */
+     *  journaled, so nothing reaches the history). Back at zero the
+     *  clip un-lifts and the selection stays adopted. */
     self.undoPending = function () {
       if (!self.gestures.length) return false;
       self.gestures.pop();
+      if (!self.gestures.length) unlift();
       refreshGhosts();
       app.requestRender();
       app.setMsg(self.gestures.length ? "transform step undone" : "transform reverted");
@@ -142,6 +178,7 @@
     self.revertPending = function () {
       if (!self.gestures.length) return false;
       self.gestures = [];
+      unlift();
       refreshGhosts();
       app.requestRender();
       app.setMsg("transform reverted");
@@ -272,8 +309,10 @@
       var mFinal = currentMatrix();
       self.drag = null;
       if (!mFinal || isIdentity(mFinal)) { app.requestRender(); return; }
-      // accumulate — the box stays live for the next gesture; the doc
-      // is untouched until the selection is clicked away
+      // first gesture lifts the selection into the floating clip; then
+      // accumulate — the box stays live for the next gesture, and the
+      // clip renders transformed until the selection is clicked away
+      ensureLifted();
       self.gestures.push(mFinal);
       refreshGhosts();
       app.requestRender();
@@ -281,6 +320,20 @@
     };
 
     self.cancel = function () { self.drag = null; app.requestRender(); };
+
+    // Flash-style selection hatch (dot pattern), built once.
+    var hatch = null;
+    function hatchPattern(ctx) {
+      if (hatch) return hatch;
+      var cv = document.createElement("canvas");
+      cv.width = 4; cv.height = 4;
+      var c2 = cv.getContext("2d");
+      c2.fillStyle = "rgba(0,0,0,0.45)";
+      c2.fillRect(0, 0, 1, 1);
+      c2.fillRect(2, 2, 1, 1);
+      hatch = ctx.createPattern(cv, "repeat");
+      return hatch;
+    }
 
     self.drawOverlay = function (ctx) {
       if (!self.box) return;
@@ -290,17 +343,84 @@
         if (!m) return { x: x, y: y };
         return { x: m[0] * x + m[2] * y + m[4], y: m[1] * x + m[3] * y + m[5] };
       }
-      // ghost geometry
-      ctx.strokeStyle = "rgba(255,120,0,0.9)";
-      ctx.lineWidth = 2 * hair;
-      ctx.beginPath();
-      (self.ghosts || []).forEach(function (e) {
-        var a = tx(e.ax, e.ay), b = tx(e.bx, e.by);
-        ctx.moveTo(a.x, a.y);
-        if (e.cx === null) ctx.lineTo(b.x, b.y);
-        else { var c = tx(e.cx, e.cy); ctx.quadraticCurveTo(c.x, c.y, b.x, b.y); }
-      });
-      ctx.stroke();
+      if (self.float) {
+        // the lifted clip renders here with its REAL fills (it no longer
+        // exists in the doc) — the untransformed clip mapped through the
+        // whole session: live drag on top of the accumulated gestures
+        var total = m ? matMul(m, composedM()) : composedM();
+        function mp(x, y) {
+          return { x: total[0] * x + total[2] * y + total[4],
+                   y: total[1] * x + total[3] * y + total[5] };
+        }
+        var fl = self.float;
+        if (!fl.paths) fl.paths = VB.buildFillPaths(fl.doc);
+        function traceChains(chains) {
+          ctx.beginPath();
+          chains.forEach(function (chain) {
+            var s = mp(chain.sx, chain.sy);
+            ctx.moveTo(s.x, s.y);
+            chain.pts.forEach(function (q) {
+              var p = mp(q.x, q.y);
+              if (q.cx === null || q.cx === undefined) ctx.lineTo(p.x, p.y);
+              else {
+                var c = mp(q.cx, q.cy);
+                ctx.quadraticCurveTo(c.x, c.y, p.x, p.y);
+              }
+            });
+            ctx.closePath();
+          });
+        }
+        for (var fi = 1; fi < fl.paths.length; fi++) {
+          var st = fl.doc.fills[fi - 1];
+          if (!st || !fl.paths[fi].length) continue;
+          traceChains(fl.paths[fi]);
+          ctx.fillStyle = "rgba(" + st.color.r + "," + st.color.g + "," +
+            st.color.b + "," + (st.color.a / 255) + ")";
+          ctx.fill("evenodd");
+          // dotted hatch: this content is not committed yet
+          ctx.fillStyle = hatchPattern(ctx);
+          ctx.fill("evenodd");
+          // selection outline follows the ACTUAL shape, not a box
+          traceChains(fl.paths[fi]);
+          ctx.strokeStyle = "rgba(255,120,0,0.95)";
+          ctx.lineWidth = 2 * hair;
+          ctx.stroke();
+        }
+        fl.doc.edges.forEach(function (e) {
+          if (e.line === 0) return;
+          var ls = fl.doc.lines[e.line - 1];
+          if (!ls) return;
+          var a2 = mp(e.ax, e.ay), b3 = mp(e.bx, e.by);
+          ctx.beginPath();
+          ctx.moveTo(a2.x, a2.y);
+          if (e.cx === null) ctx.lineTo(b3.x, b3.y);
+          else {
+            var c3 = mp(e.cx, e.cy);
+            ctx.quadraticCurveTo(c3.x, c3.y, b3.x, b3.y);
+          }
+          ctx.strokeStyle = "rgba(" + ls.color.r + "," + ls.color.g + "," +
+            ls.color.b + "," + (ls.color.a / 255) + ")";
+          ctx.lineWidth = Math.max(ls.width, hair);
+          ctx.lineCap = "round";
+          ctx.stroke();
+          // floating strokes get the orange marker too
+          ctx.strokeStyle = "rgba(255,120,0,0.95)";
+          ctx.lineWidth = 2 * hair;
+          ctx.stroke();
+        });
+      } else {
+        // pre-lift: ghost outline over the still-in-place originals
+        ctx.strokeStyle = "rgba(255,120,0,0.9)";
+        ctx.lineWidth = 2 * hair;
+        ctx.beginPath();
+        (self.ghosts || []).forEach(function (e) {
+          var a = tx(e.ax, e.ay), b = tx(e.bx, e.by);
+          ctx.moveTo(a.x, a.y);
+          if (e.cx === null) ctx.lineTo(b.x, b.y);
+          else { var c = tx(e.cx, e.cy); ctx.quadraticCurveTo(c.x, c.y, b.x, b.y); }
+        });
+        ctx.stroke();
+      }
       // box + handles
       var b2 = self.box;
       var corners = [[b2.x0, b2.y0], [b2.x1, b2.y0], [b2.x1, b2.y1], [b2.x0, b2.y1]];
