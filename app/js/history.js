@@ -22,7 +22,11 @@
       lines: JSON.parse(JSON.stringify(doc.lines)),
       edges: doc.edges.map(function (e) {
         return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, e.fill0, e.fill1, e.line);
-      })
+      }),
+      // fonts are immutable once defined — share by reference; text
+      // blocks are small, deep-copy them
+      fonts: (doc.fonts || []).slice(),
+      texts: JSON.parse(JSON.stringify(doc.texts || []))
     };
   }
 
@@ -33,6 +37,8 @@
     doc.fills = snap.fills;
     doc.lines = snap.lines;
     doc.edges = snap.edges;
+    doc.fonts = snap.fonts || [];
+    doc.texts = snap.texts || [];
   }
 
   History.prototype.push = function (doc) {

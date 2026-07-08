@@ -181,7 +181,10 @@
     document.getElementById("status-doc").textContent =
       (app.doc.width / VB.TWIPS) + "×" + (app.doc.height / VB.TWIPS) + " px · " +
       s.edges + " edges (" + s.straight + " straight, " + s.curved + " curved) · " +
-      s.fills + " fills · " + s.lines + " line styles";
+      s.fills + " fills · " + s.lines + " line styles" +
+      (app.doc.texts && app.doc.texts.length
+        ? " · " + app.doc.texts.length + " text (" + app.doc.fonts.length + " fonts)"
+        : "");
     document.getElementById("status-zoom").textContent =
       "zoom " + Math.round(app.view.zoom * 100) + "%" + (app.debug ? " · DEBUG" : "");
     document.getElementById("btn-undo").disabled = !app.history.canUndo();
@@ -298,6 +301,10 @@
 
   document.getElementById("btn-save-swf").addEventListener("click", function () {
     try {
+      if (app.doc.texts && app.doc.texts.length) {
+        toast("Note: " + app.doc.texts.length + " text block(s) are not yet " +
+          "written to SWF (coming next) — the .vbd save keeps them", 6000);
+      }
       var bytes = VB.encodeSWF(app.doc);
       var base = app.fileName ? app.fileName.replace(/\.[^.]+$/, "") : "drawing";
       var blob = new Blob([bytes], { type: "application/x-shockwave-flash" });

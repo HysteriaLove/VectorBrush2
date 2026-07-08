@@ -135,8 +135,9 @@
     stats.moveTos = 0;
     stats.straightEdges = 0;
     stats.curvedEdges = 0;
+    var hasText = (doc.texts && doc.texts.length) || (doc.fonts && doc.fonts.length);
     var w = new VB.BitWriter();
-    w.u8(1); // version
+    w.u8(hasText ? 2 : 1); // v2 = v1 + a trailing text section
     w.rect({ xmin: 0, xmax: doc.width, ymin: 0, ymax: doc.height });
     writeColor(w, doc.background);
 
@@ -161,7 +162,106 @@
 
     writeShapeRecords(w, prepareShapeEdges(doc), numFillBits, numLineBits, stats);
     w.align();
+    if (hasText) writeTextSection(w, doc);
     return w.toUint8Array();
+  }
+
+  // ---- text section (v2) -----------------------------------------------------
+  // Byte-aligned: text is tiny next to the shape, so no bit packing.
+  // Fonts store their glyph outlines verbatim (1024-EM y-down contours),
+  // so an imported SWF's text round-trips through .vbd losslessly.
+
+  function s16w(w, v) { w.u16(v & 0xFFFF); }
+  function s32w(w, v) { w.u16((v >> 16) & 0xFFFF); w.u16(v & 0xFFFF); }
+
+  function writeTextSection(w, doc) {
+    var fonts = doc.fonts || [], texts = doc.texts || [];
+    w.u16(fonts.length);
+    fonts.forEach(function (f) {
+      var name = unescape(encodeURIComponent(f.name)); // utf8 bytes
+      w.u8(Math.min(name.length, 255));
+      for (var i = 0; i < Math.min(name.length, 255); i++) w.u8(name.charCodeAt(i));
+      w.u8((f.bold ? 1 : 0) | (f.italic ? 2 : 0));
+      w.u16(f.glyphs.length);
+      f.glyphs.forEach(function (g) {
+        w.u16(g.code);
+        w.u16(g.contours.length);
+        g.contours.forEach(function (c) {
+          s16w(w, c.mx); s16w(w, c.my);
+          w.u16(c.segs.length);
+          c.segs.forEach(function (s) {
+            if (s.cx === undefined) { w.u8(0); s16w(w, s.x); s16w(w, s.y); }
+            else { w.u8(1); s16w(w, s.cx); s16w(w, s.cy); s16w(w, s.x); s16w(w, s.y); }
+          });
+        });
+      });
+    });
+    w.u16(texts.length);
+    texts.forEach(function (t) {
+      // a,b,c,d as 16.16 fixed (SWF's own precision), tx/ty as s32 twips
+      for (var i = 0; i < 4; i++) s32w(w, Math.round(t.matrix[i] * 65536));
+      s32w(w, t.matrix[4]); s32w(w, t.matrix[5]);
+      w.u16(t.records.length);
+      t.records.forEach(function (rec) {
+        w.u16(rec.font);
+        w.u16(rec.height);
+        writeColor(w, rec.color);
+        s16w(w, rec.x); s16w(w, rec.y);
+        w.u16(rec.glyphs.length);
+        rec.glyphs.forEach(function (g) { w.u16(g.gi); s16w(w, g.adv); });
+      });
+    });
+  }
+
+  function s16r(r) { return (r.u16() << 16) >> 16; }
+  function s32r(r) { return ((r.u16() << 16) | r.u16()) | 0; }
+
+  function readTextSection(r, doc) {
+    var nf = r.u16();
+    for (var i = 0; i < nf; i++) {
+      var nameLen = r.u8();
+      var raw = "";
+      for (var j = 0; j < nameLen; j++) raw += String.fromCharCode(r.u8());
+      var name;
+      try { name = decodeURIComponent(escape(raw)); } catch (e) { name = raw; }
+      var style = r.u8();
+      var font = { name: name, bold: !!(style & 1), italic: !!(style & 2), glyphs: [] };
+      var ng = r.u16();
+      for (var g = 0; g < ng; g++) {
+        var glyph = { code: r.u16(), contours: [] };
+        var nc = r.u16();
+        for (var c = 0; c < nc; c++) {
+          var ct = { mx: s16r(r), my: s16r(r), segs: [] };
+          var ns = r.u16();
+          for (var s = 0; s < ns; s++) {
+            if (r.u8() === 0) ct.segs.push({ x: s16r(r), y: s16r(r) });
+            else ct.segs.push({ cx: s16r(r), cy: s16r(r), x: s16r(r), y: s16r(r) });
+          }
+          glyph.contours.push(ct);
+        }
+        font.glyphs.push(glyph);
+      }
+      doc.fonts.push(font);
+    }
+    var nt = r.u16();
+    for (i = 0; i < nt; i++) {
+      var matrix = [s32r(r) / 65536, s32r(r) / 65536, s32r(r) / 65536,
+                    s32r(r) / 65536, s32r(r), s32r(r)];
+      var text = { matrix: matrix, records: [] };
+      var nr = r.u16();
+      for (var k = 0; k < nr; k++) {
+        var rec = {
+          font: r.u16(), height: r.u16(), color: readColor(r),
+          x: s16r(r), y: s16r(r), glyphs: []
+        };
+        var ngl = r.u16();
+        for (var g2 = 0; g2 < ngl; g2++) {
+          rec.glyphs.push({ gi: r.u16(), adv: s16r(r) });
+        }
+        text.records.push(rec);
+      }
+      doc.texts.push(text);
+    }
   }
 
   // Degenerate-filter + oversized-split + pen-continuity order: the edge
@@ -285,7 +385,9 @@
 
     var r = new VB.BitReader(body, 0);
     var version = r.u8();
-    if (version !== 1) throw new Error("Unsupported VBD version " + version);
+    if (version !== 1 && version !== 2) {
+      throw new Error("Unsupported VBD version " + version);
+    }
 
     var doc = new VB.VBDocument();
     var stage = r.rect();
@@ -333,6 +435,11 @@
         doc.edges.push(VB.edge(penX, penY, cx, cy, cx + adx, cy + ady, f0, f1, ln));
         penX = cx + adx; penY = cy + ady;
       }
+    }
+
+    if (version >= 2) {
+      r.align();
+      readTextSection(r, doc);
     }
 
     return { doc: doc, info: { version: version, compressed: !!(flags & 1) } };

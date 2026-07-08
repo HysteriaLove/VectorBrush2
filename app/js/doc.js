@@ -62,12 +62,25 @@
     this.fills = [];               // fill styles; index i is style i+1
     this.lines = [];               // line styles; index i is style i+1
     this.edges = [];               // the planar map
+    // Text floats ABOVE the planar map (Flash: the merged shape sits at
+    // depth 1, text blocks stack over it in placement order).
+    // fonts[i]: { name, bold, italic, glyphs: [{ code, contours }] }
+    //   contours use ttf.js emGlyph format: 1024-EM y-down integer
+    //   coords, [{ mx, my, segs: [{x,y} line | {cx,cy,x,y} quad] }].
+    //   Imported DefineFont2 glyphs are kept VERBATIM for round-trips.
+    // texts[i]: { matrix: [a,b,c,d,tx,ty] (twips placement), records:
+    //   [{ font (index into fonts), height (twips), color RGBA,
+    //      x, y (block-local twips), glyphs: [{ gi, adv }] }] }
+    this.fonts = [];
+    this.texts = [];
   }
 
   VBDocument.prototype.clear = function () {
     this.fills = [];
     this.lines = [];
     this.edges = [];
+    this.fonts = [];
+    this.texts = [];
   };
 
   // Add a style, reusing an identical existing entry. Returns 1-based index.

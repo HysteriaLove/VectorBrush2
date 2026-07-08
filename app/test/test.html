@@ -50,6 +50,7 @@
 <script src="../js/ttf.js"></script>
 <script src="fixtures.js"></script>
 <script src="ttffixture.js"></script>
+<script src="fontswf.js"></script>
 <script src="userlog.js"></script>
 <script src="userlog2.js"></script>
 <script src="userlog3.js"></script>
@@ -1430,6 +1431,102 @@
       segsEq(d[0].segs, [{ x: 500, y: -500 }, { x: 0, y: 0 }]),
       JSON.stringify(d));
     check("ttf .notdef is empty", font.emGlyph(0).length === 0);
+  })();
+
+  // ==================== regression: SWF text import ====================
+  // Font001/004 are MX2004 reference files (SWFExamples/Font001): text
+  // used to be silently dropped on load — only broken-apart geometry
+  // survived (the user's "scattered characters" bug).
+  log("swf text import:");
+  await (async function () {
+    var res1 = await VB.parseSWF(window.VBFontSWF.bytes("Font001"));
+    var doc1 = res1.doc;
+    check("Font001: four fonts imported",
+      doc1.fonts.length === 4 &&
+      doc1.fonts[0].name === "Times New Roman" &&
+      doc1.fonts[1].name === "Wingdings" &&
+      doc1.fonts[3].name === "MS UI Gothic",
+      doc1.fonts.map(function (f) { return f.name; }).join("/"));
+    check("Font001: glyph subsets verbatim",
+      doc1.fonts[0].glyphs.length === 15 && doc1.fonts[1].glyphs.length === 8 &&
+      doc1.fonts[2].glyphs.length === 14 && doc1.fonts[3].glyphs.length === 13,
+      doc1.fonts.map(function (f) { return f.glyphs.length; }).join(","));
+    check("Font001: bold+italic flags survive",
+      !doc1.fonts[0].bold && doc1.fonts[3].bold && doc1.fonts[3].italic);
+    check("Font001: Times 'T' glyph outline",
+      doc1.fonts[0].glyphs[1].code === 84 &&
+      doc1.fonts[0].glyphs[1].contours.length === 1 &&
+      doc1.fonts[0].glyphs[1].contours[0].mx === 593 &&
+      doc1.fonts[0].glyphs[1].contours[0].my === -678 &&
+      doc1.fonts[0].glyphs[1].contours[0].segs.length === 24,
+      JSON.stringify(doc1.fonts[0].glyphs[1].contours[0]).slice(0, 90));
+    check("Font001: four text blocks placed",
+      doc1.texts.length === 4 && res1.info.textsPlaced === 4,
+      doc1.texts.length + " blocks");
+    var t0 = doc1.texts[0];
+    check("Font001: first block record (12pt Times, black, 24 glyphs)",
+      t0.records.length === 1 && t0.records[0].font === 0 &&
+      t0.records[0].height === 240 && t0.records[0].color.a === 255 &&
+      t0.records[0].glyphs.length === 24 &&
+      t0.matrix[4] === 420 && t0.matrix[5] === 265,
+      JSON.stringify({ m: t0.matrix, rec0: t0.records[0].glyphs.length }));
+    var t3 = doc1.texts[3];
+    check("Font001: transformed block keeps its scale matrix",
+      Math.abs(t3.matrix[0] - 2.00653) < 0.001 && t3.matrix[3] === 1 &&
+      t3.records.length === 4,
+      JSON.stringify(t3.matrix));
+    check("Font001: multi-line block has per-line offsets",
+      doc1.texts[2].records.length === 3 &&
+      doc1.texts[2].records[1].y > doc1.texts[2].records[0].y);
+
+    // rendering: the first block ("Welcome To...") must put ink on the
+    // canvas along its baseline — this is the visible half of the bug
+    var cv = document.createElement("canvas");
+    cv.width = 550; cv.height = 400;
+    VB.render(cv.getContext("2d"), doc1, { zoom: 1, panX: 0, panY: 0 });
+    var row = cv.getContext("2d").getImageData(20, 18, 160, 8).data;
+    var dark = 0;
+    for (var px = 0; px < row.length; px += 4) {
+      if (row[px] < 128 && row[px + 3] > 128) dark++;
+    }
+    check("Font001: text renders ink on the stage", dark > 40, dark + " dark px");
+
+    var res4 = await VB.parseSWF(window.VBFontSWF.bytes("Font004"));
+    var doc4 = res4.doc;
+    check("Font004: merged shape AND text coexist",
+      doc4.edges.length > 200 && doc4.texts.length > 30,
+      doc4.edges.length + " edges, " + doc4.texts.length + " texts");
+    var alphaRec = null;
+    doc4.texts.forEach(function (t) {
+      t.records.forEach(function (rec) { if (rec.color.a === 128) alphaRec = rec; });
+    });
+    check("Font004: DefineText2 alpha color imported", !!alphaRec &&
+      alphaRec.color.r === 200 || alphaRec.color.r === 240,
+      alphaRec && JSON.stringify(alphaRec.color));
+
+    // vbd v2 round-trip: fonts + texts survive save/load losslessly
+    var bytes = await VB.encodeVBD(doc1, { compress: true });
+    var back = await VB.decodeVBD(bytes);
+    check("vbd v2 round-trips text losslessly",
+      back.info.version === 2 &&
+      JSON.stringify(back.doc.fonts) === JSON.stringify(doc1.fonts) &&
+      JSON.stringify(back.doc.texts) === JSON.stringify(doc1.texts),
+      "v" + back.info.version + " fonts=" + back.doc.fonts.length +
+      " texts=" + back.doc.texts.length);
+    // a doc without text still writes v1
+    var plain = new VB.VBDocument();
+    plain.width = 11000; plain.height = 8000;
+    var v1 = await VB.decodeVBD(await VB.encodeVBD(plain, { compress: false }));
+    check("textless vbd stays v1", v1.info.version === 1);
+
+    // history: undo/redo must not destroy text
+    var hist = new VB.History();
+    hist.push(doc1);
+    var savedTexts = doc1.texts.length;
+    doc1.texts = [];
+    hist.undo(doc1);
+    check("history restores text blocks", doc1.texts.length === savedTexts,
+      doc1.texts.length + " texts");
   })();
 
   // ======================= SWF export round-trip ===========================

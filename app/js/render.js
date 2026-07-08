@@ -59,6 +59,51 @@
       ctx.lineJoin = "round";
       ctx.stroke();
     }
+
+    // Text blocks float above the ink (Flash: shape at depth 1, text
+    // stacked over it), drawn from their embedded glyph outlines so the
+    // screen shows exactly what the file stores.
+    for (var t = 0; t < (doc.texts || []).length; t++) {
+      drawText(ctx, doc, doc.texts[t]);
+    }
+  }
+
+  function drawText(ctx, doc, text) {
+    var m = text.matrix;
+    ctx.save();
+    ctx.transform(m[0], m[1], m[2], m[3], m[4], m[5]);
+    for (var i = 0; i < text.records.length; i++) {
+      var rec = text.records[i];
+      var font = doc.fonts[rec.font];
+      if (!font) continue;
+      var scale = rec.height / 1024; // glyph EM square -> twips
+      var penX = rec.x, penY = rec.y;
+      ctx.beginPath();
+      for (var g = 0; g < rec.glyphs.length; g++) {
+        var glyph = font.glyphs[rec.glyphs[g].gi];
+        if (glyph) traceGlyph(ctx, glyph.contours, penX, penY, scale);
+        penX += rec.glyphs[g].adv;
+      }
+      ctx.fillStyle = VB.colorToCSS(rec.color);
+      ctx.fill("evenodd");
+    }
+    ctx.restore();
+  }
+
+  function traceGlyph(ctx, contours, px, py, s) {
+    for (var c = 0; c < contours.length; c++) {
+      var ct = contours[c];
+      ctx.moveTo(px + ct.mx * s, py + ct.my * s);
+      for (var i = 0; i < ct.segs.length; i++) {
+        var seg = ct.segs[i];
+        if (seg.cx === undefined) ctx.lineTo(px + seg.x * s, py + seg.y * s);
+        else {
+          ctx.quadraticCurveTo(px + seg.cx * s, py + seg.cy * s,
+                               px + seg.x * s, py + seg.y * s);
+        }
+      }
+      ctx.closePath();
+    }
   }
 
   function tracePath(ctx, chain, close) {

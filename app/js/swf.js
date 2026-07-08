@@ -13,9 +13,10 @@
 
   var TAG = {
     END: 0, SHOW_FRAME: 1, DEFINE_SHAPE: 2, PLACE_OBJECT: 4, REMOVE_OBJECT: 5,
-    SET_BACKGROUND_COLOR: 9, DEFINE_SHAPE2: 22, PLACE_OBJECT2: 26,
-    REMOVE_OBJECT2: 28, DEFINE_SHAPE3: 32, DEFINE_SPRITE: 39, FRAME_LABEL: 43,
-    DEFINE_SHAPE4: 83
+    SET_BACKGROUND_COLOR: 9, DEFINE_TEXT: 11, DEFINE_SHAPE2: 22,
+    PLACE_OBJECT2: 26, REMOVE_OBJECT2: 28, DEFINE_SHAPE3: 32,
+    DEFINE_TEXT2: 33, DEFINE_EDIT_TEXT: 37, DEFINE_SPRITE: 39,
+    FRAME_LABEL: 43, DEFINE_FONT2: 48, DEFINE_SHAPE4: 83
   };
 
   async function inflateZlib(bytes) {
@@ -190,6 +191,140 @@
     return { id: id, fills: fills, lines: lines, edges: edges };
   }
 
+  // ---- font / text parsing --------------------------------------------------
+
+  // One glyph's shape stream -> contours in ttf.js emGlyph format
+  // ({mx,my,segs:[{x,y}|{cx,cy,x,y}]}, 1024-EM y-down). Style values in
+  // the records are read and dropped (glyphs are single-fill by spec).
+  function readGlyphShape(r) {
+    var fillBits = r.ub(4), lineBits = r.ub(4);
+    var contours = [];
+    var cur = null;
+    var penX = 0, penY = 0;
+    for (;;) {
+      if (r.ub(1) === 0) {
+        var flags = r.ub(5);
+        if (flags === 0) break;
+        if (flags & 1) {
+          var n = r.ub(5);
+          penX = r.sb(n); penY = r.sb(n);
+          cur = { mx: penX, my: penY, segs: [] };
+          contours.push(cur);
+        }
+        if (flags & 2) r.ub(fillBits);
+        if (flags & 4) r.ub(fillBits);
+        if (flags & 8) r.ub(lineBits);
+      } else if (r.ub(1)) {
+        var nb = r.ub(4) + 2;
+        var dx = 0, dy = 0;
+        if (r.ub(1)) { dx = r.sb(nb); dy = r.sb(nb); }
+        else if (r.ub(1)) { dy = r.sb(nb); }
+        else { dx = r.sb(nb); }
+        penX += dx; penY += dy;
+        if (cur) cur.segs.push({ x: penX, y: penY });
+      } else {
+        var nc = r.ub(4) + 2;
+        var cdx = r.sb(nc), cdy = r.sb(nc), adx = r.sb(nc), ady = r.sb(nc);
+        var cx = penX + cdx, cy = penY + cdy;
+        penX = cx + adx; penY = cy + ady;
+        if (cur) cur.segs.push({ cx: cx, cy: cy, x: penX, y: penY });
+      }
+    }
+    return contours;
+  }
+
+  function readFont2(body, start) {
+    var r = new VB.BitReader(body, start);
+    var id = r.u16();
+    var flags = r.u8();
+    r.u8(); // language code
+    var nameLen = r.u8();
+    var name = "";
+    for (var i = 0; i < nameLen; i++) {
+      var ch = r.u8();
+      if (ch !== 0) name += String.fromCharCode(ch); // MX NUL-terminates
+    }
+    var nglyphs = r.u16();
+    var wideOffsets = !!(flags & 8);
+    var wideCodes = !!(flags & 4);
+    var table = r.pos;
+    var offs = [];
+    for (i = 0; i < nglyphs; i++) offs.push(wideOffsets ? r.u32() : r.u16());
+    var codeOff = wideOffsets ? r.u32() : r.u16();
+    var glyphs = [];
+    for (i = 0; i < nglyphs; i++) {
+      var gr = new VB.BitReader(body, table + offs[i]);
+      glyphs.push({ code: 0, contours: readGlyphShape(gr) });
+    }
+    var cr = new VB.BitReader(body, table + codeOff);
+    for (i = 0; i < nglyphs; i++) {
+      glyphs[i].code = wideCodes ? cr.u16() : cr.u8();
+    }
+    return {
+      id: id, name: name,
+      bold: !!(flags & 1), italic: !!(flags & 2),
+      glyphs: glyphs
+    };
+  }
+
+  // DefineText / DefineText2 -> block-local records with resolved
+  // font/color/height carry-over. Positions stay block-local twips; the
+  // block's own matrix (identity in MX files) composes with the
+  // placement matrix at assembly.
+  function readText(body, start, ver) {
+    var r = new VB.BitReader(body, start);
+    var id = r.u16();
+    r.rect(); // bounds (recomputed on export)
+    var blockMatrix = readMatrix(r);
+    var glyphBits = r.u8();
+    var advBits = r.u8();
+    var records = [];
+    var fontId = 0, height = 240;
+    var color = { r: 0, g: 0, b: 0, a: 255 };
+    var penX = 0, penY = 0;
+    for (;;) {
+      r.align();
+      var flags = r.u8();
+      if (flags === 0) break;
+      if (flags & 8) fontId = r.u16();
+      if (flags & 4) color = readColor(r, ver === 2);
+      if (flags & 1) penX = (r.u16() << 16) >> 16; // SI16
+      if (flags & 2) penY = (r.u16() << 16) >> 16;
+      if (flags & 8) height = r.u16();
+      var count = r.u8();
+      var glyphs = [];
+      for (var g = 0; g < count; g++) {
+        glyphs.push({ gi: r.ub(glyphBits), adv: r.sb(advBits) });
+      }
+      records.push({
+        fontId: fontId, height: height,
+        color: { r: color.r, g: color.g, b: color.b, a: color.a },
+        x: penX, y: penY, glyphs: glyphs
+      });
+      // pen advances through the record so a follow-up record without
+      // an explicit X continues where this one ended
+      for (g = 0; g < count; g++) penX += glyphs[g].adv;
+    }
+    return { id: id, matrix: blockMatrix, records: records };
+  }
+
+  // SWF matrix struct -> our [a,b,c,d,tx,ty] (x' = a·x + c·y + tx).
+  function matrixToArray(m) {
+    if (!m) return [1, 0, 0, 1, 0, 0];
+    return [m.sx, m.r0, m.r1, m.sy, m.tx, m.ty];
+  }
+
+  function matMul(m2, m1) { // apply m1 first, then m2
+    return [
+      m2[0] * m1[0] + m2[2] * m1[1],
+      m2[1] * m1[0] + m2[3] * m1[1],
+      m2[0] * m1[2] + m2[2] * m1[3],
+      m2[1] * m1[2] + m2[3] * m1[3],
+      m2[0] * m1[4] + m2[2] * m1[5] + m2[4],
+      m2[1] * m1[4] + m2[3] * m1[5] + m2[5]
+    ];
+  }
+
   // ---- document assembly ---------------------------------------------------
 
   function bakeMatrix(e, m) {
@@ -255,6 +390,8 @@
 
     var warnings = [];
     var shapes = {};      // character id -> parsed shape
+    var textDefs = {};    // character id -> parsed text block
+    var fontIndex = {};   // font id -> index into doc.fonts
     var placements = {};  // depth -> { charId, matrix }
 
     tagLoop:
@@ -284,6 +421,24 @@
           shapes[shape.id] = shape;
           break;
         }
+        case TAG.DEFINE_FONT2: {
+          var font = readFont2(body, r.pos);
+          fontIndex[font.id] = doc.fonts.length;
+          doc.fonts.push({
+            name: font.name, bold: font.bold, italic: font.italic,
+            glyphs: font.glyphs
+          });
+          break;
+        }
+        case TAG.DEFINE_TEXT:
+        case TAG.DEFINE_TEXT2: {
+          var text = readText(body, r.pos, code === TAG.DEFINE_TEXT ? 1 : 2);
+          textDefs[text.id] = text;
+          break;
+        }
+        case TAG.DEFINE_EDIT_TEXT:
+          warnings.push("dynamic text (DefineEditText) not supported — skipped");
+          break;
         case TAG.PLACE_OBJECT: {
           var pid = tr.u16(), pdepth = tr.u16();
           placements[pdepth] = { charId: pid, matrix: readMatrix(tr) };
@@ -311,21 +466,44 @@
     }
 
     var depths = Object.keys(placements).map(Number).sort(function (a, b) { return a - b; });
-    var placedCount = 0;
+    var placedCount = 0, textsPlaced = 0;
     for (var d = 0; d < depths.length; d++) {
       var p = placements[depths[d]];
-      if (p.charId !== null && shapes[p.charId]) {
+      if (p.charId === null) continue;
+      if (shapes[p.charId]) {
         mergeShape(doc, shapes[p.charId], p.matrix);
         placedCount++;
+      } else if (textDefs[p.charId]) {
+        // a text block: placement matrix composed over the block's own
+        // (identity in MX files); records reference doc.fonts indices.
+        // The same definition may be placed at several depths (Break
+        // Apart dedupes repeated characters) — each becomes a block.
+        var def = textDefs[p.charId];
+        var total = matMul(matrixToArray(p.matrix), matrixToArray(def.matrix));
+        var records = [];
+        var ok = true;
+        for (var t = 0; t < def.records.length; t++) {
+          var rec = def.records[t];
+          if (fontIndex[rec.fontId] === undefined) { ok = false; break; }
+          records.push({
+            font: fontIndex[rec.fontId], height: rec.height,
+            color: { r: rec.color.r, g: rec.color.g, b: rec.color.b, a: rec.color.a },
+            x: rec.x, y: rec.y,
+            glyphs: rec.glyphs.map(function (g2) { return { gi: g2.gi, adv: g2.adv }; })
+          });
+        }
+        if (ok) { doc.texts.push({ matrix: total, records: records }); textsPlaced++; }
+        else warnings.push("text block references a missing font — skipped");
       }
     }
-    // Shapes defined but never placed are dropped (they're invisible anyway).
+    // Definitions never placed are dropped (they're invisible anyway).
 
     return {
       doc: doc,
       info: {
         signature: sig, version: version, fps: fps, frames: frameCount,
         shapesDefined: Object.keys(shapes).length, shapesPlaced: placedCount,
+        fontsDefined: doc.fonts.length, textsPlaced: textsPlaced,
         warnings: warnings
       }
     };
