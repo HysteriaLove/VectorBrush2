@@ -293,6 +293,9 @@
   // ---- undo / redo -----------------------------------------------------------
 
   function doUndo() {
+    // a floating (uncommitted) selection undoes by restoration, without
+    // a journal record — its lift was never journaled either
+    if (tools.select && tools.select.undoFloat && tools.select.undoFloat()) return;
     if (app.history.undo(app.doc)) { app.record({ op: "undo" }); setMsg("undo"); docChanged(); }
   }
   function doRedo() {

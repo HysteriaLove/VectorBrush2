@@ -581,6 +581,19 @@
       app.requestRender();
     };
 
+    // Undo while a chunk floats: the lift was never journaled (only the
+    // commit is), so a journaled "undo" would desync replay. Restore the
+    // pre-lift snapshot directly and record nothing.
+    self.undoFloat = function () {
+      if (!self.float) return false;
+      self.float = null;
+      app.history.undo(app.doc);
+      self.sel = { fills: [], edgeKeys: [], region: null };
+      app.docChanged();
+      app.setMsg("floating selection put back");
+      return true;
+    };
+
     // Commit the floating chunk: merge it into the document at its
     // accumulated offset. The whole multi-drag gesture is ONE journal op
     // and ONE undo step (the history snapshot was taken at lift time).
@@ -1068,23 +1081,40 @@
         }
         ctx.save();
         ctx.translate(fl.dx + extraX, fl.dy + extraY);
+        // true fills — chains carry quad controls (cx/cy); flattening
+        // them broke the lifted shapes visually
         var fillPaths = VB.buildFillPaths(fl.doc);
-        for (var fi2 = 1; fi2 < fillPaths.length; fi2++) {
-          var st = fl.doc.fills[fi2 - 1];
-          if (!st) continue;
+        function traceChains(chains) {
           ctx.beginPath();
-          fillPaths[fi2].forEach(function (chain) {
+          chains.forEach(function (chain) {
             ctx.moveTo(chain.sx, chain.sy);
-            chain.pts.forEach(function (q) { ctx.lineTo(q.x, q.y); });
+            chain.pts.forEach(function (q) {
+              if (q.cx === null || q.cx === undefined) ctx.lineTo(q.x, q.y);
+              else ctx.quadraticCurveTo(q.cx, q.cy, q.x, q.y);
+            });
             ctx.closePath();
           });
+        }
+        for (var fi2 = 1; fi2 < fillPaths.length; fi2++) {
+          var st = fl.doc.fills[fi2 - 1];
+          if (!st || !fillPaths[fi2].length) continue;
+          traceChains(fillPaths[fi2]);
           ctx.fillStyle = "rgba(" + st.color.r + "," + st.color.g + "," +
             st.color.b + "," + (st.color.a / 255) + ")";
           ctx.fill("evenodd");
+          // dotted hatch: this content is not committed yet
+          ctx.fillStyle = hatchPattern(ctx);
+          ctx.fill("evenodd");
+          // selection outline follows the ACTUAL shape, not a box
+          traceChains(fillPaths[fi2]);
+          ctx.strokeStyle = "rgba(255,120,0,0.95)";
+          ctx.lineWidth = 2 * hair;
+          ctx.stroke();
         }
         fl.doc.edges.forEach(function (e) {
           if (e.line === 0) return;
           var ls = fl.doc.lines[e.line - 1];
+          if (!ls) return;
           ctx.beginPath();
           ctx.moveTo(e.ax, e.ay);
           if (e.cx === null) ctx.lineTo(e.bx, e.by);
@@ -1094,19 +1124,12 @@
           ctx.lineWidth = Math.max(ls.width, hair);
           ctx.lineCap = "round";
           ctx.stroke();
+          // floating strokes get the orange marker too
+          ctx.strokeStyle = "rgba(255,120,0,0.95)";
+          ctx.lineWidth = 2 * hair;
+          ctx.stroke();
         });
         ctx.restore();
-        ctx.strokeStyle = "rgba(0,160,255,0.9)";
-        ctx.lineWidth = 1.5 * hair;
-        ctx.setLineDash([6 * hair, 4 * hair]);
-        ctx.beginPath();
-        fl.points.forEach(function (p, i2) {
-          var px2 = p.x + extraX, py2 = p.y + extraY;
-          if (i2 === 0) ctx.moveTo(px2, py2); else ctx.lineTo(px2, py2);
-        });
-        ctx.closePath();
-        ctx.stroke();
-        ctx.setLineDash([]);
       }
       if (self.sel.region) {
         ctx.strokeStyle = "rgba(0,160,255,0.9)";
