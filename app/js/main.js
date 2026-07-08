@@ -31,6 +31,13 @@
     requestRender: requestRender,
     setMsg: setMsg,
     setCursor: function (c) { canvas.style.cursor = c || ""; },
+    onEdgeSelected: function (idx) {
+      if (!app.debug) return;
+      app.debugPin = idx;
+      setMsg(idx >= 0 ? VB.debugDescribeEdge(app.doc, idx) : "");
+      refreshDebugEdge();
+      requestRender();
+    },
     docChanged: docChanged
   };
 
@@ -320,16 +327,6 @@
       ev.preventDefault();
       return;
     }
-    if (ev.button === 0 && app.debug && app.tool === "select") {
-      // debug pin: click an edge to lock the inspector on it
-      var pt = clientToTwips(ev);
-      var idx = VB.debugPickEdge(app.doc, pt.x, pt.y, 5 * VB.TWIPS / app.view.zoom);
-      app.debugPin = idx;
-      setMsg(idx >= 0 ? VB.debugDescribeEdge(app.doc, idx) : "");
-      refreshDebugEdge();
-      requestRender();
-      return;
-    }
     if (ev.button === 0) {
       var tool = tools[app.tool];
       if (tool && tool.onDown) {
@@ -349,19 +346,22 @@
       requestRender();
     } else if (activePointerTool && activePointerTool.onMove) {
       activePointerTool.onMove(clientToTwips(ev));
-    } else if (tools[app.tool] && tools[app.tool].onHover) {
-      tools[app.tool].onHover(clientToTwips(ev));
-    } else if (app.debug) {
-      // hover inspector (pin wins)
-      var pt = clientToTwips(ev);
-      var tol = 5 * VB.TWIPS / app.view.zoom;
-      var idx = VB.debugPickEdge(app.doc, pt.x, pt.y, tol);
-      if (idx !== app.debugHover) {
-        app.debugHover = idx;
-        if (app.debugPin < 0) {
-          setMsg(idx >= 0 ? VB.debugDescribeEdge(app.doc, idx) : "");
-          refreshDebugEdge();
-          requestRender();
+    } else {
+      if (tools[app.tool] && tools[app.tool].onHover) {
+        tools[app.tool].onHover(clientToTwips(ev));
+      }
+      if (app.debug) {
+        // hover inspector (pin wins) — runs alongside the active tool
+        var pt = clientToTwips(ev);
+        var tol = 5 * VB.TWIPS / app.view.zoom;
+        var idx = VB.debugPickEdge(app.doc, pt.x, pt.y, tol);
+        if (idx !== app.debugHover) {
+          app.debugHover = idx;
+          if (app.debugPin < 0) {
+            setMsg(idx >= 0 ? VB.debugDescribeEdge(app.doc, idx) : "");
+            refreshDebugEdge();
+            requestRender();
+          }
         }
       }
     }

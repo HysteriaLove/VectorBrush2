@@ -310,6 +310,7 @@
         } else {
           var idx = findByKey(app.doc, drag.key);
           self.sel = idx >= 0 ? { kind: "edge", idx: idx } : null;
+          if (idx >= 0 && app.onEdgeSelected) app.onEdgeSelected(idx);
           app.requestRender();
         }
         return;
