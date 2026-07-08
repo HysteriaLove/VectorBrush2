@@ -48,17 +48,83 @@
       return !covered(m.x, m.y);
     });
 
+    // A fence piece IDENTICAL to a surviving old edge (integer-exact,
+    // either orientation — mutual noding splits coincident walls into
+    // matching pieces) is a true no-op: same nodes, same geometry. Keep
+    // the old edge, drop the duplicate — two overlapping edges scramble
+    // the angular sort in the face walk. Nothing short of integer-exact
+    // is touched (near-parallels have their own nodes and faces).
+    function edgeKey(ax, ay, cx, cy, bx, by) {
+      return ax + "," + ay + "," + cx + "," + cy + "," + bx + "," + by;
+    }
+    var survivorKeys = new Set();
+    doc.edges.forEach(function (e) {
+      if (fence.has(e)) return;
+      survivorKeys.add(edgeKey(e.ax, e.ay, e.cx, e.cy, e.bx, e.by));
+    });
+    doc.edges = doc.edges.filter(function (e) {
+      if (!fence.has(e)) return true;
+      return !survivorKeys.has(edgeKey(e.ax, e.ay, e.cx, e.cy, e.bx, e.by)) &&
+             !survivorKeys.has(edgeKey(e.bx, e.by, e.cx, e.cy, e.ax, e.ay));
+    });
+
     // Rounding can turn grazing contacts into real crossings; the face
     // walk needs a properly noded map.
     VB.repairPlanar(doc);
 
     var built = VB.buildFaces(doc);
 
+    // A probe point verified to be INSIDE the face (parity against the
+    // face's own boundary). A single 1tw nudge off one edge can leak
+    // into the neighboring region when noding disturbed geometry at the
+    // twip scale — and one leaked probe misfills (or empties) an entire
+    // face. Try the longest edges at several params and nudge widths,
+    // and accept only a probe the face itself contains.
+    function faceProbe(f) {
+      var cycles = [f.outer].concat(f.holes);
+      function contains(x, y) {
+        var c = 0;
+        for (var ci = 0; ci < cycles.length; ci++) {
+          for (var hi = 0; hi < cycles[ci].length; hi++) {
+            c += VB.edgeRayCrossings(doc.edges[cycles[ci][hi].edge], x, y);
+          }
+        }
+        return (c & 1) === 1;
+      }
+      var order = f.outer.slice().sort(function (h1, h2) {
+        var e1 = doc.edges[h1.edge], e2 = doc.edges[h2.edge];
+        var l1 = (e1.bx - e1.ax) * (e1.bx - e1.ax) + (e1.by - e1.ay) * (e1.by - e1.ay);
+        var l2 = (e2.bx - e2.ax) * (e2.bx - e2.ax) + (e2.by - e2.ay) * (e2.by - e2.ay);
+        return l2 - l1;
+      });
+      var params = [0.5, 0.3, 0.7];
+      var nudges = [1, 2.5];
+      for (var oi = 0; oi < order.length && oi < 5; oi++) {
+        var h = order[oi];
+        var e = doc.edges[h.edge];
+        for (var pi = 0; pi < params.length; pi++) {
+          var t = params[pi];
+          var p = VB.geom.evalEdge(e, t);
+          var p1 = VB.geom.evalEdge(e, Math.min(1, t + 0.04));
+          var p0 = VB.geom.evalEdge(e, Math.max(0, t - 0.04));
+          var dx = p1.x - p0.x, dy = p1.y - p0.y;
+          if (!h.forward) { dx = -dx; dy = -dy; }
+          var len = Math.hypot(dx, dy) || 1;
+          for (var ni = 0; ni < nudges.length; ni++) {
+            var n = nudges[ni];
+            var px = p.x - dy / len * n, py = p.y + dx / len * n;
+            if (contains(px, py)) return { x: px, y: py };
+          }
+        }
+      }
+      return VB.probeForCycle(doc.edges, f.outer); // last resort
+    }
+
     // One decision per face.
     var diag = [];
     VB._maskDiag = diag;
     var stamps = built.faces.map(function (f) {
-      var probe = VB.probeForCycle(doc.edges, f.outer);
+      var probe = faceProbe(f);
       var inMask = insideMask(probe.x, probe.y);
       var stamp = inMask ? maskFill : VB.geom.fillAt(preOp, probe.x, probe.y);
       diag.push({

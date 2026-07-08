@@ -151,9 +151,14 @@
   // original integer quads. No near-coincident duplicates can exist.
 
   // Directed boundary loops of a fill: edges carrying `fillIdx` on
-  // exactly one side, oriented fill-on-right, welded by exact endpoint
-  // continuation. Returns { loops: [[edge]], edges: Set } — open chains
-  // are dropped (their edges stay untouched in the document).
+  // exactly one side, oriented fill-on-right, welded into the fill's
+  // FACE-BOUNDARY cycles. Continuation at a shared node must follow the
+  // angular face-walk rule (rotational predecessor of the arrival
+  // direction — same convention as faces.js): naive "first unused"
+  // pairing builds self-crossing loops whose winding cancels, painted
+  // fingers drop out of the union, and their area floods as fake holes.
+  // Returns { loops: [[edge]], edges: Set } — open chains are dropped
+  // (their edges stay untouched in the document).
   function fillLoops(doc, fillIdx) {
     var directed = [];
     doc.edges.forEach(function (e) {
@@ -166,11 +171,20 @@
         bx: f1 ? e.bx : e.ax, by: f1 ? e.by : e.ay
       });
     });
+    function departAngle(x0, y0, cx, cy, x1, y1) {
+      var tx = (cx !== null && (cx !== x0 || cy !== y0)) ? cx : x1;
+      var ty = (cx !== null && (cx !== x0 || cy !== y0)) ? cy : y1;
+      return Math.atan2(ty - y0, tx - x0);
+    }
     var byStart = new Map();
     directed.forEach(function (d, i) {
       var k = d.ax + "," + d.ay;
       var arr = byStart.get(k);
-      if (arr) arr.push(i); else byStart.set(k, [i]);
+      if (!arr) { arr = []; byStart.set(k, arr); }
+      arr.push({ i: i, angle: departAngle(d.ax, d.ay, d.cx, d.cy, d.bx, d.by) });
+    });
+    byStart.forEach(function (arr) {
+      arr.sort(function (a, b) { return a.angle - b.angle; });
     });
     var used = new Array(directed.length).fill(false);
     var loops = [], edges = new Set();
@@ -183,10 +197,18 @@
         if (tail.bx === chain[0].ax && tail.by === chain[0].ay) break;
         var cands = byStart.get(tail.bx + "," + tail.by);
         var next = -1;
-        if (cands) {
+        if (cands && cands.length) {
+          // angle pointing BACK along the arriving edge, from its end
+          var back = departAngle(tail.bx, tail.by, tail.cx, tail.cy, tail.ax, tail.ay);
+          // rotational predecessor of `back`: largest angle < back (wrap)
+          var best = -1, bestAngle = -Infinity, wrap = -1, wrapAngle = -Infinity;
           for (var c = 0; c < cands.length; c++) {
-            if (!used[cands[c]]) { next = cands[c]; break; }
+            if (used[cands[c].i]) continue;
+            var a = cands[c].angle;
+            if (a < back && a > bestAngle) { bestAngle = a; best = cands[c].i; }
+            if (a > wrapAngle) { wrapAngle = a; wrap = cands[c].i; }
           }
+          next = best >= 0 ? best : wrap;
         }
         if (next < 0) break;
         used[next] = true;
@@ -378,4 +400,5 @@
   VB.sweptRegion = sweptRegion;
   VB.sweptOutline = sweptOutline;
   VB.paintUnion = paintUnion;
+  VB.fillLoops = fillLoops; // exposed for diagnostics/tests
 })();
