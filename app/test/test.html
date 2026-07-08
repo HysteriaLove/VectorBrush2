@@ -41,6 +41,7 @@
 <script src="../js/pencil.js"></script>
 <script src="fixtures.js"></script>
 <script src="userlog.js"></script>
+<script src="userlog2.js"></script>
 <script>
 (async function () {
   "use strict";
@@ -577,19 +578,22 @@
     check("two-color consistent", VB.integrityReport(doc3).length === 0,
       VB.integrityReport(doc3)[0]);
 
-    // 4. Brush across a pencil stroke: the stroke survives, its pieces
-    //    inside become interior fill|fill+line edges.
+    // 4. Brush across a pencil stroke: paint-over ERASES the covered
+    //    stroke segments (Flash "paint normal") — the stroke is trimmed
+    //    to stubs outside the paint, exactly like the eraser trims.
     var doc4 = new VB.VBDocument();
     VB.pencilCommit(doc4, [{ x: 1000, y: 4000 }, { x: 4000, y: 4000 }, { x: 7000, y: 4000 }], stroke);
     VB.brushStroke(doc4, [{ x: 4000, y: 3000 }, { x: 4000, y: 5000 }], 600, red);
-    var interior = doc4.edges.filter(function (e) {
-      return e.line === 1 && e.fill0 === 1 && e.fill1 === 1;
+    var coveredStrokes = doc4.edges.filter(function (e) {
+      if (e.line !== 1) return false;
+      var m = VB.geom.evalEdge(e, 0.5);
+      return VB.distToPath([{ x: 4000, y: 3000 }, { x: 4000, y: 5000 }], m.x, m.y) < 600 - 4;
     });
-    var outside = doc4.edges.filter(function (e) {
-      return e.line === 1 && e.fill0 === 0 && e.fill1 === 0;
-    });
-    check("stroke pieces interior to paint", interior.length > 0, interior.length + " interior");
-    check("stroke pieces outside remain bare", outside.length >= 2, outside.length + " outside");
+    var stubs = doc4.edges.filter(function (e) { return e.line === 1; });
+    check("covered stroke erased", coveredStrokes.length === 0,
+      coveredStrokes.length + " pieces under the paint");
+    check("stroke stubs survive outside", stubs.length >= 2, stubs.length + " stubs");
+    check("paint region filled", VB.geom.fillAt(doc4, 4000, 4000) === 1);
     check("brush-over-stroke consistent", VB.integrityReport(doc4).length === 0,
       VB.integrityReport(doc4)[0]);
 
@@ -781,6 +785,31 @@
     check("no region vanishes beyond the eraser", vanishEvents === 0,
       vanishEvents + " far-vanish samples");
     check("session end state non-trivial", res.doc.edges.length > 100,
+      res.doc.edges.length + " edges");
+  })();
+
+  // ============ regression: real brush session (user log 2) ================
+  // Pencil loop + 8 heavy self-crossing brush strokes over it. Replays
+  // clean; the phantom-chord census is the honest wedge tripwire (the
+  // integrity metric can't see stitched chords). Current pipeline leaves
+  // ~50 from the heaviest stroke; the region-boolean core is expected to
+  // drive this to zero — the threshold ratchets DOWN, never up.
+  log("brush session replay:");
+  await (async function () {
+    var corruptAt = -1;
+    var res = await VB.replayJournal(window.VBUserLog2.ops, {
+      onOp: function (i, op, d) {
+        if (corruptAt < 0 && VB.integrityReport(d).length) corruptAt = i;
+      }
+    });
+    check("brush session replays clean", corruptAt < 0, "corrupt at op#" + corruptAt);
+    var phantom = res.doc.edges.filter(function (e) {
+      return e.cx === null && e.line === 0 &&
+        Math.hypot(e.bx - e.ax, e.by - e.ay) > 300;
+    });
+    check("brush session phantom chords bounded", phantom.length <= 60,
+      phantom.length + " phantom chords");
+    check("brush session end state sane", res.doc.edges.length > 500,
       res.doc.edges.length + " edges");
   })();
 

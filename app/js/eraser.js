@@ -145,7 +145,7 @@
     // crossing without a shared node — split them now or faces leak.
     VB.repairPlanar(doc);
 
-    deriveFills(doc, preOp, swath.path, radius);
+    deriveFills(doc, preOp, swath.path, radius, 0);
 
     // Terminal self-heal: old-fence × new-fence grazings can leave a fill
     // boundary topologically open at twip precision even when everything
@@ -202,11 +202,11 @@
   //   3. no probe inside → decide once, exactly, from its own boundary
   //      probe (distance rules near the fence band, pre-op region parity
   //      otherwise) and stamp the whole face with it.
-  function deriveFills(doc, preOp, path, radius) {
+  function deriveFills(doc, preOp, path, radius, insideFill) {
     function sideFill(px, py, baseDist) {
       var d = VB.distToPath(path, px, py);
-      if (d <= radius - FENCE_BAND) return 0;
-      if (d <= radius + FENCE_BAND && d < baseDist) return 0;
+      if (d <= radius - FENCE_BAND) return insideFill;
+      if (d <= radius + FENCE_BAND && d < baseDist) return insideFill;
       return VB.geom.fillAt(preOp, px, py);
     }
 
@@ -277,8 +277,8 @@
         for (var b3 = 0; b3 < boundary.length; b3++) {
           var he = boundary[b3];
           if (!inScope(he)) continue;
-          if (he.forward) doc.edges[he.edge].fill1 = 0;
-          else doc.edges[he.edge].fill0 = 0;
+          if (he.forward) doc.edges[he.edge].fill1 = insideFill;
+          else doc.edges[he.edge].fill0 = insideFill;
         }
       } else if (containsProbe) {
         // 2. suspect merger — fall back to exact local truth, one side
@@ -292,10 +292,10 @@
         var dProbe = VB.distToPath(path, probe.x, probe.y);
         var winner;
         if (dProbe <= radius - FENCE_BAND) {
-          winner = 0;
+          winner = insideFill;
         } else if (dProbe <= radius + FENCE_BAND) {
           var dBase = VB.distToPath(path, probe.baseX, probe.baseY);
-          winner = dProbe < dBase ? 0 : VB.geom.fillAt(preOp, probe.x, probe.y);
+          winner = dProbe < dBase ? insideFill : VB.geom.fillAt(preOp, probe.x, probe.y);
         } else {
           winner = VB.geom.fillAt(preOp, probe.x, probe.y);
         }
@@ -404,4 +404,5 @@
   VB.EraserTool = EraserTool;
   VB.eraseStroke = eraseStroke;
   VB.stitchOpenChains = stitchOpenChains; // shared with the brush tool
+  VB.deriveSweptFills = deriveFills;     // shared with the brush tool
 })();

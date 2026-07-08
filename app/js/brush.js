@@ -9,16 +9,17 @@
  *   - different colors overlapping split at the crossings and share
  *     two-sided F|G borders, with the NEW color owning the overlap
  *     (Brush002/Brush003.swf — "paint normal" covers what's beneath);
- *   - strokes crossed by the brush survive: their pieces inside the
- *     paint become interior edges (fill|fill with a line style), the
- *     same structure a pencil line drawn across a fill has.
+ *   - paint-over ERASES what it covers: stroke segments under the paint
+ *     are trimmed away exactly like the eraser trims them ("paint
+ *     normal" replaces everything beneath).
  *
  * Mechanically it mirrors eraseStroke with the inside fill being the
  * paint instead of emptiness: node the swath outline into the map, keep
  * its true boundary pieces (paint inward, pre-op fill outward), delete
- * submerged lineless fill boundaries, re-claim submerged strokes as
- * interior, then repair, dissolve redundancy, and stitch — upholding the
- * Flash output invariants (no lineless 0|0, no lineless F|F).
+ * everything covered, re-derive fills from the pre-op snapshot with the
+ * swept region resolving to the paint, dissolve redundancy, and stitch
+ * — upholding the Flash output invariants (no lineless 0|0, no lineless
+ * F|F).
  */
 (function () {
   "use strict";
@@ -54,6 +55,15 @@
         ymin: Math.min(bb.ymin, b.ymin), ymax: Math.max(bb.ymax, b.ymax)
       };
     }, null);
+
+    // Ground truth for the fill re-derivation at the end: the pre-op
+    // document is consistent, so region queries against it are exact.
+    var preOp = new VB.VBDocument();
+    preOp.width = doc.width; preOp.height = doc.height;
+    preOp.fills = doc.fills; preOp.lines = doc.lines;
+    preOp.edges = doc.edges.map(function (e) {
+      return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, e.fill0, e.fill1, e.line);
+    });
 
     // Node the paint outline into the map.
     var inserts = loopEdges.map(function (e) {
@@ -99,10 +109,12 @@
 
     kept = VB.pruneDeadEnds(VB.cancelMicroSpurs(kept), doc);
 
-    // Submerge what the paint covers: lineless fill boundaries inside the
-    // swath disappear (the paint replaces those fills there); strokes
-    // survive as interior edges of the paint, exactly like a pencil line
-    // inside a bucket fill. Band slivers ([r-2, r]) keep their claims.
+    // Paint over what the swath covers: in Flash's "paint normal" mode
+    // the brush REPLACES everything beneath it — old fill boundaries AND
+    // stroke segments are erased where covered (crossed strokes are
+    // trimmed to stubs exactly like the eraser does).
+    // Band slivers ([r-2, r]) keep their claims; the fill re-derivation
+    // below reconciles them against the pre-op snapshot.
     var painted = 0;
     var survivors = [];
     for (var j = 0; j < doc.edges.length; j++) {
@@ -110,12 +122,7 @@
       var bb = VB.geom.edgeBBox(de);
       if (VB.geom.bboxOverlap(bb, swathBBox)) {
         var m = VB.geom.evalEdge(de, 0.5);
-        if (inside(m.x, m.y, -2)) {
-          if (de.line === 0) { painted++; continue; } // submerged boundary
-          de.fill0 = fillIdx;                          // interior stroke
-          de.fill1 = fillIdx;
-          painted++;
-        }
+        if (inside(m.x, m.y, -2)) { painted++; continue; }
       }
       survivors.push(de);
     }
@@ -125,6 +132,12 @@
 
     // Grazing crossings that became real after rounding must be noded.
     VB.repairPlanar(doc);
+
+    // The same hardened fill re-derivation the eraser earned on real
+    // session logs — with the swept region resolving to the PAINT
+    // instead of emptiness. Kills stranded claims from band-surviving
+    // old boundaries hugging the new fence (brush-over-brush wedges).
+    VB.deriveSweptFills(doc, preOp, swath.path, radius, fillIdx);
 
     // Flash output invariants: no lineless 0|0, no lineless fill|fill.
     doc.edges = doc.edges.filter(function (e2) {
