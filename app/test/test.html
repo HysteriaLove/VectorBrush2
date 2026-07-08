@@ -42,6 +42,7 @@
 <script src="../js/journal.js"></script>
 <script src="../js/history.js"></script>
 <script src="../js/project.js"></script>
+<script src="../js/text.js"></script>
 <script src="../js/debug.js"></script>
 <script src="../js/pencil.js"></script>
 <script src="../js/shapes.js"></script>
@@ -1630,6 +1631,76 @@
       VB.geom.fillAt(res6.doc, 5500, 4200) === 1 && // blue survives
       VB.geom.fillAt(res6.doc, 2100, 2100) === 0,
       res6.project.scene().layers.length + " layers");
+  })();
+
+  // ======================= unit tests: text authoring ======================
+  // buildTextOp lays a string out with a parsed TTF into a SELF-CONTAINED
+  // journal op (font subset + advances baked at authoring time, like
+  // MX2004); textApplyOp merges it into the document.
+  log("text authoring:");
+  await (async function () {
+    var red = { r: 204, g: 102, b: 102, a: 255 };
+    var ttf = VB.parseTTF(window.VBTTFFixture.bytes());
+    // fixture: upm 2048, A adv 2048, B adv 1638, D adv 1000,
+    // kern(A,B) = -164, hhea ascent 1638 / descent -410 (no OS/2)
+    var op = VB.buildTextOp(ttf, { name: "VBTest", bold: false, italic: false },
+                            "AB\nD", 400, red, 1000, 2000);
+    check("op font subset in first-use order",
+      op.font.name === "VBTest" && op.font.glyphs.length === 3 &&
+      op.font.glyphs[0].code === 65 && op.font.glyphs[1].code === 66 &&
+      op.font.glyphs[2].code === 68,
+      op.font.glyphs.map(function (g) { return g.code; }).join(","));
+    check("op bakes kerned advances in twips",
+      op.records.length === 2 &&
+      op.records[0].glyphs[0].adv === 368 && // (2048-164) * 400/2048
+      op.records[0].glyphs[1].adv === 320 && // 1638 * 400/2048
+      op.records[1].glyphs[0].adv === 195,   // 1000 * 400/2048
+      JSON.stringify(op.records.map(function (r) {
+        return r.glyphs.map(function (g) { return g.adv; });
+      })));
+    check("op lines sit on win-metric baselines",
+      op.records[0].y === 320 && op.records[1].y === 720 && // pitch 400
+      op.matrix[4] === 1000 && op.matrix[5] === 2000,
+      op.records[0].y + "/" + op.records[1].y);
+
+    var doc = new VB.VBDocument();
+    VB.textApplyOp(doc, op);
+    check("textApplyOp installs font + block",
+      doc.fonts.length === 1 && doc.fonts[0].glyphs.length === 3 &&
+      doc.texts.length === 1 && doc.texts[0].records[0].font === 0);
+    // a second block reuses the font, extends the subset, remaps gi
+    var op2 = VB.buildTextOp(ttf, { name: "VBTest", bold: false, italic: false },
+                             "CB", 400, red, 3000, 4000);
+    VB.textApplyOp(doc, op2);
+    check("second block merges into the same font",
+      doc.fonts.length === 1 && doc.fonts[0].glyphs.length === 4 &&
+      doc.fonts[0].glyphs[3].code === 67 &&
+      doc.texts[1].records[0].glyphs[0].gi === 3 && // C appended
+      doc.texts[1].records[0].glyphs[1].gi === 1,   // B reused
+      JSON.stringify(doc.texts[1].records[0].glyphs));
+
+    // journal replay is deterministic and self-contained
+    var ops = [{ op: "new", width: 11000, height: 8000 }, op];
+    var ra = await VB.replayJournal(ops);
+    var rb = await VB.replayJournal(ops);
+    check("textCreate replays deterministically",
+      JSON.stringify(ra.doc.texts) === JSON.stringify(rb.doc.texts) &&
+      ra.doc.texts.length === 1 && ra.doc.fonts.length === 1);
+
+    // rendering: glyph A's triangle puts ink where expected
+    var cv = document.createElement("canvas");
+    cv.width = 550; cv.height = 400;
+    VB.render(cv.getContext("2d"), ra.doc, { zoom: 1, panX: 0, panY: 0 });
+    // block at (1000,2000), baseline +320; A spans 400tw wide, 266 up
+    var probe = cv.getContext("2d").getImageData(60, 111, 1, 1).data;
+    check("authored text renders ink", probe[0] > 180 && probe[2] < 150,
+      Array.from(probe).join(","));
+
+    // vbd round-trip of authored text (v2 path via bare doc)
+    var back = await VB.decodeVBD(await VB.encodeVBD(ra.doc, { compress: true }));
+    check("authored text survives vbd",
+      JSON.stringify(back.doc.texts) === JSON.stringify(ra.doc.texts) &&
+      JSON.stringify(back.doc.fonts) === JSON.stringify(ra.doc.fonts));
   })();
 
   // ======================= SWF export round-trip ===========================

@@ -142,6 +142,8 @@
     color: var(--text);
   }
   #debugpanel.hidden { display: none; }
+  #text-opts { display: inline-flex; align-items: center; gap: 6px; }
+  #text-opts.hidden { display: none; }
   #debugpanel h4 {
     font: 600 11px/1.4 "Segoe UI", sans-serif;
     color: var(--accent);
@@ -225,6 +227,15 @@
     <label class="ctl" title="Eraser size (px)">
       🧽<input type="number" id="eraser-size" value="20" min="2" max="100" step="2">px
     </label>
+    <span id="text-opts" class="hidden">
+      <label class="ctl" title="Font family">
+        <select id="text-font" style="max-width:150px"></select>
+      </label>
+      <label class="ctl" title="Text size (pt)">
+        <input type="number" id="text-size" value="24" min="4" max="200" step="1">pt
+      </label>
+      <button id="btn-fonts" title="List the system's fonts (or drop a .ttf on the canvas)">Fonts…</button>
+    </span>
     <div class="sep"></div>
     <button id="btn-zoom-out" title="Zoom out">−</button>
     <button id="btn-zoom-100" title="Zoom to 100%">100%</button>
@@ -245,6 +256,7 @@
       <button data-tool="line" title="Line tool (N)">╱</button>
       <button data-tool="oval" title="Oval tool (O)">◯</button>
       <button data-tool="rect" title="Rectangle tool (R)">▭</button>
+      <button data-tool="text" title="Text tool (T)">T</button>
       <button data-tool="brush" title="Brush (B)">🖌</button>
       <button data-tool="bucket" title="Paint bucket (K)">🪣</button>
       <button data-tool="eraser" title="Eraser (E)">🧽</button>
@@ -283,7 +295,7 @@
     <span id="status-msg"></span>
   </div>
 
-  <input type="file" id="file-input" accept=".swf,.vbd" style="display:none">
+  <input type="file" id="file-input" accept=".swf,.vbd,.ttf,.ttc" style="display:none">
 
   <script src="js/bitio.js"></script>
   <script src="js/doc.js"></script>
@@ -315,6 +327,7 @@
   <script src="js/lasso.js"></script>
   <script src="js/ttf.js"></script>
   <script src="js/project.js"></script>
+  <script src="js/text.js"></script>
   <script src="js/main.js"></script>
 </body>
 </html>

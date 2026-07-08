@@ -181,6 +181,12 @@
           history.push(project);
           VB.regionDelete(doc, op.points);
           break;
+        case "textCreate":
+          // self-contained: the op carries its font subset + baked
+          // advances, so replay never depends on installed fonts
+          history.push(project);
+          VB.textApplyOp(doc, op);
+          break;
         case "undo":
           history.undo(project);
           sync();

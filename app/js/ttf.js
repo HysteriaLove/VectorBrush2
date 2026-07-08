@@ -68,6 +68,13 @@
     var descent = r.s16(hhea + 6);
     var lineGap = r.s16(hhea + 8);
     var numHMetrics = r.u16(hhea + 34);
+    // OS/2 win metrics: MX2004's text baselines match usWinAscent
+    // (Times 12pt yoff 220/240 = 1877/2048 exactly)
+    var winAscent = ascent, winDescent = -descent;
+    if (tables["OS/2"] && tables["OS/2"].len >= 78) {
+      winAscent = r.u16(tables["OS/2"].off + 74);
+      winDescent = r.u16(tables["OS/2"].off + 76);
+    }
     var hmtx = need("hmtx");
     var loca = need("loca");
     var glyf = need("glyf");
@@ -331,6 +338,8 @@
       ascent: ascent,
       descent: descent,
       lineGap: lineGap,
+      winAscent: winAscent,
+      winDescent: winDescent,
       glyphIndex: glyphIndex,
       advance: advance,
       kern: kern,

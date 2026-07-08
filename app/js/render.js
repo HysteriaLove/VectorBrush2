@@ -148,4 +148,5 @@
   window.VB = window.VB || {};
   VB.render = render;
   VB.renderProject = renderProject;
+  VB.drawTextBlock = drawText; // (ctx, doc, textBlock) — used by the text tool's live preview
 })();

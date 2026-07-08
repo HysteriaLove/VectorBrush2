@@ -75,7 +75,8 @@
     eraser: new VB.EraserTool(app),
     line: VB.LineTool(app),
     oval: VB.OvalTool(app),
-    rect: VB.RectTool(app)
+    rect: VB.RectTool(app),
+    text: VB.TextTool(app)
   };
 
   // ---- rendering loop ------------------------------------------------------
@@ -235,6 +236,12 @@
   async function loadArrayBuffer(name, buf) {
     var bytes = new Uint8Array(buf);
     try {
+      if (/\.(ttf|ttc|otf)$/i.test(name)) {
+        // a dropped font goes to the text tool's font list, not the doc
+        var fe = VB.textFonts.addBuffer(name, buf);
+        toast("Font loaded: " + fe.label);
+        return;
+      }
       var result, kind;
       if (VB.isVBD(bytes)) {
         result = await VB.decodeVBD(bytes);
@@ -496,6 +503,10 @@
   // ---- keyboard ---------------------------------------------------------------
 
   window.addEventListener("keydown", function (ev) {
+    // typing in a form field (the text tool's hidden textarea, layer
+    // rename, size inputs) must never trigger tool shortcuts
+    var tag = ev.target && ev.target.tagName;
+    if (tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT") return;
     if (ev.code === "Space") { spaceDown = true; }
     if (ev.ctrlKey && !ev.shiftKey && ev.key.toLowerCase() === "z") { ev.preventDefault(); doUndo(); return; }
     if ((ev.ctrlKey && ev.key.toLowerCase() === "y") ||
@@ -526,7 +537,7 @@
     // O = oval, R = rectangle
     var toolKeys = { v: "select", p: "pencil", b: "brush", k: "bucket",
                      e: "eraser", n: "line", o: "oval", r: "rect",
-                     q: "transform", l: "lasso" };
+                     q: "transform", l: "lasso", t: "text" };
     if (toolKeys[k]) selectTool(toolKeys[k]);
   });
   window.addEventListener("keyup", function (ev) {
@@ -604,6 +615,9 @@
     canvas.style.cursor = "";
     if (tool === "transform" && app.tool !== "transform") returnTool = app.tool;
     if (tools.select && tools.select.commitFloat) tools.select.commitFloat();
+    if (tools.text && tools.text.commitPending) tools.text.commitPending();
+    var textOpts = document.getElementById("text-opts");
+    if (textOpts) textOpts.classList.toggle("hidden", tool !== "text");
     if (tool === "transform" && tools.select.exportSelection) {
       var handoff = tools.select.exportSelection();
       if (handoff.region || handoff.fills.length || handoff.edgeKeys.length) {
@@ -636,6 +650,31 @@
     selectTool(returnTool && tools[returnTool] ? returnTool : "select");
   };
 
+  // ---- text tool options ------------------------------------------------------
+
+  function refreshFontList() {
+    var sel = document.getElementById("text-font");
+    var keep = sel.value;
+    sel.innerHTML = "";
+    VB.textFonts.entries.forEach(function (e) {
+      var o = document.createElement("option");
+      o.value = e.label;
+      o.textContent = e.label;
+      sel.appendChild(o);
+    });
+    if (keep && VB.textFonts.find(keep)) sel.value = keep;
+  }
+  VB.textFonts.onChange(refreshFontList);
+
+  document.getElementById("btn-fonts").addEventListener("click", async function () {
+    try {
+      await VB.textFonts.loadLocal();
+      toast(VB.textFonts.entries.length + " font families available");
+    } catch (err) {
+      toast(err.message, 6000);
+    }
+  });
+
   // ---- layers & scenes panel ---------------------------------------------------
 
   // Pending selections (arrow float, transform session) belong to the
@@ -643,6 +682,7 @@
   function flushSelections() {
     if (tools.select && tools.select.commitFloat) tools.select.commitFloat();
     if (tools.transform && tools.transform.adopt) tools.transform.adopt(null);
+    if (tools.text && tools.text.commitPending) tools.text.commitPending();
     if (tools.select && tools.select.clearSelection) tools.select.clearSelection();
   }
 
