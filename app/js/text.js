@@ -117,6 +117,63 @@
     return true;
   }
 
+  /** Copy a block as self-contained textCreate ops (clipboard). One op
+   *  per font the records reference (app-authored blocks use one font;
+   *  imported multi-font blocks paste as sibling blocks with the same
+   *  placement). Each op carries its own glyph subset, so pasting
+   *  never depends on the source document or installed fonts. */
+  function textCopyOps(doc, block) {
+    var byFont = new Map();
+    block.records.forEach(function (rec) {
+      var arr = byFont.get(rec.font);
+      if (!arr) { arr = []; byFont.set(rec.font, arr); }
+      arr.push(rec);
+    });
+    var ops = [];
+    byFont.forEach(function (recs, fi) {
+      var font = doc.fonts[fi];
+      if (!font) return;
+      var giMap = new Map(); // source gi -> subset index
+      var glyphs = [];
+      recs.forEach(function (rec) {
+        rec.glyphs.forEach(function (g) {
+          if (giMap.has(g.gi)) return;
+          var src = font.glyphs[g.gi];
+          giMap.set(g.gi, glyphs.length);
+          glyphs.push({
+            code: src ? src.code : 0,
+            contours: src ? JSON.parse(JSON.stringify(src.contours)) : []
+          });
+        });
+      });
+      ops.push({
+        op: "textCreate",
+        font: { name: font.name, bold: !!font.bold, italic: !!font.italic,
+                glyphs: glyphs },
+        matrix: block.matrix.slice(),
+        records: recs.map(function (rec) {
+          var out = {
+            height: rec.height,
+            color: { r: rec.color.r, g: rec.color.g,
+                     b: rec.color.b, a: rec.color.a },
+            x: rec.x, y: rec.y,
+            glyphs: rec.glyphs.map(function (g) {
+              return { gi: giMap.get(g.gi), adv: g.adv };
+            })
+          };
+          if (rec.soft) out.soft = true;
+          return out;
+        }),
+        wrapWidth: block.wrapWidth || null,
+        pitch: block.pitch || null,
+        align: block.align || 0,
+        spacing: block.spacing || 0,
+        boxHeight: block.boxHeight || null
+      });
+    });
+    return ops;
+  }
+
   /** Replace a block's content (records + font subset), keeping its
    *  placement matrix — the edit-session commit. Self-contained like
    *  textCreate. */
@@ -1054,6 +1111,7 @@
   VB.textEditApply = textEditApply;
   VB.textTransformApply = textTransformApply;
   VB.textDeleteApply = textDeleteApply;
+  VB.textCopyOps = textCopyOps;
   VB.textBlockBounds = textBlockBounds;
   VB.textHit = textHit;
   VB.buildTextOp = buildTextOp;

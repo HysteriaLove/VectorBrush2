@@ -211,6 +211,28 @@
     c.history.push(c.project);
     VB.textBoxHApply(c.doc, op.index, op.height, op.dy);
   });
+  // Paste a shape clip (a standalone mini planar map captured at copy
+  // time — self-contained like the text ops, so replay never depends
+  // on clipboard state) under a placement matrix. Merging is the same
+  // one-pass region merge a transform drop uses.
+  defineOp("paste", function (c, op) {
+    c.history.push(c.project);
+    var clip = new VB.VBDocument();
+    clip.width = c.doc.width; clip.height = c.doc.height;
+    clip.fills = op.clip.fills.map(function (f) {
+      return { type: "solid", color: { r: f.color.r, g: f.color.g,
+                                       b: f.color.b, a: f.color.a } };
+    });
+    clip.lines = op.clip.lines.map(function (l) {
+      return { width: l.width, color: { r: l.color.r, g: l.color.g,
+                                        b: l.color.b, a: l.color.a } };
+    });
+    clip.edges = op.clip.edges.map(function (e) {
+      return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by,
+                     e.fill0, e.fill1, e.line);
+    });
+    VB.regionMergeLifted(c.doc, clip, op.m);
+  });
   defineOp("undo", function (c) {
     c.history.undo(c.project);
     c.sync();

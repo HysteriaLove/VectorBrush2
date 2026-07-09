@@ -532,9 +532,14 @@
     if ((ev.ctrlKey && ev.key.toLowerCase() === "y") ||
         (ev.ctrlKey && ev.shiftKey && ev.key.toLowerCase() === "z")) { ev.preventDefault(); doRedo(); return; }
     if (ev.ctrlKey && ev.key.toLowerCase() === "o") { ev.preventDefault(); fileInput.click(); return; }
-    if ((ev.key === "Delete" || ev.key === "Backspace") &&
-        app.tool === "select" && tools.select.onDeleteKey) {
-      if (tools.select.onDeleteKey()) { ev.preventDefault(); return; }
+    if (ev.ctrlKey && !ev.altKey) {
+      var ck = ev.key.toLowerCase();
+      if (ck === "c") { ev.preventDefault(); copySelection(); return; }
+      if (ck === "x") { ev.preventDefault(); cutSelection(); return; }
+      if (ck === "v") { ev.preventDefault(); pasteClipboard(); return; }
+    }
+    if (ev.key === "Delete" || ev.key === "Backspace") {
+      if (deleteSelection()) { ev.preventDefault(); return; }
     }
     if (ev.key === "Escape") {
       if (activePointerTool && activePointerTool.cancel) {
@@ -672,6 +677,106 @@
     if (app.tool !== "transform") return;
     selectTool(returnTool && tools[returnTool] ? returnTool : "select");
   };
+
+  // ---- clipboard (Ctrl+C / Ctrl+X / Ctrl+V) + Delete ---------------------------
+  // Internal clipboard; payloads are self-contained (shape clips as
+  // plain planar-map JSON, text as textCreate ops), so pasting is ONE
+  // registered command through app.exec and replays bit-for-bit.
+  var clipboard = null;
+  var pasteBump = 0; // each paste of the same payload lands 10px further
+
+  function selectionSource() {
+    if (tools.transform && tools.transform.hasSession &&
+        tools.transform.hasSession()) return tools.transform;
+    return tools.select;
+  }
+
+  function copySelection() {
+    var src = selectionSource();
+    var payload = src.copySelection ? src.copySelection() : null;
+    if (!payload) { setMsg("nothing selected to copy"); return false; }
+    clipboard = payload;
+    pasteBump = 0;
+    setMsg("copied — Ctrl+V to paste");
+    return true;
+  }
+
+  function deleteSelection() {
+    if (tools.transform && tools.transform.hasSession &&
+        tools.transform.hasSession()) {
+      return tools.transform.deleteSelection();
+    }
+    if (SEL_FAMILY[app.tool] && tools.select.onDeleteKey) {
+      return tools.select.onDeleteKey();
+    }
+    return false;
+  }
+
+  function cutSelection() {
+    if (!copySelection()) return false;
+    if (!deleteSelection()) { setMsg("copied — nothing deletable"); return true; }
+    setMsg("cut — Ctrl+V to paste");
+    return true;
+  }
+
+  function pasteClipboard() {
+    if (!clipboard) { setMsg("clipboard is empty"); return false; }
+    if (app.project.activeLayer().locked) { setMsg("layer is locked"); return false; }
+    pasteBump += 200;
+    if (clipboard.kind === "shape") {
+      app.exec({
+        op: "paste",
+        clip: JSON.parse(JSON.stringify(clipboard.clip)),
+        m: [1, 0, 0, 1, pasteBump, pasteBump]
+      });
+      // pasted content lands selected: its bbox becomes a region the
+      // transform tool adopts (Flash pastes as a movable selection)
+      var bb = null;
+      clipboard.clip.edges.forEach(function (e) {
+        [[e.ax, e.ay], [e.bx, e.by]].concat(
+          e.cx === null ? [] : [[e.cx, e.cy]]).forEach(function (p) {
+          if (!bb) bb = { x0: p[0], y0: p[1], x1: p[0], y1: p[1] };
+          bb.x0 = Math.min(bb.x0, p[0]); bb.x1 = Math.max(bb.x1, p[0]);
+          bb.y0 = Math.min(bb.y0, p[1]); bb.y1 = Math.max(bb.y1, p[1]);
+        });
+      });
+      if (bb) {
+        var pad = 20, dx = pasteBump, dy = pasteBump;
+        tools.select.sel = {
+          fills: [], edgeKeys: [], text: null,
+          region: [
+            { x: bb.x0 + dx - pad, y: bb.y0 + dy - pad },
+            { x: bb.x1 + dx + pad, y: bb.y0 + dy - pad },
+            { x: bb.x1 + dx + pad, y: bb.y1 + dy + pad },
+            { x: bb.x0 + dx - pad, y: bb.y1 + dy + pad }
+          ]
+        };
+        selectTool("transform");
+      }
+      setMsg("pasted");
+      return true;
+    }
+    // text: one textCreate per part (a single part for app-authored
+    // blocks; imported multi-font blocks paste as sibling blocks)
+    var lastIndex = -1;
+    clipboard.parts.forEach(function (part) {
+      var op = JSON.parse(JSON.stringify(part));
+      op.matrix[4] += pasteBump;
+      op.matrix[5] += pasteBump;
+      app.exec(op);
+      lastIndex = app.doc.texts.length - 1;
+    });
+    if (lastIndex >= 0) {
+      tools.select.sel = { fills: [], edgeKeys: [], region: null, text: lastIndex };
+      selectTool("select");
+    }
+    setMsg("text pasted");
+    return true;
+  }
+
+  document.getElementById("btn-delete").addEventListener("click", function () {
+    if (!deleteSelection()) setMsg("nothing selected to delete");
+  });
 
   // Double-clicking a text block (from any selection tool) opens it in
   // the text tool's edit session.

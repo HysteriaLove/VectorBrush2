@@ -243,6 +243,57 @@
       return true;
     };
 
+    /** Clipboard payload for the session's selection (Ctrl+C), as it
+     *  currently stands — pending gestures are baked into the copy. */
+    self.copySelection = function () {
+      if (!self.items) return null;
+      var m = gestureM();
+      if (self.items.textIndex != null) {
+        var blk = self.float && self.float.textBlock
+          ? self.float.textBlock
+          : app.doc.texts[self.items.textIndex];
+        if (!blk) return null;
+        var snap = {
+          matrix: matMul(m, blk.matrix), records: blk.records,
+          wrapWidth: blk.wrapWidth, pitch: blk.pitch, align: blk.align,
+          spacing: blk.spacing, boxHeight: blk.boxHeight
+        };
+        var parts = VB.textCopyOps(app.doc, snap);
+        return parts.length ? { kind: "text", parts: parts } : null;
+      }
+      var clip = self.float ? self.float.doc
+        : self.items.region
+          ? VB.regionLift(app.doc, self.items.region)
+          : VB.arrowLiftSelDoc(app.doc, self.items.fills, self.items.edgeKeys);
+      if (!clip || clip.edges.length === 0) return null;
+      return { kind: "shape", clip: VB.clipFromLifted(clip, m) };
+    };
+
+    /** Delete the session's selection (Delete key / toolbar button):
+     *  an un-journaled lift is put back first, then ONE registered
+     *  delete op lands through app.exec — replay-identical. */
+    self.deleteSelection = function () {
+      if (!self.items) return false;
+      var it = self.items;
+      self.gestures = [];
+      self.boxOps = [];
+      if (self.float) unlift();
+      self.discard();
+      if (it.textIndex != null) {
+        if (!app.doc.texts[it.textIndex]) return false;
+        app.exec({ op: "textDelete", index: it.textIndex });
+        app.setMsg("text deleted");
+      } else if (it.region) {
+        app.exec({ op: "regionDelete", points: it.region });
+        app.setMsg("region erased");
+      } else {
+        app.exec({ op: "deleteSel", fills: it.fills, edgeKeys: it.edgeKeys });
+        app.setMsg("selection deleted");
+      }
+      if (app.transformDone) app.transformDone();
+      return true;
+    };
+
     /** Drop the session without committing — the document changed under
      *  us (load, undo/redo, another tool), so the picks are stale. The
      *  float is NOT restored: the change replaced the doc wholesale. */

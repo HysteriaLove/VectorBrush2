@@ -408,6 +408,36 @@
                        pieces.concat(adopted.twins));
   }
 
+  /** A lifted clip as a plain JSON clipboard payload, with a placement
+   *  matrix baked in (identity when m is null). Self-contained: paste
+   *  ops embed this verbatim, so replay never depends on clipboard
+   *  state or the source document. */
+  function clipFromLifted(lifted, m) {
+    function tx(x, y) {
+      if (!m) return { x: x, y: y };
+      return { x: Math.round(m[0] * x + m[2] * y + m[4]),
+               y: Math.round(m[1] * x + m[3] * y + m[5]) };
+    }
+    return {
+      fills: lifted.fills.map(function (f) {
+        return { type: "solid", color: { r: f.color.r, g: f.color.g,
+                                         b: f.color.b, a: f.color.a } };
+      }),
+      lines: lifted.lines.map(function (l) {
+        return { width: l.width, color: { r: l.color.r, g: l.color.g,
+                                          b: l.color.b, a: l.color.a } };
+      }),
+      edges: lifted.edges.map(function (e) {
+        var a = tx(e.ax, e.ay), b = tx(e.bx, e.by);
+        var c = e.cx === null ? null : tx(e.cx, e.cy);
+        return { ax: a.x, ay: a.y,
+                 cx: c === null ? null : c.x, cy: c === null ? null : c.y,
+                 bx: b.x, by: b.y,
+                 fill0: e.fill0, fill1: e.fill1, line: e.line };
+      })
+    };
+  }
+
   /** The drawing clipped to the region, as a fresh document. */
   function regionLift(doc, points) {
     var lifted = cloneDoc(doc);
@@ -748,6 +778,32 @@
         region: self.sel.region ? self.sel.region.slice() : null,
         text: self.sel.text != null ? self.sel.text : null
       };
+    };
+
+    /** Clipboard payload for the current selection (Ctrl+C):
+     *  {kind:"shape", clip} or {kind:"text", parts:[textCreate ops]}.
+     *  A floating selection copies where it currently hovers. */
+    self.copySelection = function () {
+      if (self.float) {
+        var fl = self.float;
+        return { kind: "shape",
+                 clip: clipFromLifted(fl.doc, [1, 0, 0, 1, fl.dx, fl.dy]) };
+      }
+      if (self.sel.text != null && app.doc.texts[self.sel.text]) {
+        var parts = VB.textCopyOps(app.doc, app.doc.texts[self.sel.text]);
+        return parts.length ? { kind: "text", parts: parts } : null;
+      }
+      if (self.sel.region) {
+        var clip = regionLift(app.doc, self.sel.region);
+        return clip.edges.length
+          ? { kind: "shape", clip: clipFromLifted(clip, null) } : null;
+      }
+      if (self.sel.fills.length || self.sel.edgeKeys.length) {
+        var clip2 = liftSelDoc(app.doc, self.sel.fills, self.sel.edgeKeys);
+        return clip2.edges.length
+          ? { kind: "shape", clip: clipFromLifted(clip2, null) } : null;
+      }
+      return null;
     };
 
     function pickAnchor(pos) {
@@ -1206,32 +1262,20 @@
         return true;
       }
       if (selEmpty()) return false;
+      // command-pattern path: exec journals + applies the registered
+      // op + refreshes (docChanged clears the selection)
       if (self.sel.text != null) {
-        var tIdx = self.sel.text;
-        app.record({ op: "textDelete", index: tIdx });
-        app.history.push(app.doc);
-        VB.textDeleteApply(app.doc, tIdx);
-        self.clearSelection();
-        app.docChanged();
+        app.exec({ op: "textDelete", index: self.sel.text });
         app.setMsg("text deleted");
         return true;
       }
       if (self.sel.region) {
-        var pts = self.sel.region;
-        app.record({ op: "regionDelete", points: pts });
-        app.history.push(app.doc);
-        regionDelete(app.doc, pts);
-        self.clearSelection();
-        app.docChanged();
+        app.exec({ op: "regionDelete", points: self.sel.region });
         app.setMsg("region erased");
         return true;
       }
       var items = self.exportSelection();
-      app.record({ op: "deleteSel", fills: items.fills, edgeKeys: items.edgeKeys });
-      app.history.push(app.doc);
-      arrowDeleteSel(app.doc, items.fills, items.edgeKeys);
-      self.clearSelection();
-      app.docChanged();
+      app.exec({ op: "deleteSel", fills: items.fills, edgeKeys: items.edgeKeys });
       app.setMsg("selection deleted");
       return true;
     };
@@ -1470,5 +1514,6 @@
   VB.regionTransform = regionTransform;
   VB.regionPolyLoop = polyLoop;
   VB.regionMergeLifted = mergeLifted;
+  VB.clipFromLifted = clipFromLifted;
   VB.arrowEdgeKey = edgeKey;
 })();

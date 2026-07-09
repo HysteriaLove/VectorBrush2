@@ -860,6 +860,69 @@
       micro20.length + " sub-5tw records");
   })();
 
+  // ======================= clipboard: copy / paste commands =====================
+  // Copy captures a self-contained clip (plain planar-map JSON); paste
+  // is ONE registered command dispatched by the same registry live and
+  // in replay. Text copies as textCreate ops.
+  log("clipboard:");
+  await (async function () {
+    var blue = { r: 102, g: 204, b: 255, a: 255 };
+    var ops0 = [
+      { op: "new", width: 11000, height: 8000 },
+      { op: "brush", points: [{ x: 2000, y: 2000 }, { x: 3000, y: 2200 }],
+        radius: 300, color: blue }
+    ];
+    var r0 = await VB.replayJournal(ops0);
+    check("clipboard body painted", VB.geom.fillAt(r0.doc, 2500, 2100) === 1);
+    var band = [{ x: 1500, y: 1500 }, { x: 3600, y: 1500 },
+                { x: 3600, y: 2700 }, { x: 1500, y: 2700 }];
+    var clip = VB.clipFromLifted(VB.regionLift(r0.doc, band), null);
+    check("region copy captures the blob",
+      clip.edges.length > 0 && clip.fills.length === 1,
+      clip.edges.length + " edges");
+    var r1 = await VB.replayJournal(ops0.concat([
+      { op: "paste", clip: clip, m: [1, 0, 0, 1, 4000, 500] }
+    ]));
+    check("paste replays consistent",
+      VB.integrityReport(r1.doc).length === 0, VB.integrityReport(r1.doc)[0]);
+    check("pasted copy lands at the offset, original untouched",
+      VB.geom.fillAt(r1.doc, 6500, 2600) === 1 &&
+      VB.geom.fillAt(r1.doc, 2500, 2100) === 1,
+      VB.geom.fillAt(r1.doc, 6500, 2600) + "/" + VB.geom.fillAt(r1.doc, 2500, 2100));
+    var r2 = await VB.replayJournal(ops0.concat([
+      { op: "paste", clip: clip, m: [1, 0, 0, 1, 4000, 500] },
+      { op: "undo" }
+    ]));
+    check("paste is one undo step",
+      VB.geom.fillAt(r2.doc, 6500, 2600) === 0 &&
+      VB.geom.fillAt(r2.doc, 2500, 2100) === 1);
+
+    // text copy: self-contained parts recreate the block in a FRESH doc
+    var ttfC = VB.parseTTF(window.VBTTFFixture.bytes());
+    var tdc = new VB.VBDocument();
+    tdc.width = 11000; tdc.height = 8000;
+    VB.textApplyOp(tdc, VB.buildTextOp(ttfC, { name: "VBTest" }, "AB AB", 400,
+      { r: 20, g: 60, b: 200, a: 255 }, 1000, 1000, 1500, 1, 30));
+    var parts = VB.textCopyOps(tdc, tdc.texts[0]);
+    check("text copy yields one self-contained part",
+      parts.length === 1 && parts[0].font.glyphs.length > 0,
+      parts.length + " parts");
+    var tdc2 = new VB.VBDocument();
+    tdc2.width = 11000; tdc2.height = 8000;
+    VB.textApplyOp(tdc2, parts[0]);
+    var srcB = tdc.texts[0], dstB = tdc2.texts[0];
+    function advs(b) {
+      return JSON.stringify(b.records.map(function (r) {
+        return r.glyphs.map(function (g) { return g.adv; });
+      }));
+    }
+    check("text paste recreates records verbatim",
+      dstB.records.length === srcB.records.length &&
+      advs(dstB) === advs(srcB) &&
+      dstB.wrapWidth === srcB.wrapWidth && dstB.spacing === srcB.spacing,
+      advs(dstB) + " vs " + advs(srcB));
+  })();
+
   // ======================= unit tests: shape primitives =====================
   // Line (N) / Oval (O) / Rectangle (R): filled shapes run the brush's
   // boolean-mask pipeline (paint-over beneath, stroke stamped on the
