@@ -20,9 +20,15 @@
   var SIDE_PROBE = 1.5; // twips: probe distance (legacy deriveFills below)
   var FIT_TOL = 12;     // twips: outline curve-fit tolerance (0.6 px)
 
-  function eraseStroke(doc, points, radius) {
+  // union: an optional VB.SwathUnion the tool fed during the drag; its
+  // finished region is byte-identical to the batch union, so replay
+  // (which passes none) commits the same geometry.
+  function eraseStroke(doc, points, radius, union) {
     var swath = VB.buildSwath(points, radius);
-    if (!swath.path || swath.path.length === 0) return { removed: 0, boundary: 0 };
+    if (!swath.path || swath.path.length === 0) {
+      if (union) union.dispose();
+      return { removed: 0, boundary: 0 };
+    }
 
     var swathBBox = swath.path.reduce(function (bb, p) {
       if (!bb) {
@@ -46,6 +52,7 @@
         VB.geom.fillAt(doc, swath.path[0].x, swath.path[0].y) === 0 &&
         VB.geom.fillAt(doc, swath.path[swath.path.length - 1].x,
           swath.path[swath.path.length - 1].y) === 0) {
+      if (union) union.dispose();
       return { removed: 0, boundary: 0 };
     }
 
@@ -53,7 +60,8 @@
     // paper.js capsule union, fitted to Flash-lean quad loops, noded in,
     // then the face-walk mask (mask.js) regenerates all claims — with the
     // region resolving to EMPTINESS instead of a paint fill.
-    var loops = VB.sweptOutline(swath.path, radius, FIT_TOL);
+    var pre = union ? union.finish(swath.path, radius) : null;
+    var loops = VB.sweptOutline(swath.path, radius, FIT_TOL, pre);
     var fitted = [];
     loops.forEach(function (loop) {
       loop.forEach(function (e) { fitted.push(e); });
@@ -261,6 +269,10 @@
 
   EraserTool.prototype.onDown = function (pos) {
     this.points = [{ x: pos.x, y: pos.y }];
+    // unite swept capsules while the hand is still moving — pointerup
+    // then only pays the final fold + mask (see paperglue.SwathUnion)
+    this.union = new VB.SwathUnion(this.radius());
+    this.union.add(pos);
     this.hoverPos = pos;
   };
 
@@ -272,6 +284,7 @@
     var dx = pos.x - last.x, dy = pos.y - last.y;
     if (dx * dx + dy * dy >= minDist * minDist) {
       this.points.push({ x: pos.x, y: pos.y });
+      if (this.union) this.union.add(pos);
     }
     this.app.requestRender();
   };
@@ -279,8 +292,13 @@
   EraserTool.prototype.onUp = function (pos) {
     if (!this.points) return;
     var pts = this.points;
+    var union = this.union;
     this.points = null;
-    if (pos) pts.push({ x: pos.x, y: pos.y });
+    this.union = null;
+    if (pos) {
+      pts.push({ x: pos.x, y: pos.y });
+      if (union) union.add(pos);
+    }
 
     this.app.record({
       op: "erase",
@@ -288,7 +306,7 @@
       radius: this.radius()
     });
     this.app.history.push(this.app.doc);
-    var result = eraseStroke(this.app.doc, pts, this.radius());
+    var result = eraseStroke(this.app.doc, pts, this.radius(), union);
     if (result.removed === 0 && result.boundary === 0) {
       this.app.history.undoStack.pop(); // erased nothing; drop the snapshot
       this.app.setMsg("nothing to erase there");
@@ -308,6 +326,7 @@
 
   EraserTool.prototype.cancel = function () {
     this.points = null;
+    if (this.union) { this.union.dispose(); this.union = null; }
     this.app.requestRender();
   };
 

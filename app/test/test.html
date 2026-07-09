@@ -2941,6 +2941,94 @@
     log("  VISUAL EXCEPTION: " + (err && err.stack || err), "fail");
   }
 
+  // ============== incremental swath union ≡ batch union ====================
+  // The brush/eraser tools unite swept capsules DURING the drag
+  // (paperglue.SwathUnion); replay always recomputes the batch tree
+  // union. Live and replay must therefore commit byte-identical edges —
+  // for every capsule-count shape of the merge tree (powers of two,
+  // 2^k-1 fold-heavy counts, odd counts, single capsule, dab) and for
+  // buildSwath's end-replacement of the final thinned point.
+  log("");
+  log("incremental swath union:");
+  try {
+    var IU_RADIUS = 300;
+    function iuStroke(nPts, seed) {
+      var s = seed >>> 0;
+      function rnd() { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }
+      var pts = [];
+      for (var i = 0; i < nPts; i++) {
+        pts.push({
+          x: 1200 + i * 420 + Math.round(rnd() * 160),
+          y: 3600 + Math.round(2200 * Math.sin(i / 2.1)) + Math.round(rnd() * 160)
+        });
+      }
+      return pts;
+    }
+    function iuBase(doc) {
+      doc.width = 26000; doc.height = 8000;
+      VB.brushStroke(doc, [{ x: 1000, y: 3600 }, { x: 24000, y: 3800 }], 700,
+                     { r: 60, g: 120, b: 240, a: 255 });
+    }
+    function edgeString(doc) {
+      return doc.edges.map(function (e) {
+        return [e.ax, e.ay, e.cx, e.cy, e.bx, e.by, e.fill0, e.fill1, e.line].join("/");
+      }).join(" ");
+    }
+    function iuFeed(pts) {
+      var u = new VB.SwathUnion(IU_RADIUS);
+      for (var i = 0; i < pts.length; i++) u.add(pts[i]);
+      return u;
+    }
+    var red = { r: 220, g: 40, b: 40, a: 255 };
+    // capsule counts 0(dab),1,2,4,7,8,15,16,32 — every tree shape class
+    [1, 2, 3, 5, 8, 9, 16, 17, 33].forEach(function (nPts) {
+      var ptsB = iuStroke(nPts, 7 + nPts);
+      var docA = new VB.VBDocument(); iuBase(docA);
+      var docB = new VB.VBDocument(); iuBase(docB);
+      VB.brushStroke(docA, ptsB, IU_RADIUS, red);
+      VB.brushStroke(docB, ptsB, IU_RADIUS, red, iuFeed(ptsB));
+      check("brush " + nPts + " pts: incremental == batch",
+            edgeString(docA) === edgeString(docB),
+            docA.edges.length + " vs " + docB.edges.length + " edges");
+
+      var docC = new VB.VBDocument(); iuBase(docC);
+      var docD = new VB.VBDocument(); iuBase(docD);
+      VB.eraseStroke(docC, ptsB, IU_RADIUS);
+      VB.eraseStroke(docD, ptsB, IU_RADIUS, iuFeed(ptsB));
+      check("erase " + nPts + " pts: incremental == batch",
+            edgeString(docC) === edgeString(docD),
+            docC.edges.length + " vs " + docD.edges.length + " edges");
+    });
+    // end-replacement: final point lands within the thinning step of the
+    // previous one — buildSwath REPLACES the last thinned point while the
+    // accumulator rejected it; finish() must rebuild the last capsule
+    // from the authoritative path
+    var ptsR = iuStroke(9, 99);
+    ptsR.push({ x: ptsR[8].x + 30, y: ptsR[8].y - 25 });
+    var docE = new VB.VBDocument(); iuBase(docE);
+    var docF = new VB.VBDocument(); iuBase(docF);
+    VB.brushStroke(docE, ptsR, IU_RADIUS, red);
+    VB.brushStroke(docF, ptsR, IU_RADIUS, red, iuFeed(ptsR));
+    check("brush end-replacement: incremental == batch",
+          edgeString(docE) === edgeString(docF),
+          docE.edges.length + " vs " + docF.edges.length + " edges");
+    // a stale accumulator (radius changed mid-drag) must be discarded and
+    // fall back to the batch union, not corrupt the commit
+    var ptsW = iuStroke(9, 42);
+    var uW = new VB.SwathUnion(IU_RADIUS + 40);
+    for (var w = 0; w < ptsW.length; w++) uW.add(ptsW[w]);
+    var docG = new VB.VBDocument(); iuBase(docG);
+    var docH = new VB.VBDocument(); iuBase(docH);
+    VB.brushStroke(docG, ptsW, IU_RADIUS, red);
+    VB.brushStroke(docH, ptsW, IU_RADIUS, red, uW);
+    check("radius-mismatch union falls back to batch",
+          edgeString(docG) === edgeString(docH),
+          docG.edges.length + " vs " + docH.edges.length + " edges");
+  } catch (err) {
+    fail++;
+    log("  INCREMENTAL UNION EXCEPTION: " + (err && err.stack || err), "fail");
+  }
+
   var summary = "VBTEST DONE pass=" + pass + " fail=" + fail;
   document.title = summary;
   log("");

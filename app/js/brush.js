@@ -27,9 +27,15 @@
 
   // paint: an RGBA color OR a full 2DMaterial style (anything with a
   // .type) — a selected material IS the drawing color.
-  function brushStroke(doc, points, radius, paint) {
+  // union: an optional VB.SwathUnion the tool fed during the drag; its
+  // finished region is byte-identical to the batch union, so replay
+  // (which passes none) commits the same geometry.
+  function brushStroke(doc, points, radius, paint, union) {
     var swath = VB.buildSwath(points, radius);
-    if (!swath.path || swath.path.length === 0) return { painted: 0, boundary: 0 };
+    if (!swath.path || swath.path.length === 0) {
+      if (union) union.dispose();
+      return { painted: 0, boundary: 0 };
+    }
 
     var fillIdx = doc.addFillStyle(paint && paint.type
       ? JSON.parse(JSON.stringify(paint))
@@ -44,7 +50,8 @@
     // (Feeding the whole old region through paper's booleans instead hit
     // resolveCrossings' documented fragility on pinch-touching compound
     // regions — painted lobes came back carved out.)
-    var loops = VB.sweptOutline(swath.path, radius, FIT_TOL);
+    var pre = union ? union.finish(swath.path, radius) : null;
+    var loops = VB.sweptOutline(swath.path, radius, FIT_TOL, pre);
     var fitted = [];
     loops.forEach(function (loop) {
       loop.forEach(function (e) { fitted.push(e); });
@@ -96,6 +103,10 @@
 
   BrushTool.prototype.onDown = function (pos) {
     this.points = [{ x: pos.x, y: pos.y }];
+    // unite swept capsules while the hand is still moving — pointerup
+    // then only pays the final fold + mask (see paperglue.SwathUnion)
+    this.union = new VB.SwathUnion(this.radius());
+    this.union.add(pos);
     this.hoverPos = pos;
   };
 
@@ -107,6 +118,7 @@
     var dx = pos.x - last.x, dy = pos.y - last.y;
     if (dx * dx + dy * dy >= minDist * minDist) {
       this.points.push({ x: pos.x, y: pos.y });
+      if (this.union) this.union.add(pos);
     }
     this.app.requestRender();
   };
@@ -114,8 +126,13 @@
   BrushTool.prototype.onUp = function (pos) {
     if (!this.points) return;
     var pts = this.points;
+    var union = this.union;
     this.points = null;
-    if (pos) pts.push({ x: pos.x, y: pos.y });
+    this.union = null;
+    if (pos) {
+      pts.push({ x: pos.x, y: pos.y });
+      if (union) union.add(pos);
+    }
 
     var op = {
       op: "brush",
@@ -132,7 +149,7 @@
     this.app.record(op);
     this.app.history.push(this.app.doc);
     var result = brushStroke(this.app.doc, pts, this.radius(),
-                             op.style || this.app.fillColor);
+                             op.style || this.app.fillColor, union);
     this.app.docChanged();
     this.app.setMsg("painted: " + result.boundary + " boundary pieces" +
       (result.painted ? " · " + result.painted + " edges submerged" : ""));
@@ -145,6 +162,7 @@
 
   BrushTool.prototype.cancel = function () {
     this.points = null;
+    if (this.union) { this.union.dispose(); this.union = null; }
     this.app.requestRender();
   };
 

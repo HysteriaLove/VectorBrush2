@@ -111,6 +111,81 @@
     return kids[0];
   }
 
+  // Incremental swath union — spreads sweptRegion's capsule tree across
+  // the drag so pointerup only pays the final fold. The accumulator is a
+  // binary counter of partial unions (sizes are decreasing powers of 2;
+  // equal-size neighbors merge eagerly, left operand receiving). That
+  // discipline, folded right-associatively at the end, reproduces
+  // sweptRegion's level-by-level pairing tree EXACTLY — same operands,
+  // same receivers — so live-incremental and replay-batch geometry are
+  // identical by construction.
+  //
+  // Point thinning mirrors buildSwath: acceptance depends only on the
+  // last accepted point, EXCEPT that buildSwath may replace the last
+  // point with the final raw point at the end. Hence the counter always
+  // lags one capsule — the last capsule is only built in finish(), from
+  // the authoritative buildSwath path. finish() verifies the shared
+  // prefix and the radius; any mismatch discards the partials and
+  // returns null, and the caller falls back to the batch union.
+  function SwathUnion(radius) {
+    this.radius = radius;
+    this.minStep = Math.max(8, radius * 0.35);
+    this.pts = [];      // accepted (thinned) points so far
+    this.partials = []; // [{size, item}] — the binary counter
+  }
+  SwathUnion.prototype.add = function (p) {
+    var last = this.pts[this.pts.length - 1];
+    if (last) {
+      var dx = p.x - last.x, dy = p.y - last.y;
+      if (dx * dx + dy * dy < this.minStep * this.minStep) return;
+    }
+    this.pts.push({ x: p.x, y: p.y });
+    // capsule k is final once pts[k+1] can no longer be replaced,
+    // i.e. once it is no longer the last accepted point
+    if (this.pts.length >= 3) {
+      this._pushCapsule(this.pts[this.pts.length - 3],
+                        this.pts[this.pts.length - 2]);
+    }
+  };
+  SwathUnion.prototype._pushCapsule = function (p, q) {
+    var P = this.partials;
+    P.push({ size: 1, item: capsule(p, q, this.radius) });
+    while (P.length >= 2 && P[P.length - 1].size === P[P.length - 2].size) {
+      var right = P.pop(), left = P.pop();
+      var u = left.item.unite(right.item, { insert: false });
+      left.item.remove();
+      right.item.remove();
+      P.push({ size: left.size * 2, item: u });
+    }
+  };
+  SwathUnion.prototype.finish = function (pathPts, radius) {
+    var M = pathPts.length;
+    var ok = radius === this.radius && this.pts.length === M && M >= 2;
+    if (ok) {
+      for (var i = 0; i + 1 < M; i++) { // all but the replaceable last
+        if (this.pts[i].x !== pathPts[i].x ||
+            this.pts[i].y !== pathPts[i].y) { ok = false; break; }
+      }
+    }
+    if (!ok) { this.dispose(); return null; }
+    this._pushCapsule(pathPts[M - 2], pathPts[M - 1]);
+    var P = this.partials;
+    var acc = P[P.length - 1].item;
+    for (var j = P.length - 2; j >= 0; j--) {
+      var u = P[j].item.unite(acc, { insert: false });
+      P[j].item.remove();
+      acc.remove();
+      acc = u;
+    }
+    this.partials = [];
+    VB._sweptDiag = { capsules: M - 1, rounds: ["incremental"] };
+    return acc;
+  };
+  SwathUnion.prototype.dispose = function () {
+    this.partials.forEach(function (p) { p.item.remove(); });
+    this.partials = [];
+  };
+
   // Closed loops of a path item as point lists (integer twips).
   //
   // PRIMARY sampler: by arclength — byte-identical behavior for every
@@ -191,8 +266,12 @@
    * one per boundary loop (outer boundaries and pocket holes alike),
    * each loop closed exactly. Fill claims are left 0 for the caller.
    */
-  function sweptOutline(pathPts, radius, fitTol) {
-    var region = sweptRegion(pathPts, radius);
+  function sweptOutline(pathPts, radius, fitTol, preRegion) {
+    // preRegion: a SwathUnion.finish() result — identical to
+    // sweptRegion's output by construction, already paid for during the
+    // drag. Everything downstream (repair ladder, hole filter, fitting)
+    // treats both origins the same.
+    var region = preRegion || sweptRegion(pathPts, radius);
     if (!region) return [];
     // A capsule chain is connected by construction, and every pen point
     // is covered by its capsules. If a pen point is NOT contained in the
@@ -626,6 +705,7 @@
   window.VB = window.VB || {};
   VB.paperScope = ensureScope;
   VB.sweptRegion = sweptRegion;
+  VB.SwathUnion = SwathUnion;
   VB.sweptOutline = sweptOutline;
   VB.paintUnion = paintUnion;
   VB.fillLoops = fillLoops; // exposed for diagnostics/tests
