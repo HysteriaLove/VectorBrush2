@@ -732,40 +732,25 @@
     if (tools.select.clearSelection) tools.select.clearSelection();
     pasteBump += 200;
     if (clipboard.kind === "shape") {
-      app.exec({
-        op: "paste",
-        clip: JSON.parse(JSON.stringify(clipboard.clip)),
-        m: [1, 0, 0, 1, pasteBump, pasteBump]
-      });
-      // pasted content lands selected: its bbox becomes a region the
-      // transform tool adopts (Flash pastes as a movable selection)
-      var bb = null;
-      clipboard.clip.edges.forEach(function (e) {
-        [[e.ax, e.ay], [e.bx, e.by]].concat(
-          e.cx === null ? [] : [[e.cx, e.cy]]).forEach(function (p) {
-          if (!bb) bb = { x0: p[0], y0: p[1], x1: p[0], y1: p[1] };
-          bb.x0 = Math.min(bb.x0, p[0]); bb.x1 = Math.max(bb.x1, p[0]);
-          bb.y0 = Math.min(bb.y0, p[1]); bb.y1 = Math.max(bb.y1, p[1]);
-        });
-      });
-      if (bb) {
-        var pad = 20, dx = pasteBump, dy = pasteBump;
-        tools.select.sel = {
-          fills: [], edgeKeys: [], text: null,
-          region: [
-            { x: bb.x0 + dx - pad, y: bb.y0 + dy - pad },
-            { x: bb.x1 + dx + pad, y: bb.y0 + dy - pad },
-            { x: bb.x1 + dx + pad, y: bb.y1 + dy + pad },
-            { x: bb.x0 + dx - pad, y: bb.y1 + dy + pad }
-          ]
-        };
-        selectTool("transform");
+      // the pasted clip becomes an UNCOMMITTED floating object: the
+      // document is untouched while the user places it; click-away
+      // lands ONE paste op at the final position. It is never merged
+      // and re-selected — a bbox re-selection would steal underlying
+      // content on the first drag (user bug report).
+      selectTool("transform");
+      if (!tools.transform.adoptClip(
+            JSON.parse(JSON.stringify(clipboard.clip)),
+            [1, 0, 0, 1, pasteBump, pasteBump])) {
+        setMsg("clipboard clip is empty");
+        return false;
       }
-      setMsg("pasted");
+      setMsg("pasted — drag to place, click away to commit");
       return true;
     }
     // text: one textCreate per part (a single part for app-authored
-    // blocks; imported multi-font blocks paste as sibling blocks)
+    // blocks; imported multi-font blocks paste as sibling blocks).
+    // Text blocks are objects — creating one carves nothing — so the
+    // new block lands and opens as a transform session for placing.
     var lastIndex = -1;
     clipboard.parts.forEach(function (part) {
       var op = JSON.parse(JSON.stringify(part));
@@ -776,9 +761,9 @@
     });
     if (lastIndex >= 0) {
       tools.select.sel = { fills: [], edgeKeys: [], region: null, text: lastIndex };
-      selectTool("select");
+      selectTool("transform"); // handoff adopts the block as a session
     }
-    setMsg("text pasted");
+    setMsg("text pasted — drag to place");
     return true;
   }
 

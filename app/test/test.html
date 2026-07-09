@@ -897,6 +897,60 @@
       VB.geom.fillAt(r2.doc, 6500, 2600) === 0 &&
       VB.geom.fillAt(r2.doc, 2500, 2100) === 1);
 
+    // paste-as-float: the pasted clip is an UNCOMMITTED transform
+    // float — the document is untouched while the user places it;
+    // click-away lands exactly ONE paste op at the final placement,
+    // and cancelling drops the float without journaling anything.
+    var fdoc = (await VB.replayJournal(ops0)).doc;
+    var beforeEdges = fdoc.edges.length;
+    var fproj = VB.wrapDoc(fdoc);
+    var journalF = [], toolF;
+    var appF = {
+      doc: fdoc,
+      view: { zoom: 1 },
+      record: function (op) { journalF.push(op); },
+      history: new VB.History(),
+      docChanged: function () { toolF.discard(); },
+      requestRender: function () {}, setMsg: function () {},
+      setCursor: function () {},
+      exec: function (op) {
+        appF.record(op);
+        VB.applyOp({ doc: fdoc, project: fproj, history: appF.history,
+                     sync: function () {} }, op);
+        appF.docChanged();
+      }
+    };
+    toolF = VB.FreeTransformTool(appF);
+    check("adoptClip floats without touching the doc",
+      toolF.adoptClip(clip, [1, 0, 0, 1, 4000, 500]) === true &&
+      fdoc.edges.length === beforeEdges &&
+      toolF.hasSession() && !!toolF.float,
+      fdoc.edges.length + " edges, session " + toolF.hasSession());
+    var fb = toolF.box;
+    var fcx = (fb.x0 + fb.x1) / 2 + 4000, fcy = (fb.y0 + fb.y1) / 2 + 500;
+    toolF.onDown({ x: fcx, y: fcy }, {});
+    toolF.onMove({ x: fcx + 500, y: fcy + 300 });
+    toolF.onUp({ x: fcx + 500, y: fcy + 300 });
+    check("float drag journals nothing, doc untouched",
+      journalF.length === 0 && fdoc.edges.length === beforeEdges,
+      journalF.length + " ops, " + fdoc.edges.length + " edges");
+    toolF.onDown({ x: 10800, y: 7800 }, {}); // click away commits
+    toolF.onUp({ x: 10800, y: 7800 });
+    check("click-away lands ONE paste op",
+      journalF.length === 1 && journalF[0].op === "paste",
+      JSON.stringify(journalF.map(function (o) { return o.op; })));
+    check("paste lands at final position, original intact",
+      VB.geom.fillAt(fdoc, 7000, 2900) === 1 &&
+      VB.geom.fillAt(fdoc, 2500, 2100) === 1,
+      VB.geom.fillAt(fdoc, 7000, 2900) + "/" + VB.geom.fillAt(fdoc, 2500, 2100));
+    var afterCommit = fdoc.edges.length;
+    toolF.adoptClip(clip, [1, 0, 0, 1, 4000, 500]);
+    toolF.undoPending(); // pops the seed gesture -> zero -> cancel
+    check("undo-to-zero cancels the paste outright",
+      journalF.length === 1 && fdoc.edges.length === afterCommit &&
+      !toolF.hasSession(),
+      journalF.length + " ops, session " + toolF.hasSession());
+
     // text copy: self-contained parts recreate the block in a FRESH doc
     var ttfC = VB.parseTTF(window.VBTTFFixture.bytes());
     var tdc = new VB.VBDocument();

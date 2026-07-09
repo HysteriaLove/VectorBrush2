@@ -186,9 +186,19 @@
     }
 
     /** Put a lifted clip back untouched: the lift was never journaled,
-     *  so restore the snapshot directly and record nothing. */
+     *  so restore the snapshot directly and record nothing. An EXTERNAL
+     *  clip (clipboard paste) never entered the document at all —
+     *  dropping the float cancels the paste outright. */
     function unlift() {
       if (!self.float) return;
+      if (self.float.external) {
+        self.float = null;
+        self.boxOps = [];
+        self.discard();
+        app.setMsg("paste cancelled");
+        app.requestRender();
+        return;
+      }
       self.float = null;
       self.boxOps = [];
       app.history.undo(app.doc);
@@ -205,6 +215,16 @@
       var fl = self.float;
       self.gestures = []; // before mutating: docChanged() discards us
       self.boxOps = [];
+      if (fl && fl.external) {
+        // an external clip (paste) lands NOW, as ONE registered op at
+        // its final placement — the document was untouched until here
+        var clipJSON = fl.clipJSON;
+        self.float = null;
+        self.discard();
+        app.exec({ op: "paste", clip: clipJSON, m: m });
+        app.setMsg("pasted");
+        return true;
+      }
       if (!fl || (isIdentity(m) && !boxOps.length)) { unlift(); return false; }
       self.float = null;
       if (fl.textBlock) {
@@ -279,6 +299,12 @@
       self.boxOps = [];
       if (self.float) unlift();
       self.discard();
+      if (it.external) {
+        // an uncommitted paste: dropping the float WAS the deletion —
+        // nothing ever entered the document, nothing to journal
+        app.requestRender();
+        return true;
+      }
       if (it.textIndex != null) {
         if (!app.doc.texts[it.textIndex]) return false;
         app.exec({ op: "textDelete", index: it.textIndex });
@@ -371,6 +397,56 @@
       // the content live instead of a hollow outline
       ensureLifted();
       app.requestRender();
+    };
+
+    /** Adopt an EXTERNAL clip (clipboard paste) as an UNCOMMITTED
+     *  floating object: every prior selection is dropped, the document
+     *  stays untouched while the user places the paste, and click-away
+     *  lands the whole session as ONE {op:"paste"} at the final
+     *  matrix. Cancelling (undo to zero, Escape, Delete) just drops
+     *  the float. seedM (optional) pre-places the float, e.g. the
+     *  10px paste offset. */
+    self.adoptClip = function (clipJSON, seedM) {
+      self.commitPending();
+      var clip = new VB.VBDocument();
+      clip.width = app.doc.width; clip.height = app.doc.height;
+      clip.fills = clipJSON.fills.map(function (f) {
+        return { type: "solid", color: { r: f.color.r, g: f.color.g,
+                                         b: f.color.b, a: f.color.a } };
+      });
+      clip.lines = clipJSON.lines.map(function (l) {
+        return { width: l.width, color: { r: l.color.r, g: l.color.g,
+                                          b: l.color.b, a: l.color.a } };
+      });
+      clip.edges = clipJSON.edges.map(function (e) {
+        return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by,
+                       e.fill0, e.fill1, e.line);
+      });
+      if (clip.edges.length === 0) { self.discard(); return false; }
+      self.gestures = seedM ? [seedM.slice()] : [];
+      self.base = [1, 0, 0, 1, 0, 0];
+      self.boxOps = [];
+      self.items = { external: true };
+      self.float = { doc: clip, paths: null, external: true,
+                     clipJSON: clipJSON };
+      var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      clip.edges.forEach(function (e) {
+        [[e.ax, e.ay], [e.bx, e.by]].concat(
+          e.cx === null ? [] : [[e.cx, e.cy]]).forEach(function (p) {
+          x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]);
+          y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]);
+        });
+      });
+      self.pristine = [
+        VB.edge(x0, y0, null, null, x1, y0, 0, 0, 0),
+        VB.edge(x1, y0, null, null, x1, y1, 0, 0, 0),
+        VB.edge(x1, y1, null, null, x0, y1, 0, 0, 0),
+        VB.edge(x0, y1, null, null, x0, y0, 0, 0, 0)
+      ];
+      self.box = bboxOf(self.pristine);
+      refreshGhosts();
+      app.requestRender();
+      return true;
     };
 
     // Handles live in PRISTINE space (ax/ay say which frame axes the
