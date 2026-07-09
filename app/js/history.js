@@ -106,6 +106,17 @@
       materials: JSON.parse(JSON.stringify(target.materials || [])),
       editTarget: JSON.parse(JSON.stringify(target.editTarget || null)),
       actors: (target.actors || []).map(snapshotActor),
+      // note items: fields are mutated in place by ops but content is
+      // copy-on-write (brainstorm.js contract) — shallow item copies
+      // share content by reference, so image data never re-serializes
+      notes: {
+        items: ((target.notes || {}).items || []).map(function (it) {
+          return {
+            id: it.id, kind: it.kind, x: it.x, y: it.y, w: it.w, h: it.h,
+            content: it.content
+          };
+        })
+      },
       scenes: target.scenes.map(function (sc) {
         return {
           name: sc.name,
@@ -131,6 +142,14 @@
     target.materials = JSON.parse(JSON.stringify(snap.materials || []));
     target.editTarget = JSON.parse(JSON.stringify(snap.editTarget || null));
     target.actors = (snap.actors || []).map(restoreActor);
+    target.notes = {
+      items: ((snap.notes || {}).items || []).map(function (it) {
+        return {
+          id: it.id, kind: it.kind, x: it.x, y: it.y, w: it.w, h: it.h,
+          content: it.content
+        };
+      })
+    };
     target.scenes = snap.scenes.map(function (sc) {
       return {
         name: sc.name,

@@ -28,8 +28,8 @@
   // DrawingSurface hosts — Roughs and Actors per the architecture);
   // the rest are stub workspaces their build-order steps mount into.
   var SECTIONS = [
-    { id: "brainstorm", label: "Brainstorm",
-      note: "Infinite canvas for references and NoteObjects — build-order step 7 (Architecture §6.1)." },
+    { id: "brainstorm", label: "Brainstorm", board: true,
+      note: "" },
     { id: "writing", label: "Writing",
       note: "Documents and dialogue Lines, the app-wide language backbone — step 5 (Architecture §6.2)." },
     { id: "storyboards", label: "Storyboards",
@@ -64,10 +64,16 @@
     for (var i = 0; i < tabs.length; i++) {
       tabs[i].classList.toggle("active", tabs[i].dataset.sec === sec.id);
     }
-    document.body.classList.toggle("ws-stub-mode", !sec.editor);
-    if (!sec.editor) {
+    document.body.classList.toggle("ws-stub-mode", !sec.editor && !sec.board);
+    document.body.classList.toggle("ws-board-mode", !!sec.board);
+    if (!sec.editor && !sec.board) {
       document.getElementById("ws-stub-title").textContent = sec.label;
       document.getElementById("ws-stub-note").textContent = sec.note;
+    }
+    if (sec.board && VB.BrainstormView) {
+      VB.BrainstormView.mount(document.getElementById("brainstorm-board"), app);
+    } else if (VB.BrainstormView) {
+      VB.BrainstormView.unmount();
     }
     // editor input (keyboard/tools) only while an editor section shows
     app.uiActive = !!sec.editor && overlay.style.display !== "flex";
@@ -312,6 +318,7 @@
   function showHome() {
     app.uiActive = false;
     app.unmountRenderer();
+    if (VB.BrainstormView) VB.BrainstormView.unmount();
     overlay.style.display = "flex";
     renderHome();
   }

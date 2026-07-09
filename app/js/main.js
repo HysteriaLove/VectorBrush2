@@ -191,6 +191,7 @@
     refreshActors(); // …and the actor library / edit mode
     syncEditCrumb();
     refreshTimeline();
+    if (VB.BrainstormView) VB.BrainstormView.refresh(); // undo/redo on the board
     app.debugPin = -1;
     app.debugHover = -1;
     refreshDebugPanel();

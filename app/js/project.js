@@ -49,6 +49,9 @@
     // cells y2kvector documents. Rides the journal; not yet part of the
     // .y2kvector project-file body.
     this.actors = [];
+    // The Brainstorm board (brainstorm.js): placeable note items,
+    // z-order = array order. Rides the journal.
+    this.notes = { items: [] };
     // Actor edit mode (Flash's symbol-edit): when set, scene()/stage()/
     // activeCell() resolve to the targeted actor cell, so every tool,
     // renderer, and journaled art op follows. Set ONLY through the

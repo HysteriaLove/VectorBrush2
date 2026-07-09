@@ -49,6 +49,7 @@
 <script src="../js/project.js"></script>
 <script src="../js/actors.js"></script>
 <script src="../js/thumbs.js"></script>
+<script src="../js/brainstorm.js"></script>
 <script src="../js/text.js"></script>
 <script src="../js/debug.js"></script>
 <script src="../js/pencil.js"></script>
@@ -3013,6 +3014,64 @@
   } catch (err) {
     fail++;
     log("  VISUAL EXCEPTION: " + (err && err.stack || err), "fail");
+  }
+
+  // ============================ brainstorm board =============================
+  // Thin UI, real model: note items are journaled ops with caller ids;
+  // z-order is array order (move brings to front); content is
+  // copy-on-write so history shares image data by reference.
+  log("");
+  log("brainstorm:");
+  try {
+    var bse = new VB.Session({ width: 11000, height: 8000 });
+    var IMG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAA" +
+              "fFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    bse.exec({ op: "noteAdd", id: "n1", kind: "text",
+               x: 100, y: 80, w: 180, h: 120, content: "hero has a hat" });
+    bse.exec({ op: "noteAdd", id: "n2", kind: "image",
+               x: 400, y: 60, w: 320, h: 240, content: IMG });
+    bse.exec({ op: "noteAdd", id: "n3", kind: "sketch",
+               x: 150, y: 300, w: 240, h: 160, content: { strokes: [] } });
+    check("notes land on the board",
+      bse.project.notes.items.length === 3 &&
+      VB.noteById(bse.project, "n2").item.content === IMG);
+    bse.exec({ op: "noteEdit", id: "n1", content: "hero has TWO hats" });
+    bse.exec({ op: "noteInk", id: "n3", stroke: {
+      color: "#222", width: 2,
+      pts: [{ x: 10, y: 10 }, { x: 120, y: 60 }, { x: 200, y: 40 }] } });
+    bse.exec({ op: "noteInk", id: "n3", stroke: {
+      color: "#222", width: 2, pts: [{ x: 30, y: 100 }, { x: 90, y: 120 }] } });
+    bse.exec({ op: "noteMove", id: "n1", x: 500, y: 420 });
+    bse.exec({ op: "noteResize", id: "n2", w: 200, h: 150 });
+    var bItems = bse.project.notes.items;
+    check("edits, ink, move-to-front, and resize apply",
+      VB.noteById(bse.project, "n1").item.content === "hero has TWO hats" &&
+      VB.noteById(bse.project, "n3").item.content.strokes.length === 2 &&
+      bItems[bItems.length - 1].id === "n1" &&
+      VB.noteById(bse.project, "n1").item.x === 500 &&
+      VB.noteById(bse.project, "n2").item.w === 200,
+      bItems.map(function (i) { return i.id; }).join(","));
+
+    var bRep = await VB.replayJournal(JSON.parse(JSON.stringify(bse.journal)));
+    check("the board replays byte-exact",
+      JSON.stringify(bRep.project.notes) === JSON.stringify(bse.project.notes));
+
+    var inkBefore = VB.noteById(bse.project, "n3").item.content.strokes.length;
+    bse.exec({ op: "noteInk", id: "n3", stroke: {
+      color: "#222", width: 2, pts: [{ x: 1, y: 1 }, { x: 2, y: 2 }] } });
+    bse.history.undo();
+    check("undo restores the pre-ink stroke list (copy-on-write)",
+      VB.noteById(bse.project, "n3").item.content.strokes.length === inkBefore);
+    bse.exec({ op: "noteRemove", id: "n2" });
+    check("noteRemove drops the item",
+      bse.project.notes.items.length === 2 && !VB.noteById(bse.project, "n2"));
+    bse.history.undo();
+    check("undo restores the removed image note",
+      VB.noteById(bse.project, "n2") &&
+      VB.noteById(bse.project, "n2").item.content === IMG);
+  } catch (err) {
+    fail++;
+    log("  BRAINSTORM EXCEPTION: " + (err && err.stack || err), "fail");
   }
 
   // ============================ frames (step 3) ==============================

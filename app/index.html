@@ -328,6 +328,69 @@
   #ws-stub-title { color: #6cf; margin-bottom: 8px; }
   #ws-stub-note { color: var(--text-dim); max-width: 480px; line-height: 1.6; }
 
+  /* Brainstorm board (brainstorm.js) — infinite pannable note board */
+  #brainstorm-board { display: none; }
+  body.ws-board-mode #propbar,
+  body.ws-board-mode #timebar,
+  body.ws-board-mode #middle { display: none; }
+  body.ws-board-mode #brainstorm-board {
+    display: flex; flex: 1; flex-direction: column; min-height: 0;
+  }
+  #bb-tools {
+    flex: none; height: 30px;
+    display: flex; align-items: center; gap: 6px;
+    padding: 0 10px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--panel-edge);
+    font-size: 12px; color: var(--text);
+  }
+  #bb-tools button {
+    background: #2b2d31; color: var(--text);
+    border: 1px solid var(--panel-edge); border-radius: 3px;
+    height: 22px; padding: 0 8px; cursor: pointer;
+  }
+  #bb-tools button:hover { background: #3a3d42; }
+  #bb-tools button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #bb-hint { color: var(--text-dim); font-size: 11px; margin-left: auto; }
+  #bb-canvas {
+    flex: 1; position: relative; overflow: hidden;
+    background: #26282c;
+    background-image: radial-gradient(#33363b 1px, transparent 1px);
+    background-size: 24px 24px;
+    touch-action: none; user-select: none;
+  }
+  #bb-layer { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+  .bbitem {
+    position: absolute;
+    background: #fff9d0; color: #222;
+    border: 1px solid #00000040; border-radius: 3px;
+    box-shadow: 0 2px 8px #00000050;
+  }
+  .bbitem.bb-image { background: #1b1d20; padding: 0; }
+  .bbitem.bb-image img { width: 100%; height: 100%; object-fit: fill; display: block; }
+  .bbitem.bb-sketch { background: #fffef2; }
+  .bbitem.bb-sketch canvas { width: 100%; height: 100%; display: block; }
+  .bbtext {
+    width: 100%; height: 100%; padding: 8px;
+    font: 13px/1.4 system-ui, sans-serif;
+    overflow: hidden; white-space: pre-wrap; word-break: break-word;
+    outline: none; cursor: default;
+  }
+  .bbtext[contenteditable="true"] { cursor: text; background: #fffce0; }
+  .bbdel {
+    position: absolute; top: -9px; right: -9px; width: 18px; height: 18px;
+    display: none; align-items: center; justify-content: center;
+    background: #c0392b; color: #fff; border-radius: 50%;
+    font-size: 10px; cursor: pointer;
+  }
+  .bbresize {
+    position: absolute; right: -6px; bottom: -6px; width: 12px; height: 12px;
+    display: none;
+    background: #3d5a80; border: 1px solid #fff8; border-radius: 2px;
+    cursor: nwse-resize;
+  }
+  .bbitem:hover .bbdel, .bbitem:hover .bbresize { display: flex; }
+
   /* timeline rail (Sequence/Roughs) — frame columns of the active layer */
   #timebar {
     flex: none; height: 30px;
@@ -563,6 +626,8 @@
     </div>
   </div>
 
+  <div id="brainstorm-board"></div>
+
   <div id="middle">
     <div id="tools">
       <button data-tool="select" class="active" title="Selection tool (V)">➤</button>
@@ -711,6 +776,7 @@
   <script src="js/project.js"></script>
   <script src="js/actors.js"></script>
   <script src="js/thumbs.js"></script>
+  <script src="js/brainstorm.js"></script>
   <script src="js/text.js"></script>
   <script src="js/fonts-builtin.js"></script>
   <script src="js/session.js"></script>
