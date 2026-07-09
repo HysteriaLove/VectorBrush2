@@ -18,9 +18,11 @@
   }
 
   // A whole project: the active scene's layers, bottom to top
-  // (layers[0] is the TOP layer, JSFL's convention).
-  function renderProject(ctx, project, view) {
-    setupStage(ctx, project, view);
+  // (layers[0] is the TOP layer, JSFL's convention). opts.transparent
+  // skips the backdrop/stage paint — used when the Pixi backend draws
+  // those beneath this canvas (docs/PixiPort.md two-canvas stacking).
+  function renderProject(ctx, project, view, opts) {
+    setupStage(ctx, project, view, opts && opts.transparent);
     var layers = project.scene().layers;
     for (var i = layers.length - 1; i >= 0; i--) {
       if (!layers[i].visible) continue;
@@ -28,7 +30,7 @@
     }
   }
 
-  function setupStage(ctx, stage, view) {
+  function setupStage(ctx, stage, view, transparent) {
     var canvas = ctx.canvas;
     var dpr = view.dpr || 1;
     var s = view.zoom * dpr / VB.TWIPS; // screen device px per twip
@@ -36,19 +38,23 @@
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Work-area backdrop.
-    ctx.fillStyle = "#3a3d42";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (!transparent) {
+      // Work-area backdrop.
+      ctx.fillStyle = "#3a3d42";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
 
     ctx.setTransform(s, 0, 0, s, view.panX * dpr, view.panY * dpr);
 
-    // Stage.
-    ctx.save();
-    ctx.shadowColor = "rgba(0,0,0,0.45)";
-    ctx.shadowBlur = 18 / s;
-    ctx.fillStyle = VB.colorToCSS(stage.background);
-    ctx.fillRect(0, 0, stage.width, stage.height);
-    ctx.restore();
+    if (!transparent) {
+      // Stage.
+      ctx.save();
+      ctx.shadowColor = "rgba(0,0,0,0.45)";
+      ctx.shadowBlur = 18 / s;
+      ctx.fillStyle = VB.colorToCSS(stage.background);
+      ctx.fillRect(0, 0, stage.width, stage.height);
+      ctx.restore();
+    }
   }
 
   function drawDocContent(ctx, doc, view) {

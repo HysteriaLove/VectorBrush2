@@ -100,13 +100,36 @@
 
   // ---- rendering loop ------------------------------------------------------
 
+  // ---- Pixi backend (docs/PixiPort.md, opt-in) ---------------------------------
+  // Stage 1: Pixi draws backdrop + stage background on a canvas UNDER
+  // #stage-canvas; document content, overlays and debug stay on the
+  // Canvas2D overlay (transparent mode). Falls back silently when
+  // WebGL/Pixi is unavailable.
+  var pixiSurface = null;
+  var pixiWanted =
+    /(^|[?&#])pixi(\b|=|$)/.test(location.search + location.hash) ||
+    localStorage.getItem("vbRenderer") === "pixi";
+  if (pixiWanted && VB.createPixiSurface) {
+    VB.createPixiSurface(canvas.parentElement, canvas).then(function (s) {
+      pixiSurface = s;
+      setMsg(s ? "pixi backend active (stage 1: backdrop/stage)"
+               : "pixi backend unavailable — Canvas2D");
+      requestRender();
+    });
+  }
+
   var renderQueued = false;
   function requestRender() {
     if (renderQueued) return;
     renderQueued = true;
     requestAnimationFrame(function () {
       renderQueued = false;
-      VB.renderProject(ctx, app.project, app.view);
+      if (pixiSurface) {
+        VB.renderProjectPixi(pixiSurface, app.project, app.view);
+        VB.renderProject(ctx, app.project, app.view, { transparent: true });
+      } else {
+        VB.renderProject(ctx, app.project, app.view);
+      }
       var tool = tools[app.tool];
       // a pending transform session stays visible while a sibling
       // selection tool is active
@@ -243,6 +266,7 @@
     app.view.dpr = dpr;
     canvas.width = Math.max(1, Math.round(rect.width * dpr));
     canvas.height = Math.max(1, Math.round(rect.height * dpr));
+    if (pixiSurface) pixiSurface.resize();
     requestRender();
   }
   new ResizeObserver(resizeCanvas).observe(canvas.parentElement);
