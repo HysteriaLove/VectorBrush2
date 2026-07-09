@@ -124,51 +124,18 @@
              !survivorKeys.has(edgeKey(e.bx, e.by, e.cx, e.cy, e.ax, e.ay));
     });
 
-    // Everything this op changed lies within the fence's neighborhood:
-    // covered deletions make no crossings, noding split old edges ON
-    // fence curves, span alignment split at fence endpoints. Scoping
-    // the planarity repair there keeps commits O(op), not O(document).
-    var scope = null;
-    fence.forEach(function (e) {
-      var bb = VB.geom.edgeBBox(e);
-      if (!scope) {
-        scope = { xmin: bb.xmin, xmax: bb.xmax, ymin: bb.ymin, ymax: bb.ymax };
-      } else {
-        if (bb.xmin < scope.xmin) scope.xmin = bb.xmin;
-        if (bb.xmax > scope.xmax) scope.xmax = bb.xmax;
-        if (bb.ymin < scope.ymin) scope.ymin = bb.ymin;
-        if (bb.ymax > scope.ymax) scope.ymax = bb.ymax;
-      }
-    });
-    if (scope) {
-      scope.xmin -= 300; scope.xmax += 300;
-      scope.ymin -= 300; scope.ymax += 300;
-    }
-
     // Rounding can turn grazing contacts into real crossings; the face
     // walk needs a properly noded map.
-    VB.repairPlanar(doc, undefined, scope);
+    VB.repairPlanar(doc);
 
     // Contract micro-edges. Noding two near-tangent hugging fences (a
-    // stroke re-tracing existing paint) shreds them into micro-fragments
+    // stroke re-tracing existing paint) shreds them into 1-3tw fragments
     // whose departure angles are integer-quantization noise; the angular
     // sort misroutes at such nodes and the walk turns closed pocket
     // boundaries into bridge trees (the pocket-flood class). Welding a
     // micro-edge's endpoints into one node removes the noise without
-    // changing anything visible. Welds are also parity-safe where
-    // dropping a crossing is not: a wobble lens collapses to a point,
-    // so no region swaps sides.
-    //
-    // 10tw (0.5px): a region DRAG lands content on surviving copies of
-    // its own curves, and translated-self crossings are tangential BY
-    // CONSTRUCTION (they occur where the curve parallels the drag
-    // vector). User log 25's small drags left 8tw-offset grazes whose
-    // stairs (121 fragments of 5-10tw) sailed over the old 5tw
-    // threshold; the walk bridged the moved fill's boundary and the
-    // mask dissolved the entire moved region. 10 is the corpus optimum:
-    // 5 left log14's op#111/#137 residuals, 8 shifted them, 12 cleared
-    // log14 but welded away two small features in log11-heavy.
-    var MICRO = 10;
+    // changing anything visible (<=3tw).
+    var MICRO = 5;
     for (var pass = 0; pass < 4; pass++) {
       var weld = new Map(); // "x,y" -> "x,y" (union-find style)
       function resolve(k) {
@@ -191,28 +158,12 @@
         contracted++;
       });
       if (contracted === 0) break;
-      // Welds can move nodes OUTSIDE the fence neighborhood (stray
-      // pre-existing micro-fragments) — grow the repair scope to cover
-      // every endpoint a weld actually touched.
-      function scopePoint(x, y) {
-        if (!scope) return;
-        if (x - 300 < scope.xmin) scope.xmin = x - 300;
-        if (x + 300 > scope.xmax) scope.xmax = x + 300;
-        if (y - 300 < scope.ymin) scope.ymin = y - 300;
-        if (y + 300 > scope.ymax) scope.ymax = y + 300;
-      }
       doc.edges.forEach(function (e) {
         var ka = resolve(e.ax + "," + e.ay);
         var pa = ka.split(",");
-        if (+pa[0] !== e.ax || +pa[1] !== e.ay) {
-          scopePoint(e.ax, e.ay); scopePoint(+pa[0], +pa[1]);
-        }
         e.ax = +pa[0]; e.ay = +pa[1];
         var kb = resolve(e.bx + "," + e.by);
         var pb = kb.split(",");
-        if (+pb[0] !== e.bx || +pb[1] !== e.by) {
-          scopePoint(e.bx, e.by); scopePoint(+pb[0], +pb[1]);
-        }
         e.bx = +pb[0]; e.by = +pb[1];
       });
       // Welding collapses chords but leaves controls behind: a quad whose
@@ -228,7 +179,7 @@
         if (e.cx === null) return false; // zero-length line
         return Math.hypot(e.cx - e.ax, e.cy - e.ay) > MICRO * 2;
       });
-      VB.repairPlanar(doc, undefined, scope);
+      VB.repairPlanar(doc);
     }
 
     var built = VB.buildFaces(doc);
@@ -239,15 +190,6 @@
     // twip scale — and one leaked probe misfills (or empties) an entire
     // face. Try the longest edges at several params and nudge widths,
     // and accept only a probe the face itself contains.
-    //
-    // DEEP nudges first: the probe is verified against THIS map, but
-    // outside-mask faces are then classified with fillAt(preOp) — and
-    // splitting/welding drifts boundary geometry a few twips from the
-    // pre-op original. A probe hugging the post-op boundary at 1-2.5tw
-    // can sit on the WRONG side of the pre-op curve and misfill the
-    // whole face (the log-23 pocket flood: a white pocket 15px from the
-    // stroke stamped with the neighbor's paint). Deep probes clear the
-    // drift; slivers still fall through to the fine nudges.
     function faceProbe(f) {
       var cycles = [f.outer].concat(f.holes);
       function contains(x, y) {
@@ -266,20 +208,7 @@
         return l2 - l1;
       });
       var params = [0.5, 0.3, 0.7];
-      // Deep nudges only where they can fit: 2*area/perimeter estimates
-      // the face's thickness, and a nudge over half of it is doomed on
-      // ribbon faces (stroke outlines - the common case), which would
-      // pay 3 failed containment walks per candidate before the fine
-      // nudges land. Thick faces keep the full deep-first ladder.
-      var perim = 0;
-      for (var pi0 = 0; pi0 < f.outer.length; pi0++) {
-        var pe = doc.edges[f.outer[pi0].edge];
-        perim += Math.hypot(pe.bx - pe.ax, pe.by - pe.ay);
-      }
-      var thick = perim > 0 ? 2 * Math.abs(f.area) / perim : 0;
-      var nudges = [60, 25, 8, 2.5, 1].filter(function (n) {
-        return n <= 2.5 || n <= thick / 2;
-      });
+      var nudges = [1, 2.5];
       for (var oi = 0; oi < order.length && oi < 5; oi++) {
         var h = order[oi];
         var e = doc.edges[h.edge];
@@ -301,26 +230,6 @@
       return VB.probeForCycle(doc.edges, f.outer); // last resort
     }
 
-    // Pre-op fill queries walk only the queried fill's own boundary:
-    // one boundary-list pass here replaces a whole-document scan per
-    // face stamp (there is one query per outside-mask face).
-    var preBoundary = [null];
-    for (var pf = 1; pf <= preOp.fills.length; pf++) preBoundary.push([]);
-    for (var pei = 0; pei < preOp.edges.length; pei++) {
-      var pe2 = preOp.edges[pei];
-      if (pe2.fill0 !== pe2.fill1) {
-        if (pe2.fill0 > 0) preBoundary[pe2.fill0].push(pe2);
-        if (pe2.fill1 > 0) preBoundary[pe2.fill1].push(pe2);
-      }
-    }
-    function preOpFillAt(x, y) {
-      for (var qf = preOp.fills.length; qf >= 1; qf--) {
-        if (preBoundary[qf].length &&
-            VB.geom.fillParity(preBoundary[qf], qf, x, y)) return qf;
-      }
-      return 0;
-    }
-
     // One decision per face.
     var diag = [];
     VB._maskDiag = diag;
@@ -328,7 +237,7 @@
       var probe = faceProbe(f);
       var inMask = insideMask(probe.x, probe.y);
       var stamp = inMask ? stampFor(probe.x, probe.y)
-                         : preOpFillAt(probe.x, probe.y);
+                         : VB.geom.fillAt(preOp, probe.x, probe.y);
       diag.push({
         probe: { x: Math.round(probe.x), y: Math.round(probe.y) },
         area: Math.round(f.area), inMask: inMask, stamp: stamp,

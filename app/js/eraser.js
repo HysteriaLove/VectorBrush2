@@ -63,9 +63,8 @@
     var windingLoops = fitted.map(function (e) {
       return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, 0, 0, 0);
     });
-    var sweptOracle = VB.geom.windingOracle(windingLoops);
     function insideSwept(x, y) {
-      return sweptOracle.at(x, y) !== 0;
+      return VB.geom.windingNumber(windingLoops, x, y) !== 0;
     }
 
     // Ground truth for faces outside the swath: the pre-op document is
