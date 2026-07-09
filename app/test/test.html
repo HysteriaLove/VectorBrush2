@@ -3075,6 +3075,25 @@
     fse.exec({ op: "frameRemove", layer: 0, index: 0 });
     check("a layer never goes frameless",
       fse.project.scene().layers[0].frames.length === 1);
+
+    fse.exec({ op: "fpsSet", fps: 12 });
+    var fRep2 = await VB.replayJournal(JSON.parse(JSON.stringify(fse.journal)));
+    check("fpsSet journals the playback rate",
+      fse.project.fps === 12 && fRep2.project.fps === 12,
+      fse.project.fps + " / " + fRep2.project.fps);
+
+    // frame structure is untouchable from inside an actor cell
+    fse.exec({ op: "actorAdd", id: "fa1", poseId: "fp1" });
+    fse.exec({ op: "editTargetSet", target: { actor: "fa1", pose: "fp1" } });
+    var framesBefore = fse.project.scenes[0].layers.map(function (l) {
+      return l.frames.length;
+    }).join(",");
+    fse.exec({ op: "frameAdd", layer: 0 });
+    check("frameAdd is a no-op inside actor edit mode",
+      fse.project.scenes[0].layers.map(function (l) {
+        return l.frames.length;
+      }).join(",") === framesBefore);
+    fse.exec({ op: "editTargetClear" });
   } catch (err) {
     fail++;
     log("  FRAMES EXCEPTION: " + (err && err.stack || err), "fail");

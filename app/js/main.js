@@ -141,6 +141,22 @@
       } else {
         VB.renderProject(ctx, app.project, app.view);
       }
+      // onion skin: neighbor-frame ghosts of the active layer (roughs
+      // workflow); skipped during playback and inside actor cells
+      if (app.onion && !playback.playing && !app.project.editTarget) {
+        var oLayer = app.project.activeLayer();
+        var oFrame = app.project.cur.frame || 0;
+        ctx.save();
+        if (oFrame > 0 && oLayer.frames[oFrame - 1]) {
+          ctx.globalAlpha = 0.3;
+          VB.renderDocContent(ctx, oLayer.frames[oFrame - 1], app.view);
+        }
+        if (oLayer.frames[oFrame + 1]) {
+          ctx.globalAlpha = 0.18;
+          VB.renderDocContent(ctx, oLayer.frames[oFrame + 1], app.view);
+        }
+        ctx.restore();
+      }
       var tool = tools[app.tool];
       // a pending transform session stays visible while a sibling
       // selection tool is active
@@ -174,6 +190,7 @@
     refreshLayers(); // undo/redo/load can change the layer structure
     refreshActors(); // …and the actor library / edit mode
     syncEditCrumb();
+    refreshTimeline();
     app.debugPin = -1;
     app.debugHover = -1;
     refreshDebugPanel();
@@ -685,6 +702,27 @@
         refreshDebugEdge();
         requestRender();
       }
+      return;
+    }
+    // timeline: Enter plays/stops, , / . step frames, F7 adds a frame
+    if (ev.key === "Enter" && !ev.ctrlKey && !ev.altKey) {
+      if (playback.playing) stopPlay(); else startPlay();
+      return;
+    }
+    if (ev.key === "." && !ev.ctrlKey) {
+      stopPlay();
+      app.exec({ op: "frameSelect", index: app.project.cur.frame + 1 });
+      return;
+    }
+    if (ev.key === "," && !ev.ctrlKey) {
+      stopPlay();
+      app.exec({ op: "frameSelect", index: app.project.cur.frame - 1 });
+      return;
+    }
+    if (ev.key === "F7") {
+      ev.preventDefault();
+      stopPlay();
+      app.exec({ op: "frameAdd", layer: app.project.cur.layer });
       return;
     }
     if (ev.ctrlKey || ev.altKey) return;
@@ -1857,6 +1895,117 @@
     return returnTool === "lasso" ? "lasso" : "marquee";
   };
 
+  // ---- timeline rail + playback + onion (Sequence/Roughs beat 2) ----------------
+  // The rail shows the active layer's sub-timeline as columns (holds
+  // ghosted past the layer's own frames). Playback advances the view
+  // frame directly — no journal spam — and STOP pins the landing frame
+  // with one frameSelect op so replay agrees with what the user sees.
+
+  var playback = { playing: false, raf: 0, last: 0, acc: 0 };
+
+  function refreshTimeline() {
+    var project = app.project;
+    var total = project.frameCount();
+    var cur = project.cur.frame || 0;
+    var layer = project.activeLayer();
+    document.getElementById("tl-counter").textContent =
+      (cur + 1) + " / " + total;
+    var fpsInput = document.getElementById("tl-fps");
+    if (document.activeElement !== fpsInput) {
+      fpsInput.value = String(project.fps || 24);
+    }
+    document.getElementById("tl-onion").classList.toggle("active", !!app.onion);
+    var strip = document.getElementById("tl-frames");
+    strip.innerHTML = "";
+    for (var i = 0; i < total; i++) {
+      var cell = document.createElement("div");
+      var own = i < layer.frames.length;
+      cell.className = "tlcell" +
+        (i === cur ? " cur" : "") +
+        (!own ? " hold" : (layer.frames[i].edges.length ||
+                           (layer.frames[i].texts || []).length ? " filled" : ""));
+      cell.title = "Frame " + (i + 1) + (own ? "" : " (hold)");
+      (function (idx) {
+        cell.addEventListener("pointerdown", function () {
+          stopPlay();
+          if (idx !== app.project.cur.frame) {
+            app.exec({ op: "frameSelect", index: idx });
+          }
+        });
+      })(i);
+      strip.appendChild(cell);
+    }
+  }
+
+  function startPlay() {
+    if (playback.playing || app.project.editTarget) return;
+    if (app.project.frameCount() <= 1) { setMsg("only one frame — add frames (＋ / F7)"); return; }
+    flushSelections();
+    playback.playing = true;
+    playback.last = performance.now();
+    playback.acc = 0;
+    app.session.clock.playing = true;
+    var btn = document.getElementById("tl-play");
+    btn.textContent = "⏸";
+    btn.classList.add("active");
+    function tick(now) {
+      if (!playback.playing) return;
+      playback.acc += now - playback.last;
+      playback.last = now;
+      var msPerFrame = 1000 / (app.project.fps || 24);
+      var advanced = false;
+      while (playback.acc >= msPerFrame) {
+        playback.acc -= msPerFrame;
+        app.project.cur.frame =
+          (app.project.cur.frame + 1) % app.project.frameCount();
+        advanced = true;
+      }
+      if (advanced) {
+        app.session.clock.frame = app.project.cur.frame;
+        requestRender();
+        refreshTimeline();
+      }
+      playback.raf = requestAnimationFrame(tick);
+    }
+    playback.raf = requestAnimationFrame(tick);
+  }
+
+  function stopPlay() {
+    if (!playback.playing) return;
+    playback.playing = false;
+    cancelAnimationFrame(playback.raf);
+    app.session.clock.playing = false;
+    var btn = document.getElementById("tl-play");
+    btn.textContent = "▶";
+    btn.classList.remove("active");
+    // pin the landing frame in the journal so replay agrees
+    app.exec({ op: "frameSelect", index: app.project.cur.frame });
+  }
+
+  document.getElementById("tl-play").addEventListener("click", function () {
+    if (playback.playing) stopPlay(); else startPlay();
+  });
+  document.getElementById("tl-add").addEventListener("click", function () {
+    stopPlay();
+    app.exec({ op: "frameAdd", layer: app.project.cur.layer });
+  });
+  document.getElementById("tl-del").addEventListener("click", function () {
+    stopPlay();
+    app.exec({ op: "frameRemove",
+               layer: app.project.cur.layer, index: app.project.cur.frame });
+  });
+  document.getElementById("tl-onion").addEventListener("click", function () {
+    app.onion = !app.onion;
+    refreshTimeline();
+    requestRender();
+  });
+  document.getElementById("tl-fps").addEventListener("change", function () {
+    var fps = parseInt(this.value, 10);
+    if (isFinite(fps)) app.exec({ op: "fpsSet", fps: fps });
+  });
+  // any canvas edit gesture stops playback first (capture phase)
+  canvas.addEventListener("pointerdown", function () { stopPlay(); }, true);
+
   // ---- Actors panel (actors.js; Architecture §6.6, step-2 beat 2) --------------
   // The library lists actors and their poses; clicking a pose enters the
   // journaled symbol-edit mode (editTargetSet) — the stage, the tools,
@@ -1978,7 +2127,8 @@
     document.getElementById("editcrumb").classList.toggle("hidden", !res);
     if (res) document.getElementById("crumb-label").textContent = res.label;
     ["btn-layer-add", "btn-layer-del", "btn-layer-up", "btn-layer-down",
-     "btn-scene-add", "scene-select"].forEach(function (id) {
+     "btn-scene-add", "scene-select",
+     "tl-play", "tl-add", "tl-del"].forEach(function (id) {
       document.getElementById(id).disabled = !!res;
     });
   }

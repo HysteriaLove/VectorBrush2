@@ -283,6 +283,37 @@
   }
   #text-opts .txtstyle.active { background: var(--accent); border-color: var(--accent); color: #fff; }
   #text-opts input[type=number] { width: 52px; }
+  /* timeline rail (Sequence/Roughs) — frame columns of the active layer */
+  #timebar {
+    flex: none; height: 30px;
+    display: flex; align-items: center; gap: 6px;
+    padding: 0 10px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--panel-edge);
+    font-size: 12px; color: var(--text);
+    user-select: none;
+  }
+  #timebar button {
+    background: #2b2d31; color: var(--text);
+    border: 1px solid var(--panel-edge); border-radius: 3px;
+    height: 22px; min-width: 24px; cursor: pointer; padding: 0 4px;
+  }
+  #timebar button:hover { background: #3a3d42; }
+  #timebar button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #tl-counter { color: var(--text-dim); min-width: 52px; text-align: center; }
+  #tl-frames {
+    flex: 1; display: flex; align-items: center; gap: 1px;
+    overflow-x: auto; height: 100%;
+  }
+  .tlcell {
+    flex: none; width: 13px; height: 18px;
+    background: #2b2d31; border: 1px solid var(--panel-edge);
+    border-radius: 2px; cursor: pointer;
+  }
+  .tlcell.filled { background: #45484e; }
+  .tlcell.hold { opacity: 0.45; }
+  .tlcell.cur { border-color: var(--accent); background: var(--accent); }
+
   #ctxmenu {
     position: absolute; z-index: 20; min-width: 180px;
     background: var(--panel); border: 1px solid var(--panel-edge);
@@ -459,6 +490,19 @@
     <label class="ctl" title="Selection rotation (degrees) — type 0 to snap upright">
       ⟳<input type="number" id="sel-rotation" value="0" step="1" style="width:56px" disabled>°
     </label>
+  </div>
+
+  <div id="timebar">
+    <button id="tl-play" title="Play / stop (Enter)">▶</button>
+    <button id="tl-add" title="Add a blank frame to the active layer (F7)">＋</button>
+    <button id="tl-del" title="Remove the current frame from the active layer">－</button>
+    <button id="tl-onion" title="Onion skin (previous/next frame ghosts)">🧅</button>
+    <label class="ctl" title="Frames per second">
+      <input type="number" id="tl-fps" value="24" min="1" max="120" step="1"
+             style="width:44px"> fps
+    </label>
+    <span id="tl-counter">1 / 1</span>
+    <div id="tl-frames"></div>
   </div>
 
   <div id="middle">

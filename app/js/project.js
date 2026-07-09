@@ -35,6 +35,7 @@
   function Project(width, height) {
     this.width = width || 550 * 20;
     this.height = height || 400 * 20;
+    this.fps = 24; // playback rate (reference default); journaled via fpsSet
     this.background = { r: 255, g: 255, b: 255, a: 255 };
     this.scenes = [new Scene("Scene 1", this.newCell())];
     this.cur = { scene: 0, layer: 0, frame: 0 };
@@ -176,6 +177,7 @@
   /** Appends a blank frame cell to a layer and moves the playhead to
    *  it. Shorter layers keep holding their last frame. */
   Project.prototype.addFrame = function (layerIndex) {
+    if (this.editTarget) return this.cur.frame; // actor cells have no timeline yet
     var layers = this.scene().layers;
     var l = layers[Math.min(layerIndex || 0, layers.length - 1)];
     l.frames.push(this.newCell());
@@ -183,6 +185,7 @@
     return this.cur.frame;
   };
   Project.prototype.removeFrame = function (layerIndex, index) {
+    if (this.editTarget) return false;
     var layers = this.scene().layers;
     var l = layers[Math.min(layerIndex || 0, layers.length - 1)];
     if (l.frames.length <= 1) return false; // a layer never goes frameless

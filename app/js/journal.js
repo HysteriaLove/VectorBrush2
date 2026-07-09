@@ -126,6 +126,9 @@
     c.project.selectFrame(op.index);
     c.sync();
   });
+  defineOp("fpsSet", function (c, op) {
+    c.project.fps = Math.max(1, Math.min(120, op.fps | 0)) || 24;
+  });
   defineOp("pencil", function (c, op) {
     c.history.push(c.project);
     VB.pencilCommit(c.doc, op.points, op.style,

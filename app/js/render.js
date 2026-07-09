@@ -239,6 +239,7 @@
 
   window.VB = window.VB || {};
   VB.render = render;
+  VB.renderDocContent = drawDocContent; // transparent pass (onion ghosts)
   VB.renderProject = renderProject;
   VB.applyViewTransform = applyViewTransform;
   VB.paintFill = paintFill; // (ctx, doc, fillIdx, style, chains) — the

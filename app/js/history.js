@@ -99,6 +99,7 @@
     return {
       project: true,
       width: target.width, height: target.height,
+      fps: target.fps || 24,
       background: JSON.parse(JSON.stringify(target.background)),
       cur: { scene: target.cur.scene, layer: target.cur.layer,
              frame: target.cur.frame || 0 },
@@ -123,6 +124,7 @@
     if (!snap.project) { restoreDoc(target, snap); return; }
     target.width = snap.width;
     target.height = snap.height;
+    target.fps = snap.fps || 24;
     target.background = snap.background;
     target.cur = { scene: snap.cur.scene, layer: snap.cur.layer,
                    frame: snap.cur.frame || 0 };
