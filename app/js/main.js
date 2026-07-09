@@ -547,6 +547,8 @@
   }
   document.getElementById("btn-undo").addEventListener("click", doUndo);
   document.getElementById("btn-redo").addEventListener("click", doRedo);
+  app.doUndo = doUndo; // board workspaces drive undo through the app
+  app.doRedo = doRedo;
 
   // ---- zoom / pan / pointer routing ------------------------------------------
 

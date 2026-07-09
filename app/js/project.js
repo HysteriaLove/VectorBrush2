@@ -113,11 +113,30 @@
     return d;
   };
 
+  /** The Brainstorm board's shared vector canvas — created lazily on
+   *  first touch (deterministic: live and replay create it on the same
+   *  op). Its width/height are nominal; the board is unbounded and the
+   *  planar map never clips. */
+  Project.prototype.notesCanvas = function () {
+    this.notes = this.notes || { items: [] };
+    if (!this.notes.canvas) {
+      var d = new VB.Y2KVectorDocument();
+      d.width = 8000 * 20;
+      d.height = 6000 * 20;
+      this.notes.canvas = d;
+    }
+    return this.notes.canvas;
+  };
+
   /** Resolves the actor-edit target to { cell, actor, label } or null.
    *  Symbol targets edit the symbol's ACTIVE drawing. */
   Project.prototype.resolveEditCell = function () {
     var t = this.editTarget;
     if (!t) return null;
+    if (t.notes) {
+      return { cell: this.notesCanvas(), actor: null,
+               label: "brainstorm canvas" };
+    }
     var actors = this.actors || [];
     var actor = null;
     for (var i = 0; i < actors.length; i++) {

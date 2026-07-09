@@ -1,17 +1,24 @@
-/* brainstorm.js — the Brainstorm workspace (Architecture §6.1, thin
- * slice): an infinite pannable board of placeable items — text notes,
- * dropped images, and ink sketch patches. No layers (decided): z-order
- * is array order, and moving an item brings it to front.
+/* brainstorm.js — the Brainstorm workspace (Architecture §6.1): an
+ * infinite board of placeable items (text notes, images, ink sketch
+ * patches) OVER a shared vector canvas painted with the REAL editor
+ * tools.
+ *
+ * Interaction model (user-specified): middle-mouse drags pan; the
+ * wheel zooms around the cursor; left-drag on empty space is a marquee
+ * that selects one or more items; drag moves the selection; Delete
+ * removes it; double-click edits a text note in place. The "Draw"
+ * toggle enters vector mode: pointer events route to the SAME tool
+ * objects as the stage (pencil/line/oval/rect/brush/bucket/eraser,
+ * with the topbar's colors, widths, and materials), committing
+ * journaled art ops into the board's own y2kvector cell
+ * (project.notesCanvas()) through the journaled editTarget — so board
+ * ink replays byte-exact like everything else.
  *
  * Thin means thin UI, never thin model: every mutation is a journaled
- * op with the id carried in the op, so live and replay build identical
- * boards, undo/redo ride project history, and .y2kproj persistence is
- * free. Pan/zoom is view state and never journals.
- *
- * Snapshot contract (history.js): ops may mutate item FIELDS in place
- * (x, y, w, h) after the history push, but item CONTENT values are
- * copy-on-write — noteEdit replaces the string, noteInk replaces the
- * strokes array — so history can share content by reference.
+ * op with the id carried in the op. Pan/zoom/selection are view state
+ * and never journal. Snapshot contract (history.js): ops may mutate
+ * item FIELDS in place after the history push, but item CONTENT values
+ * are copy-on-write, so history shares content by reference.
  */
 (function () {
   "use strict";
@@ -55,6 +62,22 @@
     c.sync();
   });
 
+  // group move: ONE undo step; the group comes to front preserving its
+  // relative stacking order (moves are listed back-to-front)
+  VB.defineOp("noteMoveMany", function (c, op) {
+    c.history.push(c.project);
+    var items = notesOf(c.project).items;
+    op.moves.forEach(function (m) {
+      var hit = noteById(c.project, m.id);
+      if (!hit) return;
+      hit.item.x = m.x;
+      hit.item.y = m.y;
+      items.splice(hit.index, 1);
+      items.push(hit.item);
+    });
+    c.sync();
+  });
+
   VB.defineOp("noteResize", function (c, op) {
     var hit = noteById(c.project, op.id);
     if (!hit) return;
@@ -93,11 +116,34 @@
     c.sync();
   });
 
+  VB.defineOp("noteRemoveMany", function (c, op) {
+    c.history.push(c.project);
+    var drop = {};
+    op.ids.forEach(function (id) { drop[id] = true; });
+    var notes = notesOf(c.project);
+    notes.items = notes.items.filter(function (it) { return !drop[it.id]; });
+    c.sync();
+  });
+
   // ---- board view (DOM; mounted by the shell into its workspace tab) -----------
 
+  var DRAW_TOOLS = [
+    ["pencil", "✎", "Pencil (P)"],
+    ["line", "╱", "Line (N)"],
+    ["oval", "◯", "Oval (O)"],
+    ["rect", "▭", "Rectangle (R)"],
+    ["brush", "🖌", "Brush (B)"],
+    ["bucket", "🪣", "Paint bucket (K)"],
+    ["eraser", "🧽", "Eraser (E)"]
+  ];
+  var DRAW_SET = {};
+  DRAW_TOOLS.forEach(function (t) { DRAW_SET[t[0]] = true; });
+
   var view = {
-    host: null, app: null, board: null, layer: null,
-    pan: { x: 60, y: 50 }, zoom: 1, inkMode: false
+    host: null, app: null, board: null, layer: null, ink: null,
+    marquee: null, toolStrip: null, drawBtn: null,
+    pan: { x: 60, y: 50 }, zoom: 1,
+    drawMode: false, selected: {}
   };
 
   function boardPoint(ev) {
@@ -108,9 +154,36 @@
     };
   }
 
+  function toTwips(p) { return { x: p.x * VB.TWIPS, y: p.y * VB.TWIPS }; }
+
   function applyPanZoom() {
     view.layer.style.transform = "translate(" + view.pan.x + "px," +
       view.pan.y + "px) scale(" + view.zoom + ")";
+    renderInk();
+  }
+
+  /** The vector layer: the notes canvas + (in draw mode) the live tool
+   *  overlay, oracle-rendered under the note items. */
+  function renderInk() {
+    if (!view.ink) return;
+    var cvs = view.ink;
+    var w = view.board.clientWidth, h = view.board.clientHeight;
+    if (cvs.width !== w || cvs.height !== h) { cvs.width = w; cvs.height = h; }
+    var ctx = cvs.getContext("2d");
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    var s = view.zoom / VB.TWIPS;
+    ctx.setTransform(s, 0, 0, s, view.pan.x, view.pan.y);
+    var cell = view.app.project.notes && view.app.project.notes.canvas;
+    if (cell) {
+      VB.renderDocContent(ctx, cell, { zoom: view.zoom, dpr: 1 });
+    }
+    if (view.drawMode) {
+      var tool = view.app.toolByName(view.app.tool);
+      if (tool && tool.drawOverlay) {
+        try { tool.drawOverlay(ctx); } catch (e) { /* overlay only */ }
+      }
+    }
   }
 
   function drawSketch(cv, item) {
@@ -123,13 +196,13 @@
       ? item.content.strokes : [];
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    strokes.forEach(function (s) {
-      if (!s.pts.length) return;
-      ctx.strokeStyle = s.color || "#222";
-      ctx.lineWidth = s.width || 2;
+    strokes.forEach(function (st) {
+      if (!st.pts.length) return;
+      ctx.strokeStyle = st.color || "#222";
+      ctx.lineWidth = st.width || 2;
       ctx.beginPath();
-      ctx.moveTo(s.pts[0].x, s.pts[0].y);
-      for (var i = 1; i < s.pts.length; i++) ctx.lineTo(s.pts[i].x, s.pts[i].y);
+      ctx.moveTo(st.pts[0].x, st.pts[0].y);
+      for (var i = 1; i < st.pts.length; i++) ctx.lineTo(st.pts[i].x, st.pts[i].y);
       ctx.stroke();
     });
   }
@@ -142,10 +215,15 @@
 
   function refresh() {
     if (!view.host || isEditingText()) return;
+    // prune stale selection
+    Object.keys(view.selected).forEach(function (id) {
+      if (!noteById(view.app.project, id)) delete view.selected[id];
+    });
     view.layer.innerHTML = "";
     notesOf(view.app.project).items.forEach(function (item) {
       var el = document.createElement("div");
-      el.className = "bbitem bb-" + item.kind;
+      el.className = "bbitem bb-" + item.kind +
+        (view.selected[item.id] ? " selected" : "");
       el.dataset.id = item.id;
       el.style.left = item.x + "px";
       el.style.top = item.y + "px";
@@ -178,12 +256,40 @@
       el.appendChild(rs);
       view.layer.appendChild(el);
     });
+    view.layer.classList.toggle("nohit", view.drawMode);
     applyPanZoom();
   }
 
   function exec(op) {
     view.app.exec(op);
     refresh();
+  }
+
+  function selectedIds() { return Object.keys(view.selected); }
+
+  function setDrawMode(on) {
+    if (on === view.drawMode) return;
+    view.drawMode = on;
+    view.drawBtn.classList.toggle("active", on);
+    view.toolStrip.style.display = on ? "inline-flex" : "none";
+    view.selected = {};
+    if (on) {
+      view.app.exec({ op: "editTargetSet", target: { notes: true } });
+      if (!DRAW_SET[view.app.tool]) view.app.switchTool("pencil");
+      syncToolStrip();
+    } else {
+      var t = view.app.project.editTarget;
+      if (t && t.notes) view.app.exec({ op: "editTargetClear" });
+    }
+    refresh();
+  }
+
+  function syncToolStrip() {
+    if (!view.toolStrip) return;
+    var kids = view.toolStrip.children;
+    for (var i = 0; i < kids.length; i++) {
+      kids[i].classList.toggle("active", kids[i].dataset.tool === view.app.tool);
+    }
   }
 
   function addTextAtCenter() {
@@ -194,7 +300,6 @@
     exec({ op: "noteAdd", id: id, kind: "text",
            x: Math.round(cx - 90), y: Math.round(cy - 60),
            w: 180, h: 120, content: "" });
-    // open the fresh note for typing
     var el = view.layer.querySelector('[data-id="' + id + '"] .bbtext');
     if (el) beginTextEdit(el, id);
   }
@@ -244,6 +349,48 @@
     });
   }
 
+  function onKeyDown(ev) {
+    if (!view.host || !document.body.classList.contains("ws-board-mode")) return;
+    if (isEditingText()) return;
+    var tag = ev.target && ev.target.tagName;
+    if (tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT") return;
+    if (ev.ctrlKey && !ev.shiftKey && ev.key.toLowerCase() === "z") {
+      ev.preventDefault();
+      if (view.app.doUndo) view.app.doUndo();
+      return;
+    }
+    if ((ev.ctrlKey && ev.key.toLowerCase() === "y") ||
+        (ev.ctrlKey && ev.shiftKey && ev.key.toLowerCase() === "z")) {
+      ev.preventDefault();
+      if (view.app.doRedo) view.app.doRedo();
+      return;
+    }
+    if ((ev.key === "Delete" || ev.key === "Backspace") && !view.drawMode) {
+      var ids = selectedIds();
+      if (ids.length) {
+        ev.preventDefault();
+        view.selected = {};
+        exec({ op: "noteRemoveMany", ids: ids });
+      }
+      return;
+    }
+    if (ev.key === "Escape") {
+      if (view.drawMode) setDrawMode(false);
+      else { view.selected = {}; refresh(); }
+      return;
+    }
+    if (view.drawMode && !ev.ctrlKey && !ev.altKey) {
+      var toolKeys = { p: "pencil", n: "line", o: "oval", r: "rect",
+                       b: "brush", k: "bucket", e: "eraser" };
+      var k = ev.key.toLowerCase();
+      if (toolKeys[k]) {
+        view.app.switchTool(toolKeys[k]);
+        syncToolStrip();
+        renderInk();
+      }
+    }
+  }
+
   function mount(host, app) {
     if (view.host === host) { view.app = app; refresh(); return; }
     unmount();
@@ -279,35 +426,89 @@
       function () { imgInput.click(); }));
     bar.appendChild(imgInput);
     bar.appendChild(toolBtn("＋ Sketch", "Add an ink sketch patch", addSketchAtCenter));
-    var inkBtn = toolBtn("✏ Ink", "Ink mode: draw on sketch patches", function () {
-      view.inkMode = !view.inkMode;
-      inkBtn.classList.toggle("active", view.inkMode);
+
+    view.drawBtn = toolBtn("✎ Draw", "Vector draw mode: paint on the board " +
+      "with the stage tools", function () { setDrawMode(!view.drawMode); });
+    bar.appendChild(view.drawBtn);
+
+    var strip = document.createElement("span");
+    strip.id = "bb-toolstrip";
+    strip.style.display = "none";
+    DRAW_TOOLS.forEach(function (t) {
+      var b = document.createElement("button");
+      b.dataset.tool = t[0];
+      b.textContent = t[1];
+      b.title = t[2];
+      b.addEventListener("click", function () {
+        view.app.switchTool(t[0]);
+        syncToolStrip();
+        renderInk();
+      });
+      strip.appendChild(b);
     });
-    bar.appendChild(inkBtn);
+    view.toolStrip = strip;
+    bar.appendChild(strip);
+
     var hint = document.createElement("span");
     hint.id = "bb-hint";
-    hint.textContent = "drag items · drag empty space to pan · wheel zooms · double-click text to edit";
+    hint.textContent = "middle-drag pans · wheel zooms · left-drag selects · double-click text edits";
     bar.appendChild(hint);
     host.appendChild(bar);
 
     var board = document.createElement("div");
     board.id = "bb-canvas";
+    var ink = document.createElement("canvas");
+    ink.id = "bb-ink";
+    board.appendChild(ink);
     var layer = document.createElement("div");
     layer.id = "bb-layer";
     board.appendChild(layer);
+    var marquee = document.createElement("div");
+    marquee.id = "bb-marquee";
+    marquee.style.display = "none";
+    board.appendChild(marquee);
     host.appendChild(board);
     view.board = board;
     view.layer = layer;
+    view.ink = ink;
+    view.marquee = marquee;
 
     var drag = null;
+    var activeTool = null;
+
+    function screenPoint(ev) {
+      var rect = board.getBoundingClientRect();
+      return { x: ev.clientX - rect.left, y: ev.clientY - rect.top };
+    }
+
     board.addEventListener("pointerdown", function (ev) {
       if (isEditingText()) return;
+      // middle mouse ALWAYS pans
+      if (ev.button === 1) {
+        ev.preventDefault();
+        board.setPointerCapture(ev.pointerId);
+        drag = { kind: "pan", p0: { x: ev.clientX, y: ev.clientY },
+                 pan0: { x: view.pan.x, y: view.pan.y } };
+        return;
+      }
+      if (ev.button !== 0) return;
+      board.setPointerCapture(ev.pointerId);
+      // draw mode: route to the real stage tools, in twips
+      if (view.drawMode) {
+        activeTool = view.app.toolByName(view.app.tool);
+        if (activeTool && activeTool.onDown) {
+          activeTool.onDown(toTwips(boardPoint(ev)));
+          renderInk();
+        }
+        drag = { kind: "tool" };
+        return;
+      }
       var itemEl = ev.target.closest ? ev.target.closest(".bbitem") : null;
       if (itemEl && ev.target.classList.contains("bbdel")) {
+        delete view.selected[itemEl.dataset.id];
         exec({ op: "noteRemove", id: itemEl.dataset.id });
         return;
       }
-      board.setPointerCapture(ev.pointerId);
       var p = boardPoint(ev);
       if (itemEl && ev.target.classList.contains("bbresize")) {
         var hitR = noteById(view.app.project, itemEl.dataset.id);
@@ -315,19 +516,32 @@
                  w0: hitR.item.w, h0: hitR.item.h, p0: p };
       } else if (itemEl) {
         var id = itemEl.dataset.id;
-        var hit = noteById(view.app.project, id);
-        if (view.inkMode && hit && hit.item.kind === "sketch") {
-          drag = { kind: "ink", id: id, el: itemEl, item: hit.item,
-                   pts: [{ x: p.x - hit.item.x, y: p.y - hit.item.y }] };
-        } else {
-          drag = { kind: "move", id: id, el: itemEl,
-                   x0: hit.item.x, y0: hit.item.y, p0: p, moved: false };
+        if (ev.shiftKey) {
+          if (view.selected[id]) delete view.selected[id];
+          else view.selected[id] = true;
+          refresh();
+          return;
         }
+        if (!view.selected[id]) {
+          view.selected = {};
+          view.selected[id] = true;
+          refresh();
+          itemEl = view.layer.querySelector('[data-id="' + id + '"]');
+        }
+        // drag every selected item together
+        var parts = selectedIds().map(function (sid) {
+          var hit = noteById(view.app.project, sid);
+          return { id: sid, x0: hit.item.x, y0: hit.item.y,
+                   el: view.layer.querySelector('[data-id="' + sid + '"]') };
+        });
+        drag = { kind: "move", p0: p, parts: parts, moved: false };
       } else {
-        drag = { kind: "pan", p0: { x: ev.clientX, y: ev.clientY },
-                 pan0: { x: view.pan.x, y: view.pan.y } };
+        // left-drag on empty board: marquee selection
+        drag = { kind: "marquee", s0: screenPoint(ev), p0: p };
+        if (!ev.shiftKey) { view.selected = {}; refresh(); }
       }
     });
+
     board.addEventListener("pointermove", function (ev) {
       if (!drag) return;
       var p;
@@ -335,59 +549,90 @@
         view.pan.x = drag.pan0.x + ev.clientX - drag.p0.x;
         view.pan.y = drag.pan0.y + ev.clientY - drag.p0.y;
         applyPanZoom();
+      } else if (drag.kind === "tool") {
+        if (activeTool && activeTool.onMove) {
+          activeTool.onMove(toTwips(boardPoint(ev)));
+          renderInk();
+        }
       } else if (drag.kind === "move") {
         p = boardPoint(ev);
         drag.moved = true;
-        drag.el.style.left = (drag.x0 + p.x - drag.p0.x) + "px";
-        drag.el.style.top = (drag.y0 + p.y - drag.p0.y) + "px";
+        drag.parts.forEach(function (part) {
+          if (!part.el) return;
+          part.el.style.left = (part.x0 + p.x - drag.p0.x) + "px";
+          part.el.style.top = (part.y0 + p.y - drag.p0.y) + "px";
+        });
       } else if (drag.kind === "resize") {
         p = boardPoint(ev);
         drag.el.style.width = Math.max(24, drag.w0 + p.x - drag.p0.x) + "px";
         drag.el.style.height = Math.max(24, drag.h0 + p.y - drag.p0.y) + "px";
-      } else if (drag.kind === "ink") {
-        p = boardPoint(ev);
-        drag.pts.push({ x: p.x - drag.item.x, y: p.y - drag.item.y });
-        var cv = drag.el.querySelector("canvas");
-        var ctx = cv.getContext("2d");
-        var a = drag.pts[drag.pts.length - 2], b = drag.pts[drag.pts.length - 1];
-        ctx.strokeStyle = "#222";
-        ctx.lineWidth = 2;
-        ctx.lineCap = "round";
-        ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.stroke();
+      } else if (drag.kind === "marquee") {
+        var s = screenPoint(ev);
+        var x = Math.min(drag.s0.x, s.x), y = Math.min(drag.s0.y, s.y);
+        view.marquee.style.display = "block";
+        view.marquee.style.left = x + "px";
+        view.marquee.style.top = y + "px";
+        view.marquee.style.width = Math.abs(s.x - drag.s0.x) + "px";
+        view.marquee.style.height = Math.abs(s.y - drag.s0.y) + "px";
       }
     });
+
     function endDrag(ev) {
       if (!drag) return;
       var d = drag;
       drag = null;
+      if (d.kind === "tool") {
+        if (activeTool && activeTool.onUp) {
+          activeTool.onUp(toTwips(boardPoint(ev)));
+          activeTool = null;
+          renderInk();
+        }
+        return;
+      }
       if (d.kind === "move" && d.moved) {
         var p = boardPoint(ev);
-        exec({ op: "noteMove", id: d.id,
-               x: Math.round(d.x0 + p.x - d.p0.x),
-               y: Math.round(d.y0 + p.y - d.p0.y) });
+        exec({ op: "noteMoveMany", moves: d.parts.map(function (part) {
+          return { id: part.id,
+                   x: Math.round(part.x0 + p.x - d.p0.x),
+                   y: Math.round(part.y0 + p.y - d.p0.y) };
+        }) });
       } else if (d.kind === "resize") {
         var q = boardPoint(ev);
         exec({ op: "noteResize", id: d.id,
                w: Math.round(Math.max(24, d.w0 + q.x - d.p0.x)),
                h: Math.round(Math.max(24, d.h0 + q.y - d.p0.y)) });
-      } else if (d.kind === "ink" && d.pts.length > 1) {
-        exec({ op: "noteInk", id: d.id, stroke: {
-          color: "#222", width: 2,
-          pts: d.pts.map(function (pt) {
-            return { x: Math.round(pt.x * 10) / 10, y: Math.round(pt.y * 10) / 10 };
-          })
-        } });
+      } else if (d.kind === "marquee") {
+        view.marquee.style.display = "none";
+        var pEnd = boardPoint(ev);
+        var rx0 = Math.min(d.p0.x, pEnd.x), rx1 = Math.max(d.p0.x, pEnd.x);
+        var ry0 = Math.min(d.p0.y, pEnd.y), ry1 = Math.max(d.p0.y, pEnd.y);
+        if (rx1 - rx0 > 3 || ry1 - ry0 > 3) {
+          notesOf(view.app.project).items.forEach(function (it) {
+            if (it.x < rx1 && it.x + it.w > rx0 &&
+                it.y < ry1 && it.y + it.h > ry0) {
+              view.selected[it.id] = true;
+            }
+          });
+          refresh();
+        }
       }
     }
     board.addEventListener("pointerup", endDrag);
-    board.addEventListener("pointercancel", function () { drag = null; });
+    board.addEventListener("pointercancel", function () {
+      if (drag && drag.kind === "tool" && activeTool && activeTool.cancel) {
+        activeTool.cancel();
+        activeTool = null;
+      }
+      drag = null;
+      view.marquee.style.display = "none";
+    });
 
     board.addEventListener("dblclick", function (ev) {
+      if (view.drawMode) return;
       var tx = ev.target.closest ? ev.target.closest(".bbtext") : null;
       if (!tx) return;
+      ev.preventDefault();
+      ev.stopPropagation();
       var itemEl = tx.closest(".bbitem");
       beginTextEdit(tx, itemEl.dataset.id);
     });
@@ -398,7 +643,6 @@
       var mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
       var factor = ev.deltaY < 0 ? 1.15 : 1 / 1.15;
       var next = Math.max(0.15, Math.min(4, view.zoom * factor));
-      // zoom around the cursor
       view.pan.x = mx - (mx - view.pan.x) * (next / view.zoom);
       view.pan.y = my - (my - view.pan.y) * (next / view.zoom);
       view.zoom = next;
@@ -418,15 +662,26 @@
       }
     });
 
+    window.addEventListener("keydown", onKeyDown);
     refresh();
   }
 
   function unmount() {
     if (!view.host) return;
+    window.removeEventListener("keydown", onKeyDown);
+    // never leave the journal pointed at the board's canvas
+    var t = view.app && view.app.project.editTarget;
+    if (view.drawMode && t && t.notes) {
+      view.app.exec({ op: "editTargetClear" });
+    }
+    view.drawMode = false;
+    view.selected = {};
     view.host.innerHTML = "";
     view.host = null;
     view.board = null;
     view.layer = null;
+    view.ink = null;
+    view.marquee = null;
   }
 
   window.VB = window.VB || {};

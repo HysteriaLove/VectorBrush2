@@ -115,7 +115,9 @@
             id: it.id, kind: it.kind, x: it.x, y: it.y, w: it.w, h: it.h,
             content: it.content
           };
-        })
+        }),
+        canvas: (target.notes && target.notes.canvas)
+          ? snapshotDoc(target.notes.canvas) : null
       },
       scenes: target.scenes.map(function (sc) {
         return {
@@ -150,6 +152,11 @@
         };
       })
     };
+    if (snap.notes && snap.notes.canvas) {
+      var noteCv = new VB.Y2KVectorDocument();
+      restoreDoc(noteCv, snap.notes.canvas);
+      target.notes.canvas = noteCv;
+    }
     target.scenes = snap.scenes.map(function (sc) {
       return {
         name: sc.name,

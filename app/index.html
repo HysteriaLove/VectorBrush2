@@ -376,7 +376,21 @@
     overflow: hidden; white-space: pre-wrap; word-break: break-word;
     outline: none; cursor: default;
   }
-  .bbtext[contenteditable="true"] { cursor: text; background: #fffce0; }
+  .bbtext[contenteditable="true"] {
+    cursor: text; background: #fffce0;
+    user-select: text; -webkit-user-select: text; /* the board disables selection */
+  }
+  .bbitem.selected { outline: 2px solid #3d5a80; outline-offset: 1px; }
+  #bb-ink { position: absolute; left: 0; top: 0; pointer-events: none; }
+  #bb-layer.nohit { pointer-events: none; }
+  #bb-marquee {
+    position: absolute; pointer-events: none;
+    border: 1px dashed #6cf; background: #6cf2;
+  }
+  #bb-toolstrip { display: inline-flex; gap: 2px; margin-left: 4px; }
+  #bb-toolstrip button.active {
+    background: var(--accent); border-color: var(--accent); color: #fff;
+  }
   .bbdel {
     position: absolute; top: -9px; right: -9px; width: 18px; height: 18px;
     display: none; align-items: center; justify-content: center;

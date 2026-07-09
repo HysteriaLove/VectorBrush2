@@ -3059,16 +3059,59 @@
     var inkBefore = VB.noteById(bse.project, "n3").item.content.strokes.length;
     bse.exec({ op: "noteInk", id: "n3", stroke: {
       color: "#222", width: 2, pts: [{ x: 1, y: 1 }, { x: 2, y: 2 }] } });
-    bse.history.undo();
+    bse.exec({ op: "undo" }); // journaled — replay must see the undo too
     check("undo restores the pre-ink stroke list (copy-on-write)",
       VB.noteById(bse.project, "n3").item.content.strokes.length === inkBefore);
     bse.exec({ op: "noteRemove", id: "n2" });
     check("noteRemove drops the item",
       bse.project.notes.items.length === 2 && !VB.noteById(bse.project, "n2"));
-    bse.history.undo();
+    bse.exec({ op: "undo" }); // journaled — replay must see the undo too
     check("undo restores the removed image note",
       VB.noteById(bse.project, "n2") &&
       VB.noteById(bse.project, "n2").item.content === IMG);
+
+    // group ops: one undo step, group-to-front preserving order
+    bse.exec({ op: "noteMoveMany", moves: [
+      { id: "n3", x: 600, y: 600 }, { id: "n2", x: 700, y: 700 }] });
+    var bOrder = bse.project.notes.items.map(function (i) { return i.id; });
+    check("noteMoveMany moves the group to front in listed order",
+      VB.noteById(bse.project, "n3").item.x === 600 &&
+      VB.noteById(bse.project, "n2").item.x === 700 &&
+      bOrder[bOrder.length - 2] === "n3" && bOrder[bOrder.length - 1] === "n2",
+      bOrder.join(","));
+    bse.exec({ op: "noteRemoveMany", ids: ["n2", "n3"] });
+    check("noteRemoveMany drops the group",
+      bse.project.notes.items.length === 1);
+    bse.exec({ op: "undo" }); // journaled — replay must see the undo too
+    check("group removal is one undo step",
+      bse.project.notes.items.length === 3);
+
+    // the board's vector canvas: journaled editTarget routes the REAL
+    // art ops there; replay agrees
+    bse.exec({ op: "editTargetSet", target: { notes: true } });
+    check("notes edit target retargets the active cell",
+      bse.project.activeCell() === bse.project.notes.canvas);
+    bse.exec({ op: "brush",
+               points: [{ x: 4000, y: 4000 }, { x: 9000, y: 4400 }],
+               radius: 300, color: { r: 102, g: 204, b: 255, a: 255 } });
+    bse.exec({ op: "pencil",
+               points: [{ x: 2000, y: 8000 }, { x: 9000, y: 8300 }],
+               style: { width: 20, color: { r: 0, g: 0, b: 0, a: 255 } } });
+    bse.exec({ op: "editTargetClear" });
+    check("board ink lands in the notes canvas",
+      bse.project.notes.canvas.edges.length > 0 &&
+      bse.project.scenes[0].layers[0].frames[0].edges.length === 0,
+      bse.project.notes.canvas.edges.length + " edges");
+    var bRep2 = await VB.replayJournal(JSON.parse(JSON.stringify(bse.journal)));
+    check("board ink replays byte-exact",
+      JSON.stringify(bRep2.project.notes.canvas.edges) ===
+      JSON.stringify(bse.project.notes.canvas.edges) &&
+      JSON.stringify(bRep2.project.notes.items) ===
+      JSON.stringify(bse.project.notes.items));
+    var inkEdges = bse.project.notes.canvas.edges.length;
+    bse.exec({ op: "undo" }); // journaled — replay must see the undo too // undoes the pencil on the board canvas
+    check("board ink undoes through project history",
+      bse.project.notes.canvas.edges.length < inkEdges);
   } catch (err) {
     fail++;
     log("  BRAINSTORM EXCEPTION: " + (err && err.stack || err), "fail");
