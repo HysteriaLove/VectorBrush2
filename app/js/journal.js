@@ -65,6 +65,9 @@
       ? await VB.decodeVBD(bytes)
       : await VB.parseSWF(bytes.buffer);
     c.project = result.project || VB.wrapDoc(result.doc);
+    // files without a persisted library (SWF, older .vbd bodies)
+    // rebuild theirs from the cells' non-solid fills
+    VB.projectCollectMaterials(c.project);
     c.history.clear();
     c.sync();
   });
@@ -212,16 +215,31 @@
     c.history.push(c.project);
     VB.textBoxHApply(c.doc, op.index, op.height, op.dy);
   });
-  // Replace a fill-style entry with a 2DMaterial definition (the
-  // materials panel's one mutation). The op carries the full style, so
-  // replay is self-contained; geometry/claims are untouched — only
-  // what the style paints changes.
+  // Replace a fill-style entry with a 2DMaterial definition. The op
+  // carries the full style, so replay is self-contained; geometry and
+  // claims are untouched — only what the style paints changes.
   defineOp("fillStyle", function (c, op) {
     if (op.index < 0 || op.index >= c.doc.fills.length) {
       throw new Error("fillStyle: no fill style " + op.index);
     }
     c.history.push(c.project);
     c.doc.fills[op.index] = VB.materialClone(op.style);
+  });
+
+  // The GLOBAL material library (project.materials — Flash's library,
+  // not per-layer). materialEdit also rewrites every structurally-
+  // matching fill in every cell, so editing a material updates all
+  // its uses across layers and scenes.
+  defineOp("materialAdd", function (c, op) {
+    c.history.push(c.project);
+    c.project.addMaterial(VB.materialClone(op.style));
+  });
+  defineOp("materialEdit", function (c, op) {
+    if (op.index < 0 || op.index >= (c.project.materials || []).length) {
+      throw new Error("materialEdit: no library material " + op.index);
+    }
+    c.history.push(c.project);
+    c.project.editMaterial(op.index, VB.materialClone(op.style));
   });
 
   // Paste a shape clip (a standalone mini planar map captured at copy

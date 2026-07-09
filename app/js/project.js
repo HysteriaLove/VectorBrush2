@@ -38,6 +38,56 @@
     this.background = { r: 255, g: 255, b: 255, a: 255 };
     this.scenes = [new Scene("Scene 1", this.newCell())];
     this.cur = { scene: 0, layer: 0 };
+    // The GLOBAL 2DMaterial library (Flash's library, not per-layer):
+    // crafted material definitions usable on any layer or scene. Cells
+    // keep their own fills[] (the SWF wire grammar); painting with a
+    // library material copies the definition into the target cell,
+    // deduped by sameFill.
+    this.materials = [];
+  }
+
+  function sameStyle(a, b) {
+    return JSON.stringify(a) === JSON.stringify(b);
+  }
+
+  /** Add a material to the library (structural dedupe). Returns index. */
+  Project.prototype.addMaterial = function (style) {
+    for (var i = 0; i < this.materials.length; i++) {
+      if (sameStyle(this.materials[i], style)) return i;
+    }
+    this.materials.push(JSON.parse(JSON.stringify(style)));
+    return this.materials.length - 1;
+  };
+
+  /** Replace library entry `index` AND every structurally-matching
+   *  fill in every cell — editing a material updates all its uses,
+   *  on every layer and scene, deterministically. */
+  Project.prototype.editMaterial = function (index, style) {
+    if (index < 0 || index >= this.materials.length) return false;
+    var old = this.materials[index];
+    var next = JSON.parse(JSON.stringify(style));
+    this.eachCell(function (cell) {
+      for (var i = 0; i < cell.fills.length; i++) {
+        if (sameStyle(cell.fills[i], old)) {
+          cell.fills[i] = JSON.parse(JSON.stringify(next));
+        }
+      }
+    });
+    this.materials[index] = next;
+    return true;
+  };
+
+  /** Union every cell's non-solid fills into the library — how
+   *  documents without a persisted library (SWF imports, older .vbd
+   *  bodies) rebuild theirs on load. */
+  function collectMaterials(project) {
+    project.materials = project.materials || [];
+    project.eachCell(function (cell) {
+      cell.fills.forEach(function (f) {
+        if (f.type !== "solid") project.addMaterial(f);
+      });
+    });
+    return project;
   }
 
   Project.prototype.newCell = function () {
@@ -134,10 +184,12 @@
     var p = new Project(doc.width, doc.height);
     p.background = doc.background;
     p.scenes[0].layers[0].frames[0] = doc;
+    collectMaterials(p);
     return p;
   }
 
   window.VB = window.VB || {};
   VB.Project = Project;
   VB.wrapDoc = wrapDoc;
+  VB.projectCollectMaterials = collectMaterials;
 })();

@@ -506,7 +506,7 @@
   // trivial ops: valid low-cost profiles, never null
   ["undo", "redo", "new", "load", "layerAdd", "layerDelete", "layerMove",
    "layerRename", "layerSelect", "layerVisible", "layerLock", "sceneAdd",
-   "sceneSelect"].forEach(function (kind) {
+   "sceneSelect", "materialAdd", "materialEdit"].forEach(function (kind) {
     ESTIMATORS[kind] = function (doc) {
       var b = Builder(kind, kind, doc, null);
       b.stage("bookkeeping", "op", 1, 10);

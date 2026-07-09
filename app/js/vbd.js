@@ -281,7 +281,8 @@
     for (var i = 0; i < Math.min(utf8.length, 255); i++) w.u8(utf8.charCodeAt(i));
   }
 
-  // v3: the whole Flash-style DOM — scenes -> layers -> frame cells.
+  // v4: the whole Flash-style DOM — scenes -> layers -> frame cells —
+  // plus the GLOBAL material library (v3 = same without the library).
   function encodeProjectBody(project, stats) {
     stats = stats || {};
     stats.styleChanges = 0;
@@ -289,7 +290,7 @@
     stats.straightEdges = 0;
     stats.curvedEdges = 0;
     var w = new VB.BitWriter();
-    w.u8(3);
+    w.u8(4);
     w.rect({ xmin: 0, xmax: project.width, ymin: 0, ymax: project.height });
     writeColor(w, project.background);
     w.u8(project.scenes.length);
@@ -304,6 +305,9 @@
     });
     w.u8(project.cur.scene);
     w.u8(project.cur.layer);
+    var mats = project.materials || [];
+    writeStyleCount(w, mats.length);
+    for (var mi = 0; mi < mats.length; mi++) writeFillStyle(w, mats[mi]);
     return w.toUint8Array();
   }
 
@@ -311,6 +315,19 @@
   // still open the file); anything structural forces v3.
   function needsProjectFormat(project) {
     if (project.scenes.length > 1) return true;
+    // a curated material library must persist even for a single default
+    // layer (entries beyond what the cell fills would rebuild)
+    if ((project.materials || []).length) {
+      var cell = project.scenes[0].layers[0].frames[0];
+      var rebuilt = [];
+      cell.fills.forEach(function (f) {
+        if (f.type !== "solid") rebuilt.push(JSON.stringify(f));
+      });
+      var extra = project.materials.some(function (m) {
+        return rebuilt.indexOf(JSON.stringify(m)) < 0;
+      });
+      if (extra) return true;
+    }
     var sc = project.scenes[0];
     if (sc.name !== "Scene 1" || sc.layers.length > 1) return true;
     var l = sc.layers[0];
@@ -633,11 +650,11 @@
 
     var r = new VB.BitReader(body, 0);
     var version = r.u8();
-    if (version < 1 || version > 3) {
+    if (version < 1 || version > 4) {
       throw new Error("Unsupported VBD version " + version);
     }
 
-    if (version === 3) {
+    if (version === 3 || version === 4) {
       var stage3 = r.rect();
       var project = new VB.Project(stage3.xmax - stage3.xmin,
                                    stage3.ymax - stage3.ymin);
@@ -665,9 +682,18 @@
       project.cur.scene = Math.min(r.u8(), project.scenes.length - 1);
       project.cur.layer = Math.min(r.u8(),
         project.scenes[project.cur.scene].layers.length - 1);
+      if (version === 4) {
+        // v4 = v3 + the GLOBAL material library
+        var nMat = readStyleCount(r);
+        for (var mi2 = 0; mi2 < nMat; mi2++) {
+          project.materials.push(readFillStyle(r));
+        }
+      } else {
+        VB.projectCollectMaterials(project);
+      }
       return {
         doc: project.activeCell(), project: project,
-        info: { version: 3, compressed: !!(flags & 1) }
+        info: { version: version, compressed: !!(flags & 1) }
       };
     }
 

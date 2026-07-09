@@ -51,6 +51,7 @@
       width: target.width, height: target.height,
       background: JSON.parse(JSON.stringify(target.background)),
       cur: { scene: target.cur.scene, layer: target.cur.layer },
+      materials: JSON.parse(JSON.stringify(target.materials || [])),
       scenes: target.scenes.map(function (sc) {
         return {
           name: sc.name,
@@ -71,6 +72,7 @@
     target.height = snap.height;
     target.background = snap.background;
     target.cur = { scene: snap.cur.scene, layer: snap.cur.layer };
+    target.materials = JSON.parse(JSON.stringify(snap.materials || []));
     target.scenes = snap.scenes.map(function (sc) {
       return {
         name: sc.name,

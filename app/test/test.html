@@ -964,6 +964,48 @@
       mp2.doc.fills[VB.geom.fillAt(mp2.doc, 3000, 3000) - 1].type === "linear",
       JSON.stringify(mp2.doc.fills.map(function (f) { return f.type; })));
 
+    // GLOBAL material library: add, paint on two layers, edit updates
+    // every use across layers, undo restores; vbd v4 persists it
+    var libStyle = VB.materialDefaults("linear");
+    libStyle.matrix = { sx: 0.25, sy: 0.25, r0: 0, r1: 0, tx: 3000, ty: 3000 };
+    var libOps = [
+      { op: "new", width: 11000, height: 8000 },
+      { op: "materialAdd", style: libStyle },
+      { op: "brush", points: [{ x: 2000, y: 2000 }, { x: 3500, y: 2000 }],
+        radius: 300, color: { r: 1, g: 2, b: 3, a: 255 }, style: libStyle },
+      { op: "layerAdd" },
+      { op: "brush", points: [{ x: 2000, y: 5000 }, { x: 3500, y: 5000 }],
+        radius: 300, color: { r: 1, g: 2, b: 3, a: 255 }, style: libStyle }
+    ];
+    var lr = await VB.replayJournal(libOps);
+    check("library holds ONE global material used on two layers",
+      lr.project.materials.length === 1 &&
+      lr.project.scenes[0].layers.length === 2 &&
+      lr.project.scenes[0].layers[0].frames[0].fills[0].type === "linear" &&
+      lr.project.scenes[0].layers[1].frames[0].fills[0].type === "linear",
+      lr.project.materials.length + " materials");
+    var edited = VB.materialClone(libStyle);
+    edited.type = "radial";
+    var lr2 = await VB.replayJournal(libOps.concat([
+      { op: "materialEdit", index: 0, style: edited }
+    ]));
+    check("materialEdit updates the library AND every use on every layer",
+      lr2.project.materials[0].type === "radial" &&
+      lr2.project.scenes[0].layers[0].frames[0].fills[0].type === "radial" &&
+      lr2.project.scenes[0].layers[1].frames[0].fills[0].type === "radial");
+    var lr3 = await VB.replayJournal(libOps.concat([
+      { op: "materialEdit", index: 0, style: edited }, { op: "undo" }
+    ]));
+    check("materialEdit is one undo step (library + cells restored)",
+      lr3.project.materials[0].type === "linear" &&
+      lr3.project.scenes[0].layers[1].frames[0].fills[0].type === "linear");
+    var lbytes = await VB.encodeVBD(lr.project);
+    var ldec = await VB.decodeVBD(lbytes);
+    check("vbd v4 persists the global library",
+      ldec.project && ldec.project.materials.length === 1 &&
+      ldec.project.materials[0].type === "linear",
+      JSON.stringify((ldec.project || {}).materials));
+
     // gradient rendering: a linear black->white fill actually shades
     var gdoc = mr.doc; // fill 0 is the linear style over the brush blob
     gdoc.fills[0].gradient.stops[0].color = { r: 0, g: 0, b: 0, a: 255 };
@@ -1066,6 +1108,27 @@
     var d2 = VB.matcapDebugCanvas(buf, "normal");
     check("debug views render bump and normal canvases",
       d1.width === buf.w && d2.width === buf.w);
+
+    // scanline coverage === per-pixel ray casting, on real curved
+    // geometry (the perf path must not change a single pixel)
+    var cdoc = (await VB.replayJournal([
+      { op: "new", width: 11000, height: 8000 },
+      { op: "brush", points: [{ x: 2000, y: 2500 }, { x: 4000, y: 2000 },
+                              { x: 5000, y: 4000 }, { x: 3000, y: 4500 }],
+        radius: 500, color: { r: 5, g: 5, b: 5, a: 255 } }
+    ])).doc;
+    var cbuf = VB.matcapBuffers(cdoc, 1, VB.materialDefaults("matcap"), 48);
+    var mism = 0;
+    for (var cy2 = 0; cy2 < cbuf.h; cy2++) {
+      for (var cx2 = 0; cx2 < cbuf.w; cx2++) {
+        var wx = cbuf.bbox.xmin + (cx2 + 0.5) * (cbuf.bbox.xmax - cbuf.bbox.xmin) / cbuf.w;
+        var wy = cbuf.bbox.ymin + (cy2 + 0.5) * (cbuf.bbox.ymax - cbuf.bbox.ymin) / cbuf.h;
+        var ref = VB.geom.fillParity(cdoc.edges, 1, wx, wy) ? 1 : 0;
+        if (ref !== cbuf.mask[cy2 * cbuf.w + cx2]) mism++;
+      }
+    }
+    check("scanline coverage matches per-pixel parity exactly",
+      mism === 0, mism + " mismatched texels of " + (cbuf.w * cbuf.h));
 
     // vbd: tag-4 matcap with builtin id and embedded texture round-trips
     var mstyle = VB.materialDefaults("matcap");
@@ -2050,8 +2113,8 @@
     // vbd: multi-layer forces v3 and round-trips; single default stays v1
     var bytes3 = await VB.encodeVBD(res.project, { compress: true });
     var back3 = await VB.decodeVBD(bytes3);
-    check("vbd v3 round-trips the layer DOM",
-      back3.info.version === 3 &&
+    check("vbd project body round-trips the layer DOM",
+      back3.info.version === 4 && // v4 = v3 + the global material library
       back3.project.scene().layers.length === 2 &&
       back3.project.scene().layers[0].frames[0].edges.length ===
         layers[0].frames[0].edges.length &&

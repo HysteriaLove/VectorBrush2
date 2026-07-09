@@ -8,6 +8,16 @@ identical params produce identical numbers on every machine, because
 the profile is an analytic function of the material definition, never a
 wall-clock measurement.
 
+Material scope is GLOBAL: `project.materials[]` is the library (Flash's
+library, not per-layer) shown by the Materials panel and usable on any
+layer or scene. Cells keep their own `fills[]` tables (the SWF wire
+grammar); painting with a library material copies the definition into
+the target cell, deduped structurally, and `materialEdit` rewrites the
+library entry AND every structurally-matching cell fill across all
+layers/scenes in one journaled step. Documents without a persisted
+library (SWF imports, pre-v4 .vbd) rebuild theirs from the union of
+their cells' non-solid fills on load.
+
 ## Material classes
 
 | class      | types                    | backend               | relative fill cost |
@@ -94,8 +104,8 @@ oracle discipline Canvas2D provides for rendering.
   matcap: base RGBA + f32 bumpScale, blurPx, resolution). Older bodies
   decode unchanged.
 - Journal: `{op:"fillStyle", index, style}` — a registered command
-  (one undo step) that replaces a fill-style entry; the materials panel
-  edits styles exclusively through it.
+  (one undo step) that replaces a fill-style entry in the active
+  layer/cell; the materials panel edits styles exclusively through it.
 - SWF: import keeps gradients verbatim (now rendered properly); export
   policy unchanged this stage (gradients/gpu bake to base color with a
   warning — native gradient export is a candidate follow-up since SWF

@@ -1292,11 +1292,12 @@
     return "rgba(" + c.r + "," + c.g + "," + c.b + "," + (c.a / 255) + ")";
   }
 
-  /** The active drawing paint: selecting a material row makes it THE
-   *  drawing color for brush/bucket/shape fills; picking a plain color
-   *  in the toolbar returns to solid. */
+  /** The active drawing paint: selecting a library material makes it
+   *  THE drawing color for brush/bucket/shape fills; picking a plain
+   *  color in the toolbar returns to solid. */
   function syncFillMaterial() {
-    var style = matSelected >= 0 ? app.doc.fills[matSelected] : null;
+    var mats = app.project.materials || [];
+    var style = matSelected >= 0 ? mats[matSelected] : null;
     if (style && style.type !== "solid") {
       app.fillMaterial = VB.materialClone(style);
       // the toolbar swatch mirrors the material's base color so tool
@@ -1316,14 +1317,17 @@
     }
   }
 
+  // The panel lists the GLOBAL library (project.materials) — the same
+  // materials on every layer and scene, Flash-library style.
   function refreshMaterials() {
     var list = document.getElementById("matlist");
     list.innerHTML = "";
     document.getElementById("mat-gpu").textContent =
       VB.gpuMaterialsAvailable() ? "GPU ✓" : "no GPU";
-    if (matSelected >= app.doc.fills.length) matSelected = -1;
+    var mats = app.project.materials || [];
+    if (matSelected >= mats.length) matSelected = -1;
     syncFillMaterial();
-    app.doc.fills.forEach(function (f, i) {
+    mats.forEach(function (f, i) {
       var profile = VB.materialProfile(f);
       var row = document.createElement("div");
       row.className = "matrow2" + (i === matSelected ? " active" : "");
@@ -1349,6 +1353,17 @@
     syncMatEditor();
   }
 
+  document.getElementById("btn-mat-add").addEventListener("click", function () {
+    var style = VB.materialDefaults("linear");
+    var sc = Math.max(app.doc.width, app.doc.height) / (2 * VB.GRAD_HALF);
+    style.matrix = { sx: sc, sy: sc, r0: 0, r1: 0,
+                     tx: app.doc.width / 2, ty: app.doc.height / 2 };
+    app.exec({ op: "materialAdd", style: style });
+    matSelected = (app.project.materials || []).length - 1;
+    refreshMaterials();
+    setMsg("material added — it is now the drawing color");
+  });
+
   function hexToColor(hex, a) {
     return { r: parseInt(hex.slice(1, 3), 16), g: parseInt(hex.slice(3, 5), 16),
              b: parseInt(hex.slice(5, 7), 16), a: a === undefined ? 255 : a };
@@ -1360,7 +1375,8 @@
 
   function syncMatEditor() {
     var ed = document.getElementById("matedit");
-    var style = matSelected >= 0 ? app.doc.fills[matSelected] : null;
+    var mats = app.project.materials || [];
+    var style = matSelected >= 0 ? mats[matSelected] : null;
     ed.classList.toggle("hidden", !style);
     if (!style) return;
     var typeSel = document.getElementById("mat-type");
@@ -1420,11 +1436,12 @@
         ? "\n  buffers · " + (profile.texBytesPerMpx / 1e6).toFixed(1) + " MB/Mpx" : "");
   }
 
-  /** Rebuild the selected fill style from the editor state and land it
-   *  as one fillStyle op. */
+  /** Rebuild the selected library material from the editor state and
+   *  land it as ONE materialEdit op (updates every use, all layers). */
   function applyMatEdit() {
-    if (matSelected < 0 || matSelected >= app.doc.fills.length) return;
-    var old = app.doc.fills[matSelected];
+    var mats = app.project.materials || [];
+    if (matSelected < 0 || matSelected >= mats.length) return;
+    var old = mats[matSelected];
     var type = document.getElementById("mat-type").value;
     var style;
     if (type === old.type) style = VB.materialClone(old);
@@ -1470,7 +1487,7 @@
       if (!style.matcap) style.matcap = "studio";
     }
     var keep = matSelected; // docChanged rebuilds the panel
-    app.exec({ op: "fillStyle", index: keep, style: style });
+    app.exec({ op: "materialEdit", index: keep, style: style });
     matSelected = keep;
     refreshMaterials();
   }
@@ -1505,13 +1522,34 @@
 
   /** The matcap pipeline debug views: the region's BUMP MAP (height
    *  field), the derived NORMAL MAP, and the shaded result, computed
-   *  by the same CPU pipeline the renderer uses (thumbnail-capped). */
+   *  by the same CPU pipeline the renderer uses (thumbnail-capped).
+   *  Shows the material's first real use in the ACTIVE layer; unused
+   *  library materials preview on a synthetic swatch region. */
+  function matcapPreviewTarget(style) {
+    var key = JSON.stringify(style);
+    for (var i = 0; i < app.doc.fills.length; i++) {
+      if (JSON.stringify(app.doc.fills[i]) === key) {
+        return { doc: app.doc, fillIdx: i + 1 };
+      }
+    }
+    var d = new VB.VBDocument();
+    d.width = 3000; d.height = 2200;
+    d.fills.push(VB.materialClone(style));
+    d.edges.push(
+      VB.edge(400, 1100, 400, 300, 1500, 300, 0, 1, 0),
+      VB.edge(1500, 300, 2600, 300, 2600, 1100, 0, 1, 0),
+      VB.edge(2600, 1100, 2600, 1900, 1500, 1900, 0, 1, 0),
+      VB.edge(1500, 1900, 400, 1900, 400, 1100, 0, 1, 0));
+    return { doc: d, fillIdx: 1 };
+  }
+
   function renderMatcapDebugViews(style) {
     var ids = ["mat-dbg-bump", "mat-dbg-normal", "mat-dbg-result"];
     var kinds = ["bump", "normal", "result"];
     var buffers = null;
     try {
-      buffers = VB.matcapBuffers(app.doc, matSelected + 1, style, 84);
+      var target = matcapPreviewTarget(style);
+      buffers = VB.matcapBuffers(target.doc, target.fillIdx, style, 84);
     } catch (err) { /* corrupt region: leave the views blank */ }
     for (var i = 0; i < 3; i++) {
       var cv = document.getElementById(ids[i]);

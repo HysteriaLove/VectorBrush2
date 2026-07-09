@@ -127,15 +127,64 @@
   // ---- pipeline stages (pure, typed arrays) ----------------------------------
 
   /** Region coverage mask over an integer pixel grid: 1 inside the
-   *  fill (parity against the document — exact), 0 outside. */
+   *  fill (parity at pixel centers — exact, same crossing rule as
+   *  geom.fillParity), 0 outside.
+   *
+   *  SCANLINE parity: each row computes its boundary crossings once
+   *  and fills the spans between them — O(rows × boundary edges), not
+   *  O(pixels × edges). Per-pixel ray casting made every matcap
+   *  recompute take seconds on real regions. */
   function coverageMask(doc, fillIdx, bb, w, h) {
     var mask = new Uint8Array(w * h);
     var sx = (bb.xmax - bb.xmin) / w, sy = (bb.ymax - bb.ymin) / h;
+    var boundary = [];
+    for (var bi = 0; bi < doc.edges.length; bi++) {
+      var be = doc.edges[bi];
+      if ((be.fill0 === fillIdx) !== (be.fill1 === fillIdx)) boundary.push(be);
+    }
+    var T_EPS = 1e-9;
+    // crossing x-coordinates of one edge with the horizontal line py —
+    // mirrors fillParity's straddle rules so pixel-center classification
+    // is IDENTICAL to the per-pixel reference
+    function rowCrossings(e, py, out) {
+      if (e.cx === null) {
+        if ((e.ay > py) !== (e.by > py)) {
+          out.push(e.ax + (e.bx - e.ax) * (py - e.ay) / (e.by - e.ay));
+        }
+        return;
+      }
+      var denom = e.ay - 2 * e.cy + e.by;
+      var tExt = denom !== 0 ? (e.ay - e.cy) / denom : -1;
+      var ts = [0];
+      if (tExt > T_EPS && tExt < 1 - T_EPS) ts.push(tExt);
+      ts.push(1);
+      for (var s = 0; s + 1 < ts.length; s++) {
+        var p0 = VB.geom.evalEdge(e, ts[s]), p1 = VB.geom.evalEdge(e, ts[s + 1]);
+        if ((p0.y > py) === (p1.y > py)) continue;
+        var roots = VB.geom.solveQuadratic(denom, 2 * (e.cy - e.ay), e.ay - py);
+        for (var r2 = 0; r2 < roots.length; r2++) {
+          var t = roots[r2];
+          if (t >= ts[s] - 1e-9 && t <= ts[s + 1] + 1e-9) {
+            out.push(VB.geom.evalEdge(e, Math.min(1, Math.max(0, t))).x);
+            break;
+          }
+        }
+      }
+    }
+    var xs = [];
     for (var y = 0; y < h; y++) {
       var py = bb.ymin + (y + 0.5) * sy;
-      for (var x = 0; x < w; x++) {
-        var px = bb.xmin + (x + 0.5) * sx;
-        if (VB.geom.fillParity(doc.edges, fillIdx, px, py)) mask[y * w + x] = 1;
+      xs.length = 0;
+      for (var b2 = 0; b2 < boundary.length; b2++) rowCrossings(boundary[b2], py, xs);
+      if (!xs.length) continue;
+      xs.sort(function (a, b) { return a - b; });
+      for (var k = 0; k + 1 < xs.length; k += 2) {
+        // pixels whose CENTER lies inside the span (x0, x1]
+        var x0 = Math.ceil((xs[k] - bb.xmin) / sx - 0.5);
+        var x1 = Math.floor((xs[k + 1] - bb.xmin) / sx - 0.5 - 1e-9);
+        if (x0 < 0) x0 = 0;
+        if (x1 > w - 1) x1 = w - 1;
+        for (var x = x0; x <= x1; x++) mask[y * w + x] = 1;
       }
     }
     return mask;
