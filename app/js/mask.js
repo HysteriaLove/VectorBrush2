@@ -190,6 +190,15 @@
     // twip scale — and one leaked probe misfills (or empties) an entire
     // face. Try the longest edges at several params and nudge widths,
     // and accept only a probe the face itself contains.
+    //
+    // DEEP nudges first: the probe is verified against THIS map, but
+    // outside-mask faces are then classified with fillAt(preOp) — and
+    // splitting/welding drifts boundary geometry a few twips from the
+    // pre-op original. A probe hugging the post-op boundary at 1-2.5tw
+    // can sit on the WRONG side of the pre-op curve and misfill the
+    // whole face (the log-23 pocket flood: a white pocket 15px from the
+    // stroke stamped with the neighbor's paint). Deep probes clear the
+    // drift; slivers still fall through to the fine nudges.
     function faceProbe(f) {
       var cycles = [f.outer].concat(f.holes);
       function contains(x, y) {
@@ -208,7 +217,7 @@
         return l2 - l1;
       });
       var params = [0.5, 0.3, 0.7];
-      var nudges = [1, 2.5];
+      var nudges = [60, 25, 8, 2.5, 1];
       for (var oi = 0; oi < order.length && oi < 5; oi++) {
         var h = order[oi];
         var e = doc.edges[h.edge];

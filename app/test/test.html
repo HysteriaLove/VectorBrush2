@@ -60,6 +60,7 @@
 <script src="userlog3.js"></script>
 <script src="userlog4.js"></script>
 <script src="userlog20.js"></script>
+<script src="userlog21.js"></script>
 <script>
 (async function () {
   "use strict";
@@ -859,6 +860,26 @@
     });
     check("log20 leaves no micro-fragments", micro20.length === 0,
       micro20.length + " sub-5tw records");
+
+    // Log 21 (user session 2026-07-09): 17 scribbled brush strokes + 10
+    // undos. The last stroke crosses an existing boundary curve whose
+    // noded pieces drift ~2tw from the pre-op original; the stamp probe
+    // used to hug the post-op boundary at 1-2.5tw, land on the wrong
+    // side of the PRE-OP curve, and flood a white pocket 15px from the
+    // stroke with the neighbor's paint (the island-fill report). Deep
+    // probes clear the drift; these pocket points must stay empty.
+    var post21 = (await VB.replayJournal(window.VBUserLog21.ops)).doc;
+    check("log21 replays consistent",
+      VB.integrityReport(post21).length === 0, VB.integrityReport(post21)[0]);
+    check("log21 white pocket is not flooded (probe drift)",
+      VB.geom.fillAt(post21, 4900, 6180) === 0 &&
+      VB.geom.fillAt(post21, 5000, 6200) === 0,
+      "pocket fill " + VB.geom.fillAt(post21, 4900, 6180) + "/" +
+      VB.geom.fillAt(post21, 5000, 6200));
+    check("log21 stroke tube is painted",
+      VB.geom.fillAt(post21,
+        window.VBUserLog21.ops[27].points[70].x,
+        window.VBUserLog21.ops[27].points[70].y) === 1);
   })();
 
   // ======================= unit tests: shape primitives =====================
