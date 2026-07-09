@@ -1789,6 +1789,47 @@
     return b;
   }
 
+  // Windowed thumbnails (thumbs.js): only rows actually scrolled into
+  // view render — the observer hands visible thumbs to the prefetcher,
+  // most recently revealed first. Rebuilds blit fresh cache hits
+  // synchronously, so scrolling and redraws stay cheap.
+  var THUMB_W = 48, THUMB_H = 36;
+  var thumbPriority = 0;
+  var thumbIO = window.IntersectionObserver ? new IntersectionObserver(
+    function (entries) {
+      entries.forEach(function (en) {
+        if (!en.isIntersecting || !en.target._vbThumb) return;
+        thumbIO.unobserve(en.target);
+        var req = en.target._vbThumb;
+        VB.thumbRequest(req.key, req.cell, THUMB_W, THUMB_H, ++thumbPriority)
+          .then(function (cv) {
+            if (cv && en.target.isConnected) {
+              en.target.getContext("2d").drawImage(cv, 0, 0);
+            }
+          });
+      });
+    }, { root: document.getElementById("actorlist"), rootMargin: "60px" }
+  ) : null;
+
+  function thumbCanvas(key, cell) {
+    var tc = document.createElement("canvas");
+    tc.className = "pthumb";
+    tc.width = THUMB_W;
+    tc.height = THUMB_H;
+    var cached = VB.thumbGet(key, cell);
+    if (cached) {
+      tc.getContext("2d").drawImage(cached, 0, 0);
+    } else if (thumbIO) {
+      tc._vbThumb = { key: key, cell: cell };
+      thumbIO.observe(tc);
+    } else {
+      VB.thumbRequest(key, cell, THUMB_W, THUMB_H, 0).then(function (cv) {
+        if (cv && tc.isConnected) tc.getContext("2d").drawImage(cv, 0, 0);
+      });
+    }
+    return tc;
+  }
+
   function refreshActors() {
     var list = document.getElementById("actorlist");
     list.innerHTML = "";
@@ -1829,8 +1870,12 @@
         var pr = document.createElement("div");
         var editing = t && t.actor === a.id && t.pose === p.id;
         pr.className = "actrow posesub" + (editing ? " editing" : "");
-        pr.textContent = (editing ? "✎ " : "") + p.name;
         pr.title = "Edit this pose's art";
+        pr.appendChild(thumbCanvas("pose:" + p.id, p.cell));
+        var pn = document.createElement("span");
+        pn.className = "aname";
+        pn.textContent = (editing ? "✎ " : "") + p.name;
+        pr.appendChild(pn);
         pr.addEventListener("click", function () {
           if (editing) return;
           app.exec({ op: "editTargetSet", target: { actor: a.id, pose: p.id } });

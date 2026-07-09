@@ -48,6 +48,7 @@
 <script src="../js/history.js"></script>
 <script src="../js/project.js"></script>
 <script src="../js/actors.js"></script>
+<script src="../js/thumbs.js"></script>
 <script src="../js/text.js"></script>
 <script src="../js/debug.js"></script>
 <script src="../js/pencil.js"></script>
@@ -3176,6 +3177,43 @@
       (brushPx[0] > 180 && brushPx[1] < 120),
       "rgb(" + brushMid[0] + "," + brushMid[1] + "," + brushMid[2] + ")");
     ase.exec({ op: "editTargetClear" });
+
+    // streamed thumbnails (thumbs.js — beat 3): oracle-rendered, keyed
+    // by content hash, AssetCache-tenanted, prefetcher-loaded
+    var thCell = VB.actorById(ase.project, "actor_t2").poses[0].cell;
+    var th1 = await VB.thumbRequest("pose:test", thCell, 48, 36, 1);
+    var thPix = th1.getContext("2d").getImageData(17, 13, 1, 1).data;
+    check("thumbnail shows the cell art",
+      thPix[0] > 150 && thPix[1] < 130,
+      "rgb(" + thPix[0] + "," + thPix[1] + "," + thPix[2] + ")");
+    var thRenders = VB._thumbRenders;
+    var th2 = await VB.thumbRequest("pose:test", thCell, 48, 36, 1);
+    check("fresh thumbnails come from the cache",
+      th2 === th1 && VB._thumbRenders === thRenders &&
+      VB.thumbGet("pose:test", thCell) === th1);
+    VB.pencilCommit(thCell, [{ x: 500, y: 500 }, { x: 14000, y: 700 }],
+                    { width: 20, color: { r: 0, g: 0, b: 0, a: 255 } });
+    check("edited cells miss the cache",
+      VB.thumbGet("pose:test", thCell) === null);
+    var th3 = await VB.thumbRequest("pose:test", thCell, 48, 36, 1);
+    check("edited cells re-render once",
+      th3 !== th1 && VB._thumbRenders === thRenders + 1);
+    var thData3 = th3.getContext("2d").getImageData(0, 0, 48, 36).data;
+    var thBudget = VB.assets.budget;
+    VB.assets.setBudget(1);
+    VB.assets.claim("test:thumbstarver", 2, function () {});
+    check("a starved AssetCache drops the thumb",
+      VB.thumbGet("pose:test", thCell) === null);
+    var th4 = await VB.thumbRequest("pose:test", thCell, 48, 36, 1);
+    VB.assets.release("test:thumbstarver");
+    VB.assets.setBudget(thBudget);
+    var thData4 = th4.getContext("2d").getImageData(0, 0, 48, 36).data;
+    var thDiff = 0;
+    for (var thI = 0; thI < thData3.length; thI++) {
+      if (thData3[thI] !== thData4[thI]) thDiff++;
+    }
+    check("evicted thumbs recompute pixel-identical", thDiff === 0,
+      thDiff + " differing bytes");
 
     // guards: the last pose / last drawing stay
     ase.exec({ op: "poseRemove", actor: "actor_t2", pose: "pose_t2" });
