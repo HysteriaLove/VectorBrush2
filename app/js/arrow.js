@@ -992,7 +992,6 @@
           var z2 = boxHDragTarget(d2, pos);
           if (z2) VB.textBoxHApply(app.doc, d2.index, z2.height, z2.dy);
         }
-        if (app.docTouched) app.docTouched(); // live records changed
       }
       app.requestRender();
     };
@@ -1128,7 +1127,6 @@
           })
         };
         self.sel = { fills: [], edgeKeys: [], region: null };
-        if (app.docTouched) app.docTouched(); // un-journaled lift
         app.requestRender();
         app.setMsg("selection floating — drag to keep moving, click away to merge, Delete to discard");
         return;
@@ -1185,7 +1183,6 @@
           })
         };
         self.sel = { fills: [], edgeKeys: [], region: null };
-        if (app.docTouched) app.docTouched(); // un-journaled lift
         app.requestRender();
         app.setMsg("selection floating — drag to keep moving, click away to merge, Delete to discard");
       }

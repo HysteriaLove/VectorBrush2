@@ -715,7 +715,6 @@
       });
       app.history.push(app.doc); // pre-lift snapshot (one undo step)
       app.doc.texts.splice(index, 1);
-      if (app.docTouched) app.docTouched(); // un-journaled lift
       beginSession({
         matrix: block.matrix.slice(),
         editIndex: index,
@@ -746,7 +745,6 @@
       if (s.editIndex !== null) {
         // put the lifted block back so the doc matches what replay sees
         app.doc.texts.splice(s.editIndex, 0, s.stash);
-        if (app.docTouched) app.docTouched();
         var unchanged = str === s.original &&
           (s.wrapWidth || null) === (s.stash.wrapWidth || null) &&
           (s.boxHeight || null) === (s.stash.boxHeight || null) &&

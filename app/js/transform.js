@@ -171,7 +171,6 @@
         self.float = { textBlock: app.doc.texts[idx],
                        orig: app.doc.texts[idx], textIndex: idx };
         app.doc.texts.splice(idx, 1);
-        if (app.docTouched) app.docTouched(); // un-journaled lift
         return;
       }
       // the clip builders only READ the doc — build first, snapshot,
@@ -184,7 +183,6 @@
       if (self.items.region) VB.regionDelete(app.doc, self.items.region);
       else VB.arrowRemoveSel(app.doc, self.items.fills, self.items.edgeKeys);
       self.float = { doc: clip, paths: null };
-      if (app.docTouched) app.docTouched(); // un-journaled lift
     }
 
     /** Put a lifted clip back untouched: the lift was never journaled,

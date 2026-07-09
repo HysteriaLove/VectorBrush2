@@ -11,17 +11,6 @@
   var canvas = document.getElementById("stage-canvas");
   var ctx = canvas.getContext("2d");
 
-  // Opt-in GPU renderer (?renderer=pixi): the document draws on a pixi
-  // canvas UNDER this one, which then only carries tool overlays. Falls
-  // back silently when WebGL is unavailable.
-  var pixiView = null;
-  (function () {
-    var want = new URLSearchParams(location.search).get("renderer");
-    if (want !== "pixi" || !window.PIXI || !VB.PixiView) return;
-    var pv = VB.PixiView();
-    if (pv.init(document.getElementById("canvaswrap"))) pixiView = pv;
-  })();
-
   var app = {
     project: new VB.Project(),
     fileName: null,
@@ -64,23 +53,11 @@
   // Undo snapshots capture the WHOLE project, so layer add/delete/move
   // are single undo steps. Tools call app.history.push(app.doc) — the
   // wrapper ignores the argument and snapshots the project.
-  // Live tool mutations that bypass docChanged (lifts, record reflows
-  // mid-drag) tell the GPU scene to re-tessellate through this.
-  app.docTouched = function () {
-    if (pixiView) pixiView.invalidate();
-  };
-
   var projectHistory = new VB.History();
   app.history = {
     push: function () { projectHistory.push(app.project); },
-    undo: function () {
-      if (pixiView) pixiView.invalidate(); // lift-restores bypass docChanged
-      return projectHistory.undo(app.project);
-    },
-    redo: function () {
-      if (pixiView) pixiView.invalidate();
-      return projectHistory.redo(app.project);
-    },
+    undo: function () { return projectHistory.undo(app.project); },
+    redo: function () { return projectHistory.redo(app.project); },
     canUndo: function () { return projectHistory.canUndo(); },
     canRedo: function () { return projectHistory.canRedo(); },
     clear: function () { projectHistory.clear(); },
@@ -110,12 +87,7 @@
     renderQueued = true;
     requestAnimationFrame(function () {
       renderQueued = false;
-      if (pixiView) {
-        pixiView.render(app.project, app.view);
-        VB.applyViewTransform(ctx, app.view); // overlays only
-      } else {
-        VB.renderProject(ctx, app.project, app.view);
-      }
+      VB.renderProject(ctx, app.project, app.view);
       var tool = tools[app.tool];
       // a pending transform session stays visible while a sibling
       // selection tool is active
@@ -142,7 +114,6 @@
   // debug panel's style tables and record-stream stats, which are too
   // costly to rebuild on every pointer move.
   function docChanged() {
-    if (pixiView) pixiView.invalidate();
     if (tools.select && tools.select.clearSelection) tools.select.clearSelection();
     // a pending free-transform session's picks are stale now — drop it
     // WITHOUT committing (its own commit calls docChanged after landing)
@@ -183,7 +154,6 @@
     app.view.dpr = dpr;
     canvas.width = Math.max(1, Math.round(rect.width * dpr));
     canvas.height = Math.max(1, Math.round(rect.height * dpr));
-    if (pixiView) pixiView.resize(rect.width, rect.height);
     requestRender();
   }
   new ResizeObserver(resizeCanvas).observe(canvas.parentElement);

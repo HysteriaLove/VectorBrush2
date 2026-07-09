@@ -51,7 +51,6 @@
 <script src="../js/lasso.js"></script>
 <script src="../js/ttf.js"></script>
 <script src="../js/fonts-builtin.js"></script>
-<script src="../js/pixirender.js"></script>
 <script src="fixtures.js"></script>
 <script src="ttffixture.js"></script>
 <script src="fontswf.js"></script>
@@ -2181,42 +2180,6 @@
       djOp.records[0].glyphs[0].adv > 0 &&
       djOp.font.glyphs[0].contours.length > 0,
       djOp && JSON.stringify(djOp.records[0].glyphs.map(function (g) { return g.adv; })));
-  })();
-
-  // ================= unit tests: pixi renderer helpers (no GPU) =============
-  // The GPU renderer converts even-odd fills into outline+holes by
-  // containment nesting; the nesting logic is pure and testable here.
-  log("pixi renderer helpers:");
-  (function () {
-    function ring(cx, cy, r) {
-      var pts = [];
-      for (var i = 0; i < 8; i++) {
-        var a = i / 8 * Math.PI * 2;
-        pts.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r });
-      }
-      return pts;
-    }
-    // donut (outer + hole) + a separate island + an island INSIDE the hole
-    var chains = [ring(0, 0, 100), ring(0, 0, 60), ring(500, 0, 40), ring(0, 0, 20)];
-    var nested = VB.pixiAssignHoles(chains);
-    check("hole nesting: donut + island depths",
-      nested[0].depth === 0 && nested[1].depth === 1 &&
-      nested[2].depth === 0 && nested[3].depth === 2,
-      nested.map(function (e) { return e.depth; }).join(","));
-    check("holes attach to their outline",
-      nested[0].children.length === 1 && nested[0].children[0] === 1 &&
-      nested[2].children.length === 0,
-      JSON.stringify(nested.map(function (e) { return e.children; })));
-    check("hairline floor matches the 2D renderer",
-      VB.pixiHairWidth(2, 1) === 20 &&   // 2tw stroke at zoom 1 -> 1px = 20tw
-      VB.pixiHairWidth(60, 1) === 60 &&  // fat strokes untouched
-      VB.pixiHairWidth(2, 4) === 5,      // zoomed in, floor shrinks
-      [VB.pixiHairWidth(2, 1), VB.pixiHairWidth(60, 1), VB.pixiHairWidth(2, 4)].join(","));
-    var flat = VB.pixiFlattenChain(
-      { sx: 0, sy: 0, pts: [{ cx: 50, cy: 100, x: 100, y: 0 }] }, 4);
-    check("quad flattening samples the curve",
-      flat.length === 5 && Math.abs(flat[2].y - 50) < 1,
-      JSON.stringify(flat));
   })();
 
   // ======================= SWF export round-trip ===========================
