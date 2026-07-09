@@ -129,13 +129,25 @@
     VB.repairPlanar(doc);
 
     // Contract micro-edges. Noding two near-tangent hugging fences (a
-    // stroke re-tracing existing paint) shreds them into 1-3tw fragments
+    // stroke re-tracing existing paint) shreds them into micro-fragments
     // whose departure angles are integer-quantization noise; the angular
     // sort misroutes at such nodes and the walk turns closed pocket
     // boundaries into bridge trees (the pocket-flood class). Welding a
     // micro-edge's endpoints into one node removes the noise without
-    // changing anything visible (<=3tw).
-    var MICRO = 5;
+    // changing anything visible. Welds are also parity-safe where
+    // dropping a crossing is not: a wobble lens collapses to a point,
+    // so no region swaps sides.
+    //
+    // 10tw (0.5px): a region DRAG lands content on surviving copies of
+    // its own curves, and translated-self crossings are tangential BY
+    // CONSTRUCTION (they occur where the curve parallels the drag
+    // vector). User log 25's small drags left 8tw-offset grazes whose
+    // stairs (121 fragments of 5-10tw) sailed over the old 5tw
+    // threshold; the walk bridged the moved fill's boundary and the
+    // mask dissolved the entire moved region. 10 is the corpus optimum:
+    // 5 left log14's op#111/#137 residuals, 8 shifted them, 12 cleared
+    // log14 but welded away two small features in log11-heavy.
+    var MICRO = 10;
     for (var pass = 0; pass < 4; pass++) {
       var weld = new Map(); // "x,y" -> "x,y" (union-find style)
       function resolve(k) {

@@ -61,6 +61,7 @@
 <script src="userlog4.js"></script>
 <script src="userlog20.js"></script>
 <script src="userlog21.js"></script>
+<script src="userlog25.js"></script>
 <script>
 (async function () {
   "use strict";
@@ -880,6 +881,25 @@
       VB.geom.fillAt(post21,
         window.VBUserLog21.ops[27].points[70].x,
         window.VBUserLog21.ops[27].points[70].y) === 1);
+
+    // Log 25 (user stress test 2026-07-09): brush/bucket/erase/pencil +
+    // 27 region drags. Small drags land content on surviving copies of
+    // its own curves — translated-self crossings are tangential by
+    // construction — and the graze stairs (8tw offsets) overwhelmed the
+    // 5tw micro-weld: the face walk bridged the moved fill's boundary
+    // and the mask dissolved the ENTIRE moved region ("the blue fill
+    // disappeared"). MICRO=10 welds the stairs; the moved blue must
+    // survive its final 15px drag.
+    var post25 = (await VB.replayJournal(window.VBUserLog25.ops)).doc;
+    check("log25 replays consistent",
+      VB.integrityReport(post25).length === 0, VB.integrityReport(post25)[0]);
+    var m25 = window.VBUserLog25.ops[94].m;
+    check("log25 moved blue fill survives the drag (graze stairs)",
+      VB.geom.fillAt(post25, 240 * 20 + m25[4], 220 * 20 + m25[5]) === 1 &&
+      VB.geom.fillAt(post25, 215 * 20 + m25[4], 235 * 20 + m25[5]) === 1,
+      "dest fills " +
+      VB.geom.fillAt(post25, 240 * 20 + m25[4], 220 * 20 + m25[5]) + "/" +
+      VB.geom.fillAt(post25, 215 * 20 + m25[4], 235 * 20 + m25[5]));
   })();
 
   // ======================= unit tests: shape primitives =====================
