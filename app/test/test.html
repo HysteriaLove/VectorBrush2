@@ -66,8 +66,10 @@
 <script src="userlog3.js"></script>
 <script src="userlog4.js"></script>
 <script src="userlog20.js"></script>
+<script src="userlog21.js"></script>
 <script src="userlog29.js"></script>
 <script src="userlog30.js"></script>
+<script src="userlog32.js"></script>
 <script>
 (async function () {
   "use strict";
@@ -867,6 +869,58 @@
     });
     check("log20 leaves no micro-fragments", micro20.length === 0,
       micro20.length + " sub-5tw records");
+
+    // Log 21 (user session 2026-07-09): 17 scribbled brush strokes + 10
+    // undos. The last stroke crosses an existing boundary curve whose
+    // noded pieces drift ~2tw from the pre-op original; the stamp probe
+    // used to hug the post-op boundary at 1-2.5tw, land on the wrong
+    // side of the PRE-OP curve, and flood a white pocket 15px from the
+    // stroke with the neighbor's paint (the island-fill report). Deep
+    // probes clear the drift; these pocket points must stay empty.
+    var post21 = (await VB.replayJournal(window.VBUserLog21.ops)).doc;
+    check("log21 replays consistent",
+      VB.integrityReport(post21).length === 0, VB.integrityReport(post21)[0]);
+    check("log21 white pocket is not flooded (probe drift)",
+      VB.geom.fillAt(post21, 4900, 6180) === 0 &&
+      VB.geom.fillAt(post21, 5000, 6200) === 0,
+      "pocket fill " + VB.geom.fillAt(post21, 4900, 6180) + "/" +
+      VB.geom.fillAt(post21, 5000, 6200));
+    check("log21 stroke tube is painted",
+      VB.geom.fillAt(post21,
+        window.VBUserLog21.ops[27].points[70].x,
+        window.VBUserLog21.ops[27].points[70].y) === 1);
+
+    // Log 32 (user session 2026-07-09, "eraser reverts fills / erases
+    // far geometry"): brush + pencil rooms, 19 bucket fills, then
+    // erases. Op#39's channel (a) re-stamped a fill-2 room as fill 1 —
+    // its face probe sat 13tw off a fence, inside a ~30tw pre-op fill-1
+    // tongue riding that fence (deep probes fix), and (b) leaked into a
+    // fill-1 pocket through a pencil stroke that penetrated the swath
+    // wall by 0.8tw — a T-junction graze no repair stage owned
+    // (span-align SNAP=2 fix). Far census points must ride through
+    // every erase unchanged.
+    var log32ops = window.VBUserLog32.ops;
+    var sentinels32 = [
+      { x: 3225, y: 3975 }, { x: 3675, y: 3975 }, { x: 3975, y: 3975 },
+      { x: 3525, y: 2025 }, { x: 3375, y: 2325 }, { x: 7425, y: 2475 }];
+    var pre39 = (await VB.replayJournal(log32ops.slice(0, 39))).doc;
+    var want32 = sentinels32.map(function (p) {
+      return VB.geom.fillAt(pre39, p.x, p.y);
+    });
+    check("log32 sentinels are filled before the erase",
+      want32.every(function (f) { return f > 0; }), want32.join(","));
+    VB.eraseStroke(pre39, log32ops[39].points, log32ops[39].radius);
+    var got32 = sentinels32.map(function (p) {
+      return VB.geom.fillAt(pre39, p.x, p.y);
+    });
+    check("log32 op#39 leaves far fills untouched (revert/vanish report)",
+      got32.join(",") === want32.join(","),
+      got32.join(",") + " vs " + want32.join(","));
+    check("log32 op#39 keeps the map consistent",
+      VB.integrityReport(pre39).length === 0, VB.integrityReport(pre39)[0]);
+    var post32 = (await VB.replayJournal(log32ops)).doc;
+    check("log32 full replay stays consistent",
+      VB.integrityReport(post32).length === 0, VB.integrityReport(post32)[0]);
   })();
 
   // ======================= user stress logs 29/30 ================================

@@ -70,18 +70,32 @@
     // scramble the walk (the eraser-click toggle bug). Split each side
     // at the other's endpoints that lie ON it; identical stretches then
     // decompose into integer-identical twins.
+    //
+    // Tolerance 2tw: an old edge GRAZING the fence can cross it within
+    // a twip or two of its own endpoint. That crossing is inside
+    // validatePlanar's NODE_TOL anchor exclusion (legitimate rounding
+    // jitter there), makes no micro-edge for the weld to contract, and
+    // at 0.75tw sat outside this rule too — so no repair stage owned
+    // it, the edge threaded THROUGH the fence, and the face walk
+    // bridged the fence at the shared node (log 32: the erase channel
+    // leaked into a fill-1 pocket through a pencil stroke that
+    // penetrated the swath wall by 0.8tw — 8 census cells emptied up
+    // to 500tw from the eraser). Splitting the fence AT the endpoint
+    // snaps the T-junction shut; ≤2tw of distortion is below the 5tw
+    // micro-weld the pipeline already applies.
     (function alignCoincidentSpans() {
+      var SNAP = 2;
       function splitsFor(target, endpoints) {
         var bb = VB.geom.edgeBBox(target);
         var list = [];
         for (var i = 0; i < endpoints.length; i++) {
           var pt = endpoints[i];
-          if (pt.x < bb.xmin - 1 || pt.x > bb.xmax + 1 ||
-              pt.y < bb.ymin - 1 || pt.y > bb.ymax + 1) continue;
+          if (pt.x < bb.xmin - SNAP || pt.x > bb.xmax + SNAP ||
+              pt.y < bb.ymin - SNAP || pt.y > bb.ymax + SNAP) continue;
           if ((pt.x === target.ax && pt.y === target.ay) ||
               (pt.x === target.bx && pt.y === target.by)) continue;
           var q = VB.geom.nearestOnEdge(target, pt.x, pt.y);
-          if (q.d <= 0.75 && q.t > 0.02 && q.t < 0.98) {
+          if (q.d <= SNAP && q.t > 0.02 && q.t < 0.98) {
             list.push({ t: q.t, point: { x: pt.x, y: pt.y } });
           }
         }
@@ -190,6 +204,17 @@
     // twip scale — and one leaked probe misfills (or empties) an entire
     // face. Try the longest edges at several params and nudge widths,
     // and accept only a probe the face itself contains.
+    //
+    // DEEP nudges first: the probe is verified against THIS map, but
+    // outside-mask faces are then classified with the PRE-op document —
+    // and the pre-op geometry can differ near the boundary both by
+    // twip-scale noding/weld drift AND by real micro-features hugging
+    // the fence (log 23: a probe 1-2.5tw off the boundary sat on the
+    // wrong side of the drift and flooded a white pocket; log 32: a
+    // probe 13tw off a fence landed inside a ~30tw pre-op fill tongue
+    // riding that fence, and a whole fill-2 room re-stamped as fill 1
+    // — the "fills revert on erase" report). Deep probes clear both;
+    // slivers still fall through to the fine nudges unchanged.
     function faceProbe(f) {
       var cycles = [f.outer].concat(f.holes);
       function contains(x, y) {
@@ -208,7 +233,7 @@
         return l2 - l1;
       });
       var params = [0.5, 0.3, 0.7];
-      var nudges = [1, 2.5];
+      var nudges = [60, 25, 8, 2.5, 1];
       for (var oi = 0; oi < order.length && oi < 5; oi++) {
         var h = order[oi];
         var e = doc.edges[h.edge];
@@ -279,7 +304,15 @@
             crossings += VB.edgeRayCrossings(doc.edges[h.edge], dp.x, dp.y);
           });
         });
-        if (crossings & 1) VB._maskDebugFace = Object.assign({ face: fi }, diag[fi]);
+        if (crossings & 1) {
+          VB._maskDebugFace = Object.assign({ face: fi }, diag[fi]);
+          VB._maskDebugFace.cycle = f.outer.map(function (h) {
+            var e = doc.edges[h.edge];
+            return h.edge + (h.forward ? ">" : "<") + "(" + e.ax + "," + e.ay +
+              ")-(" + e.bx + "," + e.by + ")f" + e.fill0 + "|" + e.fill1 +
+              "L" + e.line;
+          });
+        }
       });
     }
 
