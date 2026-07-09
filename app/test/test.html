@@ -25,7 +25,7 @@
 <script src="../js/swf.js"></script>
 <script src="../js/trace.js"></script>
 <script src="../js/render.js"></script>
-<script src="../js/vbd.js"></script>
+<script src="../js/y2kvector.js"></script>
 <script src="../js/swfwrite.js"></script>
 <script src="../js/materials.js"></script>
 <script src="../js/matcap.js"></script>
@@ -944,8 +944,8 @@
     var vdoc = mr.doc;
     vdoc.fills.push({ type: "matcap", color: { r: 10, g: 20, b: 30, a: 255 },
                       bumpScale: 80, blurPx: 2.5, resolution: 0.5 });
-    var bytes = await VB.encodeVBD(vdoc);
-    var decoded = await VB.decodeVBD(bytes);
+    var bytes = await VB.encodeY2KVector(vdoc);
+    var decoded = await VB.decodeY2KVector(bytes);
     var back = decoded.doc || decoded.project.activeCell();
     check("vbd round-trips linear fill",
       back.fills[0].type === "linear" &&
@@ -1026,8 +1026,8 @@
     check("materialEdit is one undo step (library + cells restored)",
       lr3.project.materials[0].type === "linear" &&
       lr3.project.scenes[0].layers[1].frames[0].fills[0].type === "linear");
-    var lbytes = await VB.encodeVBD(lr.project);
-    var ldec = await VB.decodeVBD(lbytes);
+    var lbytes = await VB.encodeY2KVector(lr.project);
+    var ldec = await VB.decodeY2KVector(lbytes);
     check("vbd v4 persists the global library",
       ldec.project && ldec.project.materials.length === 1 &&
       ldec.project.materials[0].type === "linear",
@@ -1194,8 +1194,8 @@
     mdoc2.fills.push({ type: "matcap", color: { r: 1, g: 2, b: 3, a: 255 },
                        matcap: { b64: "aGVsbG8h" },
                        bumpScale: 40, blurPx: 1, resolution: 1 });
-    var mbytes = await VB.encodeVBD(mdoc2);
-    var mdec = await VB.decodeVBD(mbytes);
+    var mbytes = await VB.encodeY2KVector(mdoc2);
+    var mdec = await VB.decodeY2KVector(mbytes);
     var mback = mdec.doc || mdec.project.activeCell();
     check("vbd round-trips builtin matcap id",
       mback.fills[0].matcap === "chrome", JSON.stringify(mback.fills[0].matcap));
@@ -2125,8 +2125,8 @@
       alphaRec && JSON.stringify(alphaRec.color));
 
     // vbd v2 round-trip: fonts + texts survive save/load losslessly
-    var bytes = await VB.encodeVBD(doc1, { compress: true });
-    var back = await VB.decodeVBD(bytes);
+    var bytes = await VB.encodeY2KVector(doc1, { compress: true });
+    var back = await VB.decodeY2KVector(bytes);
     check("vbd v2 round-trips text losslessly",
       back.info.version === 2 &&
       JSON.stringify(back.doc.fonts) === JSON.stringify(doc1.fonts) &&
@@ -2136,8 +2136,23 @@
     // a doc without text still writes v1
     var plain = new VB.Y2KVectorDocument();
     plain.width = 11000; plain.height = 8000;
-    var v1 = await VB.decodeVBD(await VB.encodeVBD(plain, { compress: false }));
+    var v1 = await VB.decodeY2KVector(await VB.encodeY2KVector(plain, { compress: false }));
     check("textless vbd stays v1", v1.info.version === 1);
+
+    // magic: new files open with "Y2KV"; the legacy "VBD1" magic (files
+    // saved before the y2kvector rename share the byte-identical body
+    // layout) must decode forever
+    check("y2kvector writes Y2KV magic",
+      bytes[0] === 0x59 && bytes[1] === 0x32 && bytes[2] === 0x4B && bytes[3] === 0x56,
+      String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]));
+    var legacy = new Uint8Array(bytes);
+    legacy[0] = 0x56; legacy[1] = 0x42; legacy[2] = 0x44; legacy[3] = 0x31; // "VBD1"
+    check("legacy VBD1 magic still recognized", VB.isY2KVector(legacy));
+    var legacyBack = await VB.decodeY2KVector(legacy);
+    check("legacy VBD1 file decodes identically",
+      JSON.stringify(legacyBack.doc.edges) === JSON.stringify(back.doc.edges) &&
+      JSON.stringify(legacyBack.doc.fonts) === JSON.stringify(back.doc.fonts),
+      legacyBack.doc.edges.length + " vs " + back.doc.edges.length + " edges");
 
     // history: undo/redo must not destroy text
     var hist = new VB.History();
@@ -2201,8 +2216,8 @@
       resUndo.project.scene().layers.length + " layers");
 
     // vbd: multi-layer forces v3 and round-trips; single default stays v1
-    var bytes3 = await VB.encodeVBD(res.project, { compress: true });
-    var back3 = await VB.decodeVBD(bytes3);
+    var bytes3 = await VB.encodeY2KVector(res.project, { compress: true });
+    var back3 = await VB.decodeY2KVector(bytes3);
     check("vbd project body round-trips the layer DOM",
       back3.info.version === 4 && // v4 = v3 + the global material library
       back3.project.scene().layers.length === 2 &&
@@ -2213,9 +2228,9 @@
       VB.geom.fillAt(back3.project.scene().layers[1].frames[0], 2200, 2200) === 1,
       "v" + back3.info.version);
     var resSingle = await VB.replayJournal(base.slice(0, 2));
-    var bytes1 = await VB.encodeVBD(resSingle.project, { compress: false });
+    var bytes1 = await VB.encodeY2KVector(resSingle.project, { compress: false });
     check("single default layer still saves as v1/v2",
-      (await VB.decodeVBD(bytes1)).info.version <= 2);
+      (await VB.decodeY2KVector(bytes1)).info.version <= 2);
 
     // SWF export: one DefineShape per layer, bottom to top
     var swf = VB.encodeSWF(res.project);
@@ -2315,7 +2330,7 @@
       Array.from(probe).join(","));
 
     // vbd round-trip of authored text (v2 path via bare doc)
-    var back = await VB.decodeVBD(await VB.encodeVBD(ra.doc, { compress: true }));
+    var back = await VB.decodeY2KVector(await VB.encodeY2KVector(ra.doc, { compress: true }));
     check("authored text survives vbd",
       JSON.stringify(back.doc.texts) === JSON.stringify(ra.doc.texts) &&
       JSON.stringify(back.doc.fonts) === JSON.stringify(ra.doc.fonts));
@@ -2531,7 +2546,7 @@
       wdoc.texts[0].records[1].y === wdoc.texts[0].records[0].y + wop.pitch,
       wdoc.texts[0].records.length + " records");
     // vbd carries wrap metadata + soft flags
-    var wback = await VB.decodeVBD(await VB.encodeVBD(wdoc, { compress: true }));
+    var wback = await VB.decodeY2KVector(await VB.encodeY2KVector(wdoc, { compress: true }));
     check("vbd round-trips wrap metadata",
       JSON.stringify(wback.doc.texts) === JSON.stringify(wdoc.texts),
       "got " + JSON.stringify(wback.doc.texts).slice(0, 260) + " want " +
@@ -2650,7 +2665,7 @@
     check("the grown box is grabbable",
       VB.textHit(vDoc, 2300, 3000 + 600) === 0);
     // vbd carries the box height (section format 4)
-    var vBack = await VB.decodeVBD(await VB.encodeVBD(vDoc, { compress: true }));
+    var vBack = await VB.decodeY2KVector(await VB.encodeY2KVector(vDoc, { compress: true }));
     check("vbd round-trips box height",
       JSON.stringify(vBack.doc.texts) === JSON.stringify(vDoc.texts));
 
@@ -2829,7 +2844,7 @@
       check("integer-twips invariant", bad.length === 0, bad[0]);
 
       // Encoder stats must agree with the actual uncompressed encoding.
-      var st = VB.vbdStats(doc);
+      var st = VB.y2kvectorStats(doc);
       check("stats edges match doc",
         st.straightEdges + st.curvedEdges >= s.edges,   // >= because oversized edges may split
         st.straightEdges + st.curvedEdges + " vs " + s.edges);
@@ -2847,10 +2862,10 @@
       check("fill loops close", openLoops === 0, openLoops + " of " + loops + " loops open");
 
       // VBD round-trip, uncompressed.
-      var rawVbd = await VB.encodeVBD(doc, { compress: false });
+      var rawVbd = await VB.encodeY2KVector(doc, { compress: false });
       check("stats bytes match encoding", st.fileBytes === rawVbd.length,
         st.fileBytes + " vs " + rawVbd.length);
-      var dec1 = await VB.decodeVBD(rawVbd);
+      var dec1 = await VB.decodeY2KVector(rawVbd);
       var diff1 = sameStringArrays(edgeKeySet(doc), edgeKeySet(dec1.doc));
       check("vbd roundtrip edges", diff1 === null, diff1);
       check("vbd roundtrip fills", JSON.stringify(doc.fills) === JSON.stringify(dec1.doc.fills));
@@ -2858,8 +2873,8 @@
       check("vbd roundtrip stage", dec1.doc.width === doc.width && dec1.doc.height === doc.height);
 
       // VBD round-trip, compressed.
-      var zipVbd = await VB.encodeVBD(doc, { compress: true });
-      var dec2 = await VB.decodeVBD(zipVbd);
+      var zipVbd = await VB.encodeY2KVector(doc, { compress: true });
+      var dec2 = await VB.decodeY2KVector(zipVbd);
       var diff2 = sameStringArrays(edgeKeySet(doc), edgeKeySet(dec2.doc));
       check("vbd compressed roundtrip", diff2 === null, diff2);
 

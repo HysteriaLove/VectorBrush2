@@ -394,15 +394,15 @@
       return b.done();
     },
 
-    saveVBD: function (doc) {
-      var b = Builder("saveVBD", "save .vbd", doc,
+    saveY2KVector: function (doc) {
+      var b = Builder("saveY2KVector", "save .y2kvector", doc,
                       { xmin: 0, ymin: 0, xmax: doc.width, ymax: doc.height });
       b.stage("write records", "edge", doc.edges.length, 4);
       b.stage("material encode", "style", doc.fills.length + doc.lines.length, 4);
       var glyphs = 0;
       (doc.fonts || []).forEach(function (f) { glyphs += f.glyphs.length; });
       b.stage("font subset", "glyph", glyphs, 10);
-      var stats = VB.vbdStats ? VB.vbdStats(doc) : null;
+      var stats = VB.y2kvectorStats ? VB.y2kvectorStats(doc) : null;
       if (stats && stats.bits) b.bits(stats.bits);
       return b.done();
     }

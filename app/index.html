@@ -293,8 +293,8 @@
 <body>
   <div id="topbar">
     <div class="brand">Vector<span>Brush</span></div>
-    <button id="btn-open" title="Open .swf or .vbd (Ctrl+O)">Open…</button>
-    <button id="btn-save" title="Save as compact .vbd">Save .vbd</button>
+    <button id="btn-open" title="Open .swf or .y2kvector (legacy .vbd) (Ctrl+O)">Open…</button>
+    <button id="btn-save" title="Save as compact .y2kvector">Save .y2kvector</button>
     <button id="btn-save-swf" title="Export as SWF v7 (opens in Flash MX 2004)">Save .swf</button>
     <button id="btn-log" title="Export the action log (deterministic bug repro)">Save log</button>
     <div class="sep"></div>
@@ -452,7 +452,7 @@
     <span id="status-msg"></span>
   </div>
 
-  <input type="file" id="file-input" accept=".swf,.vbd,.ttf,.ttc" style="display:none">
+  <input type="file" id="file-input" accept=".swf,.y2kvector,.vbd,.ttf,.ttc" style="display:none">
 
   <script src="js/bitio.js"></script>
   <script src="js/doc.js"></script>
@@ -463,7 +463,7 @@
   <script src="js/swf.js"></script>
   <script src="js/trace.js"></script>
   <script src="js/render.js"></script>
-  <script src="js/vbd.js"></script>
+  <script src="js/y2kvector.js"></script>
   <script src="js/swfwrite.js"></script>
   <script src="js/fit.js"></script>
   <script src="js/merge.js"></script>

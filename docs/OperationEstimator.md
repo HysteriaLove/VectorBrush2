@@ -127,7 +127,7 @@ The estimator keeps separate dimensions and only folds them into
 | `paintPxOps` | Per-pixel material work | `VB.materialProfile(style).perPx * paintedPixels` |
 | `gpuPasses` | Offscreen/fullscreen/compute passes | matcap, future 3D previews |
 | `textureBytes` | Working texture memory | material buffers, 3D targets |
-| `recordBits` | Encoded vector stream cost | `VB.debugEdgeRecord`, `VB.vbdStats` |
+| `recordBits` | Encoded vector stream cost | `VB.debugEdgeRecord`, `VB.y2kvectorStats` |
 | `allocations` | Large temporary structures, not object count | pre-op doc copy, face graph, masks |
 
 Suggested score fold:
@@ -480,7 +480,7 @@ Stages:
 | material encode | fill style count | 4 | gradients/matcap persistence |
 | compression/base64 | byte count | 0.02 | debug scalar only |
 
-For save estimates, use `VB.vbdStats(doc)` and `VB.debugEdgeRecord` when
+For save estimates, use `VB.y2kvectorStats(doc)` and `VB.debugEdgeRecord` when
 available so the estimator agrees with the existing debug panel.
 
 ## 3D and GPU estimators
@@ -581,7 +581,7 @@ Estimator tests should pin exact values for small fixtures:
 - brush/erase no-op in blank space
 - rect and oval fixed geometry counts
 - text edit with known glyph count
-- save stats matching `VB.vbdStats`
+- save stats matching `VB.y2kvectorStats`
 
 Replay tests should not pin every score at first. Instead:
 

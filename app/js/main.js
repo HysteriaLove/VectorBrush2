@@ -360,8 +360,8 @@
         return;
       }
       var result, kind;
-      if (VB.isVBD(bytes)) {
-        result = await VB.decodeVBD(bytes);
+      if (VB.isY2KVector(bytes)) {
+        result = await VB.decodeY2KVector(bytes);
         kind = "VBD";
       } else {
         result = await VB.parseSWF(buf);
@@ -432,12 +432,12 @@
 
   document.getElementById("btn-save").addEventListener("click", async function () {
     try {
-      var bytes = await VB.encodeVBD(app.project, { compress: true });
+      var bytes = await VB.encodeY2KVector(app.project, { compress: true });
       var base = app.fileName ? app.fileName.replace(/\.[^.]+$/, "") : "drawing";
       var blob = new Blob([bytes], { type: "application/octet-stream" });
       var a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = base + ".vbd";
+      a.download = base + ".y2kvector";
       a.click();
       URL.revokeObjectURL(a.href);
       var note = "Saved " + a.download + " · " + bytes.length.toLocaleString() + " B";
@@ -455,8 +455,8 @@
       var textCount = 0;
       app.project.eachCell(function (cell) { textCount += cell.texts.length; });
       if (textCount) {
-        toast("Note: " + textCount + " text block(s) are not yet " +
-          "written to SWF (coming next) — the .vbd save keeps them", 6000);
+        toast("Note: " + textCount + " text block(s) are not " +
+          "written to SWF — the .y2kvector save keeps them", 6000);
       }
       var bytes = VB.encodeSWF(app.project);
       var base = app.fileName ? app.fileName.replace(/\.[^.]+$/, "") : "drawing";

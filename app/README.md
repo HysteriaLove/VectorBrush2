@@ -2,13 +2,13 @@
 
 A Flash-like vector drawing editor: loads Flash MX 2004 `.swf` files 1:1,
 edits Flash-style planar-map geometry, and saves to its own compact binary
-format (`.vbd`, see [FORMAT.md](FORMAT.md)).
+format (`.y2kvector`, see [FORMAT.md](FORMAT.md)).
 
 ## Running
 
 No build step, no dependencies: open `index.html` in a browser
 (Chromium-based required for zlib support via `DecompressionStream`).
-Drop a `.swf` or `.vbd` onto the canvas, or use **Open…**.
+Drop a `.swf` or `.y2kvector` onto the canvas, or use **Open…**.
 
 - **Lasso** (`L`) and the arrow's rubber-band marquee: REGION selections
   that cut through geometry like Flash's — marquee half a shape and drag
@@ -74,7 +74,7 @@ Drop a `.swf` or `.vbd` onto the canvas, or use **Open…**.
   encoded bytes, bits/edge). With the select tool active, click pins an
   edge; Esc unpins. All coordinates are integer twips. Open
   `index.html#demo` for a synthetic document with the panel pre-opened.
-- **Save .vbd**: exports the document in the compact format
+- **Save .y2kvector**: exports the document in the compact format
 - **Save .swf**: exports an SWF v7 movie (uncompressed, one DefineShape3
   built from the exact same edge records the editor holds) for validity
   testing in Flash MX 2004 -- File > Import (or open in the standalone
@@ -93,8 +93,8 @@ no epsilons.
 | `js/swf.js` | SWF loader: FWS/CWS container, DefineShape 1–4, PlaceObject matrix baking → `Y2KVectorDocument` |
 | `js/trace.js` | Resolves dual-sided edges into closed fill loops (fill1 forward, fill0 reversed, exact endpoint welding) and stroke chains |
 | `js/render.js` | Canvas2D renderer: fills first (even-odd), strokes on top (round/round, 1px hairline floor). Uses only `moveTo`/`lineTo`/`quadraticCurveTo`/`fill`/`stroke` so it ports 1:1 to `PIXI.Graphics` |
-| `js/vbd.js` | `.vbd` encoder/decoder — pen-continuity edge ordering, delta bit-packing, optional deflate |
-| `js/swfwrite.js` | Minimal SWF v7 exporter (DefineShape3 + PlaceObject2, record stream shared with the `.vbd` encoder) |
+| `js/y2kvector.js` | `.y2kvector` encoder/decoder — pen-continuity edge ordering, delta bit-packing, optional deflate |
+| `js/swfwrite.js` | Minimal SWF v7 exporter (DefineShape3 + PlaceObject2, record stream shared with the `.y2kvector` encoder) |
 | `js/geom.js` | Edge geometry: line/quad/quad-quad intersections, de Casteljau splitting with shared rounded junctions, point-in-fill parity, distance queries |
 | `js/fit.js` | Pencil smoothing: corner segmentation + least-squares quad fitting with recursive split (Schneider-style, emits lines+quads) |
 | `js/merge.js` | Planar merge: re-nodes new strokes against the map (both sides split at crossings) and inherits region fills onto stroke pieces |
@@ -135,7 +135,7 @@ integrity, so a repro can be exported right when it happens.
 `test/test.html` runs the full pipeline against 10 embedded reference SWFs
 (`test/fixtures.js`, generated from `SWFExamples/` with expected stats from an
 independent Python parser): container + shape decoding, stage/background/style
-/edge-count equality, fill-loop closure, and lossless `.vbd` round-trips (raw
+/edge-count equality, fill-loop closure, and lossless `.y2kvector` round-trips (raw
 and deflate). Headless run:
 
 ```
@@ -148,7 +148,7 @@ The `<title>`/final line reads `VBTEST DONE pass=N fail=M`.
 verification (bounded faces must equal E − V + C), wavy-grid bucket
 containment, and the casual-drawing gap scenarios.
 
-Current status: 370 checks, 0 failures — the SWF/VBD pipeline suite plus
+Current status: 370 checks, 0 failures — the SWF/y2kvector pipeline suite plus
 the journal-replay regression (pencil square → bucket fill → erase across
 it, the case that exposed the concave-join bowtie bug) and
 eraser unit tests (band erase splitting a fill, dab holes with
@@ -160,12 +160,12 @@ unit tests for intersections, splitting, point-in-fill parity, stroke
 fitting, planar merge (crossing, fill inheritance, self-crossing),
 undo/redo, and the Flash-parity invariant (`doc.validate()`: integer twips
 everywhere, valid style indices) checked on every loaded file and after
-every merge. `.vbd` output is ≤ the source SWF size on all 10 reference
+every merge. `.y2kvector` output is ≤ the source SWF size on all 10 reference
 files.
 
 ## Roadmap
 
-1. ~~Canvas milestone: SWF loading, planar-map document, rendering, `.vbd`~~
+1. ~~Canvas milestone: SWF loading, planar-map document, rendering, `.y2kvector`~~
 2. ~~Pencil tool (capture → curve fit → planar merge), undo/redo, vector debug view~~
 3. ~~Bucket fill (face tracing, edge re-siding, border dissolution)~~
 4. ~~Eraser (swath subtraction, stroke trimming, boundary re-siding)~~

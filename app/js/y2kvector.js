@@ -1,5 +1,7 @@
-/* vbd.js — the VectorBrush Drawing format (.vbd): our own compact binary
- * transmission format, modeled directly on Flash's DefineShape encoding.
+/* y2kvector.js — the y2kvector format (.y2kvector): our own compact
+ * binary transmission format for one vector document, modeled directly
+ * on Flash's DefineShape encoding. (Formerly ".vbd" — files written
+ * with the legacy "VBD1" magic decode forever, see isY2KVector.)
  *
  * Why it's compact (same tricks as SWF):
  *   - integer twips + delta-coded edges sized to the minimum bit width
@@ -8,7 +10,7 @@
  *   - optional zlib (deflate) over the whole body
  *
  * Layout:
- *   "VBD1"                       magic (4 bytes)
+ *   "Y2KV"                       magic (4 bytes; legacy "VBD1" accepted)
  *   u8  flags                    bit0: body is zlib-deflate compressed
  *   --- body (possibly compressed) ---
  *   u8  version = 1
@@ -27,7 +29,8 @@
 (function () {
   "use strict";
 
-  var MAGIC = [0x56, 0x42, 0x44, 0x31]; // "VBD1"
+  var MAGIC = [0x59, 0x32, 0x4B, 0x56];        // "Y2KV" (written)
+  var LEGACY_MAGIC = [0x56, 0x42, 0x44, 0x31]; // "VBD1" (read forever)
   var MAX_EDGE_BITS = 17;               // SWF edge nbits field: 4 bits, +2 bias
 
   // ---- compression ---------------------------------------------------------
@@ -222,7 +225,7 @@
       }
       return mc;
     }
-    throw new Error("Unknown VBD fill type " + t);
+    throw new Error("Unknown y2kvector fill type " + t);
   }
 
   // stats (optional) is filled with Flash-grammar record counts so the
@@ -570,9 +573,12 @@
   // ---- decoding ------------------------------------------------------------
 
   function isVBD(bytes) {
-    return bytes.length > 5 &&
-      bytes[0] === MAGIC[0] && bytes[1] === MAGIC[1] &&
-      bytes[2] === MAGIC[2] && bytes[3] === MAGIC[3];
+    if (bytes.length <= 5) return false;
+    function m(magic) {
+      return bytes[0] === magic[0] && bytes[1] === magic[1] &&
+             bytes[2] === magic[2] && bytes[3] === magic[3];
+    }
+    return m(MAGIC) || m(LEGACY_MAGIC);
   }
 
   function readColor(r) {
@@ -604,7 +610,7 @@
       if (r.ub(1) === 0) {
         var recFlags = r.ub(5);
         if (recFlags === 0) break;
-        if (recFlags & 16) throw new Error("VBD must not contain NewStyles records");
+        if (recFlags & 16) throw new Error("y2kvector must not contain NewStyles records");
         if (recFlags & 1) { var n = r.ub(5); penX = r.sb(n); penY = r.sb(n); }
         if (recFlags & 2) f0 = r.ub(numFillBits);
         if (recFlags & 4) f1 = r.ub(numFillBits);
@@ -643,7 +649,7 @@
   }
 
   async function decodeVBD(bytes) {
-    if (!isVBD(bytes)) throw new Error("Not a VBD file");
+    if (!isVBD(bytes)) throw new Error("Not a y2kvector file");
     var flags = bytes[4];
     var body = bytes.subarray(5);
     if (flags & 1) body = await inflate(body);
@@ -651,7 +657,7 @@
     var r = new VB.BitReader(body, 0);
     var version = r.u8();
     if (version < 1 || version > 4) {
-      throw new Error("Unsupported VBD version " + version);
+      throw new Error("Unsupported y2kvector version " + version);
     }
 
     if (version === 3 || version === 4) {
@@ -718,10 +724,10 @@
   }
 
   window.VB = window.VB || {};
-  VB.encodeVBD = encodeVBD;
-  VB.decodeVBD = decodeVBD;
-  VB.isVBD = isVBD;
-  VB.vbdStats = vbdStats;
+  VB.encodeY2KVector = encodeVBD;
+  VB.decodeY2KVector = decodeVBD;
+  VB.isY2KVector = isVBD;
+  VB.y2kvectorStats = vbdStats;
   VB.prepareShapeEdges = prepareShapeEdges; // shared with the SWF exporter
   VB.writeShapeRecords = writeShapeRecords;
 })();

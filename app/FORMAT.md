@@ -1,12 +1,15 @@
-# VBD — VectorBrush Drawing format, version 1
+# y2kvector — the vector document format
 
-`.vbd` is VectorBrush's compact binary transmission format. It is modeled
+`.y2kvector` is our compact binary transmission format for one vector
+document (formerly `.vbd` — files with the legacy `"VBD1"` magic decode
+forever; new files are written with the `"Y2KV"` magic). It is modeled
 directly on Flash's `DefineShape` encoding — the same bit-level tricks that
 made SWF small — without the SWF container overhead (no tag headers, no
 character IDs, no PlaceObject).
 
-On the reference corpus (`SWFExamples/`), VBD files are equal to or smaller
-than the SWF originals in every case (e.g. `Stress004`: 35,967 B vs 36,186 B).
+On the reference corpus (`SWFExamples/`), y2kvector files are equal to or
+smaller than the SWF originals in every case (e.g. `Stress004`: 35,967 B vs
+36,186 B).
 
 ## Why it's compact
 
@@ -29,7 +32,7 @@ All multi-byte integers are little-endian. Bit fields are MSB-first within
 bytes (SWF convention). `UB[n]`/`SB[n]` are unsigned/signed bit fields.
 
 ```
-"VBD1"          4 bytes   magic
+"Y2KV"          4 bytes   magic (legacy "VBD1" accepted on read)
 flags           u8        bit0: body is zlib-deflate compressed
 --- body (possibly compressed from here) ---
 version         u8        = 1

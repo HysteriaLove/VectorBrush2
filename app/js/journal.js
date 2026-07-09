@@ -61,8 +61,8 @@
   });
   defineOp("load", async function (c, op) {
     var bytes = b64ToBytes(op.b64);
-    var result = VB.isVBD(bytes)
-      ? await VB.decodeVBD(bytes)
+    var result = VB.isY2KVector(bytes)
+      ? await VB.decodeY2KVector(bytes)
       : await VB.parseSWF(bytes.buffer);
     c.project = result.project || VB.wrapDoc(result.doc);
     // files without a persisted library (SWF, older .vbd bodies)

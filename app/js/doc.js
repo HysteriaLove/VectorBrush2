@@ -192,9 +192,6 @@
 
   window.VB = window.VB || {};
   VB.Y2KVectorDocument = Y2KVectorDocument;
-  // TRANSITIONAL alias (this commit only): catches stragglers loudly in
-  // external harnesses; dropped in the codec-rename commit.
-  VB.VBDocument = Y2KVectorDocument;
   VB.solidFill = solidFill;
   VB.lineStyle = lineStyle;
   VB.edge = edge;

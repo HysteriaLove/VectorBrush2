@@ -153,7 +153,7 @@
   }
 
   function streamPanelHTML(doc) {
-    var s = VB.vbdStats(doc);
+    var s = VB.y2kvectorStats(doc);
     var edges = s.straightEdges + s.curvedEdges;
     var h = "<h4>record stream</h4><table>";
     h += "<tr><td>straight</td><td>" + s.straightEdges + "</td></tr>";
