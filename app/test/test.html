@@ -28,6 +28,7 @@
 <script src="../js/vbd.js"></script>
 <script src="../js/swfwrite.js"></script>
 <script src="../js/materials.js"></script>
+<script src="../js/operation-estimator.js"></script>
 <script src="../js/fit.js"></script>
 <script src="../js/merge.js"></script>
 <script src="../js/faces.js"></script>
@@ -948,6 +949,127 @@
       check("2DMaterials section threw: " + merr.message, false,
         (merr.stack || "").split("\n").slice(0, 3).join(" | "));
     }
+  })();
+
+  // ======================= OperationEstimator ===================================
+  // Estimates are analytic and deterministic (docs/OperationEstimator.md)
+  // — exact literals pin the formulas for clean cases; structure,
+  // warnings and determinism cover the rest.
+  log("OperationEstimator:");
+  await (async function () {
+    // material paint estimate: 2000×2000tw = 100×100px = 0.01 Mpx
+    var box = { xmin: 0, ymin: 0, xmax: 2000, ymax: 2000 };
+    var mp = VB.estimateMaterialPaint(
+      { type: "solid", color: { r: 1, g: 2, b: 3, a: 255 } }, box);
+    check("solid paint = 10000 px-ops over 0.01Mpx",
+      mp.paintPxOps === 10000 && mp.textureBytes === 0 && mp.gpuPasses === 0,
+      JSON.stringify(mp));
+    mp = VB.estimateMaterialPaint(VB.materialDefaults("matcap"), box);
+    check("matcap paint = 280000 px-ops + 120000 tex bytes + 4 passes",
+      mp.paintPxOps === 280000 && mp.textureBytes === 120000 && mp.gpuPasses === 4,
+      JSON.stringify(mp));
+
+    // line into an EMPTY doc: 2+12+20+0+0 cpu, 40 record bits = 74
+    var edoc = new VB.VBDocument();
+    edoc.width = 11000; edoc.height = 8000;
+    var lineOp = { op: "line", a: { x: 1000, y: 1000 }, b: { x: 5000, y: 4000 },
+                   style: { width: 20, color: { r: 0, g: 0, b: 0, a: 255 } } };
+    var lp = VB.operationEstimate({ doc: edoc }, lineOp, { phase: "preflight" });
+    check("line into empty doc scores exactly 74 (ok)",
+      lp.totals.score === 74 && lp.totals.cpuUnits === 34 &&
+      lp.totals.recordBits === 40 && lp.level === "ok",
+      JSON.stringify(lp.totals));
+
+    // renderFrame of a 4-edge filled square: cpu 20 + solid paint over
+    // the 550×400px stage (220000 px-ops) = 220020
+    var rdoc2 = new VB.VBDocument();
+    rdoc2.width = 11000; rdoc2.height = 8000;
+    rdoc2.fills.push({ type: "solid", color: { r: 9, g: 9, b: 9, a: 255 } });
+    rdoc2.edges.push(
+      VB.edge(1000, 1000, null, null, 5000, 1000, 0, 1, 0),
+      VB.edge(5000, 1000, null, null, 5000, 4000, 0, 1, 0),
+      VB.edge(5000, 4000, null, null, 1000, 4000, 0, 1, 0),
+      VB.edge(1000, 4000, null, null, 1000, 1000, 0, 1, 0));
+    var rp = VB.operationEstimate({ doc: rdoc2 }, { op: "renderFrame" },
+                                  { phase: "preflight" });
+    check("renderFrame square scores exactly 220020",
+      rp.totals.score === 220020 && rp.totals.cpuUnits === 20 &&
+      rp.totals.paintPxOps === 220000, JSON.stringify(rp.totals));
+
+    // fixed shape geometry
+    var rectP = VB.operationEstimate({ doc: edoc },
+      { op: "rect", x0: 1000, y0: 1000, x1: 4000, y1: 3000,
+        fill: { r: 1, g: 2, b: 3, a: 255 } }, { phase: "preflight" });
+    var ovalP = VB.operationEstimate({ doc: edoc },
+      { op: "oval", x0: 1000, y0: 1000, x1: 4000, y1: 3000,
+        fill: { r: 1, g: 2, b: 3, a: 255 } }, { phase: "preflight" });
+    check("rect G=4, oval G=8 (documented constants)",
+      rectP.stages[0].count === 4 && ovalP.stages[0].count === 8,
+      rectP.stages[0].count + "/" + ovalP.stages[0].count);
+
+    // eraser blank-space short circuit
+    var ep = VB.operationEstimate({ doc: edoc },
+      { op: "erase", points: [{ x: 1000, y: 1000 }, { x: 2000, y: 1000 }],
+        radius: 200 }, { phase: "preflight" });
+    check("blank erase warns blank-erase",
+      ep.warnings.some(function (w) { return w.code === "blank-erase"; }),
+      JSON.stringify(ep.warnings));
+
+    // fillStyle mutates zero geometry: no pair-test/noding stages
+    var fdoc2 = (await VB.replayJournal([
+      { op: "new", width: 11000, height: 8000 },
+      { op: "brush", points: [{ x: 2000, y: 2000 }, { x: 3000, y: 2000 }],
+        radius: 300, color: { r: 102, g: 204, b: 255, a: 255 } }
+    ])).doc;
+    var fp = VB.operationEstimate({ doc: fdoc2 },
+      { op: "fillStyle", index: 0, style: VB.materialDefaults("linear") },
+      { phase: "preflight" });
+    check("fillStyle estimates zero geometry mutation",
+      !fp.stages.some(function (s) { return s.unit === "pair-test"; }),
+      JSON.stringify(fp.stages.map(function (s) { return s.unit; })));
+
+    // determinism: same doc + same op = byte-identical profile
+    var bop = { op: "brush", points: [{ x: 2500, y: 2100 }, { x: 3500, y: 2300 }],
+                radius: 250, color: { r: 10, g: 20, b: 30, a: 255 } };
+    var e1 = VB.operationEstimate({ doc: fdoc2 }, bop, { phase: "preflight" });
+    var e2 = VB.operationEstimate({ doc: fdoc2 }, bop, { phase: "preflight" });
+    check("estimates are deterministic",
+      JSON.stringify(e1) === JSON.stringify(e2));
+
+    // every op returns a valid profile; unknown ops degrade gracefully
+    var kinds = ["pencil", "line", "brush", "erase", "bucket", "rect", "oval",
+                 "fillStyle", "paste", "regionTransform", "regionDelete",
+                 "transformSel", "deleteSel", "textCreate", "textBreak",
+                 "undo", "layerAdd", "zzz-not-an-op"];
+    var allValid = kinds.every(function (k) {
+      var p = VB.operationEstimate({ doc: fdoc2 },
+        { op: k, points: [{ x: 1000, y: 1000 }], index: 0,
+          x: 1000, y: 1000, x0: 0, y0: 0, x1: 100, y1: 100,
+          a: { x: 0, y: 0 }, b: { x: 10, y: 10 } }, { phase: "preflight" });
+      return p && p.totals.score >= 0 && p.stages.length > 0 &&
+        p.stages.every(function (s) { return s.count >= 0 && s.score >= 0; });
+    });
+    check("every op kind yields a valid non-negative profile", allValid);
+
+    // postcommit: comparison block + anomaly warnings
+    var post = VB.operationEstimate({ doc: fdoc2 }, bop, {
+      phase: "postcommit",
+      result: { boundary: 0, removed: 0 },
+      preflight: { totals: { score: 60000 } }
+    });
+    check("postcommit flags unexpected-noop",
+      post.confidence === "postcommit" && post.comparison &&
+      post.warnings.some(function (w) { return w.code === "unexpected-noop"; }),
+      JSON.stringify(post.warnings));
+    var post2 = VB.operationEstimate({ doc: fdoc2 }, bop, {
+      phase: "postcommit",
+      result: { boundary: 40 },
+      preflight: { totals: { score: 10 } }
+    });
+    check("postcommit flags unexpected-growth",
+      post2.warnings.some(function (w) { return w.code === "unexpected-growth"; }) &&
+      post2.comparison.ratio > 2,
+      JSON.stringify(post2.comparison));
   })();
 
   // ======================= clipboard: copy / paste commands =====================

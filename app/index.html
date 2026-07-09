@@ -249,6 +249,11 @@
     overflow: hidden;
   }
   #status-msg { color: var(--text); }
+  /* OperationEstimator badge (debug mode) */
+  #status-est.est-ok { color: #7fbf7f; }
+  #status-est.est-watch { color: #d4c05a; }
+  #status-est.est-warn { color: #e6a23c; }
+  #status-est.est-hot { color: #ff7a7a; font-weight: bold; }
 
   #toast {
     position: absolute;
@@ -401,6 +406,7 @@
       </div>
     </div>
     <div id="debugpanel" class="hidden">
+      <div id="dbg-est"></div>
       <div id="dbg-edge"></div>
       <div id="dbg-stream"></div>
       <div id="dbg-styles"></div>
@@ -411,6 +417,7 @@
     <span id="status-doc">—</span>
     <span id="status-pos"></span>
     <span id="status-zoom"></span>
+    <span id="status-est" title="OperationEstimator (debug)"></span>
     <span class="spacer"></span>
     <span id="status-msg"></span>
   </div>
@@ -421,6 +428,7 @@
   <script src="js/doc.js"></script>
   <script src="js/geom.js"></script>
   <script src="js/materials.js"></script>
+  <script src="js/operation-estimator.js"></script>
   <script src="js/swf.js"></script>
   <script src="js/trace.js"></script>
   <script src="js/render.js"></script>

@@ -155,7 +155,77 @@
     if (!app.debug) return;
     document.getElementById("dbg-styles").innerHTML = VB.debugStylesPanelHTML(app.doc);
     document.getElementById("dbg-stream").innerHTML = VB.debugStreamPanelHTML(app.doc);
+    renderEstimatePanel();
     refreshDebugEdge();
+  }
+
+  // ---- OperationEstimator debug hook -------------------------------------------
+  // Every journaled op gets a deterministic PREFLIGHT profile in debug
+  // mode (docs/OperationEstimator.md). app.record runs before the
+  // mutation on every path (tools record, then apply), so the profile
+  // describes the document the op is about to act on. Debug-only and
+  // side-effect free — replay never depends on it.
+  (function () {
+    var baseRecord = app.record;
+    app.record = function (op) {
+      if (app.debug && VB.operationEstimate) {
+        try {
+          app.lastEstimate = VB.operationEstimate(
+            { doc: app.doc, project: app.project }, op, { phase: "preflight" });
+          updateEstimateBadge();
+          renderEstimatePanel();
+        } catch (err) {
+          trapError("estimator: " + err.message, err.stack);
+        }
+      }
+      baseRecord(op);
+    };
+  })();
+
+  function fmtScore(n) {
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
+    if (n >= 1e3) return Math.round(n / 1e3) + "k";
+    return String(n);
+  }
+
+  function updateEstimateBadge() {
+    var el = document.getElementById("status-est");
+    var p = app.lastEstimate;
+    if (!p || !app.debug) { el.textContent = ""; el.className = ""; return; }
+    el.textContent = p.kind + ": " + fmtScore(p.totals.score) + " est" +
+      (p.scope.candidateEdges ? " · " + p.scope.candidateEdges + " cand" : "") +
+      " · " + p.level;
+    el.className = "est-" + p.level;
+    el.title = p.warnings.map(function (w) { return w.code; }).join(", ");
+  }
+
+  function renderEstimatePanel() {
+    if (!app.debug) return;
+    var el = document.getElementById("dbg-est");
+    var p = app.lastEstimate;
+    if (!p) { el.innerHTML = ""; return; }
+    var h = '<div class="dim">op estimate — deterministic, ' +
+      p.confidence + '</div>' +
+      "<b>" + p.kind + "</b> score " + fmtScore(p.totals.score) +
+      " (" + p.level + ")<br>" +
+      "cpu " + fmtScore(p.totals.cpuUnits) +
+      " · paint " + fmtScore(p.totals.paintPxOps) +
+      (p.totals.gpuPasses ? " · gpu passes " + p.totals.gpuPasses : "") +
+      (p.totals.textureBytes
+        ? " · tex " + Math.round(p.totals.textureBytes / 1e6) + "MB" : "") +
+      " · bits " + p.totals.recordBits +
+      " · alloc " + p.totals.allocations + "<br>" +
+      "edges " + p.scope.edgesBefore +
+      " · candidates " + p.scope.candidateEdges +
+      " · bbox " + p.scope.bboxMpx + "Mpx<br>";
+    p.stages.forEach(function (s) {
+      h += '<span class="dim">' + s.name + " · " + s.count + "×" + s.weight +
+        " = " + fmtScore(s.score) + "</span><br>";
+    });
+    p.warnings.forEach(function (w) {
+      h += "<b>⚠ " + w.code + "</b> " + w.text + "<br>";
+    });
+    el.innerHTML = h;
   }
 
   function refreshDebugEdge() {
