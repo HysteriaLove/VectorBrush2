@@ -1,7 +1,7 @@
-/* pixi-render.js — the Pixi backend (docs/PixiPort.md).
+﻿/* pixi-render.js â€” the Pixi backend (docs/PixiPort.md).
  *
  * FULL document rendering on pixi v8: fills (solid, gradient, matcap),
- * strokes, text — the drawing surface is GPU-retained; the Canvas2D
+ * strokes, text â€” the drawing surface is GPU-retained; the Canvas2D
  * overlay above it keeps tool overlays, debug decorations and the rest
  * of the GUI. render.js remains the visual ORACLE: the committed
  * parity page (app/test/pixi-parity.html) compares both backends
@@ -12,20 +12,20 @@
  *  - Retained + content-hashed: each layer cell caches its display
  *    tree under a hash of its edges/styles/texts, so pan, zoom, tool
  *    overlays and pointer moves re-tessellate NOTHING. Text blocks
- *    live in their own containers — live drags are transform-only.
+ *    live in their own containers â€” live drags are transform-only.
  *  - Hairlines bake into stroke geometry: cells with hairlines rebuild
  *    when zoom moves >2% (the v7-proven policy).
  *
  * Fill-rule bridge: our fills are Flash's EVEN-ODD; pixi triangulates
  * nonzero. assignHoles() nests each style's closed chains by
- * containment (planar-map chains are disjoint or nested) — even depth
+ * containment (planar-map chains are disjoint or nested) â€” even depth
  * fills, odd-depth children cut() as holes. The same nesting drives
  * glyph counters in text.
  *
  * Gradients render EXACTLY: the paint is rasterized ONCE per style by
- * the same Canvas2D code path the oracle uses (a 256² texture over the
- * ±16384tw SWF gradient square) and sampled on the GPU through the
- * style's SWF matrix — parity by construction. Matcap fills upload the
+ * the same Canvas2D code path the oracle uses (a 256Â² texture over the
+ * Â±16384tw SWF gradient square) and sampled on the GPU through the
+ * style's SWF matrix â€” parity by construction. Matcap fills upload the
  * CPU pipeline's pixels (matcap.js) as sprites at the region bbox.
  */
 (function () {
@@ -76,7 +76,7 @@
     return a / 2;
   }
 
-  /** Nest chains by containment: entries {chain, depth, children} —
+  /** Nest chains by containment: entries {chain, depth, children} â€”
    *  even depth = filled outline, its odd-depth children are holes. */
   function assignHoles(chains, flatten) {
     var entries = chains.map(function (c) {
@@ -84,14 +84,39 @@
       return { chain: c, poly: poly, area: Math.abs(polyArea(poly)),
                depth: 0, parent: -1, children: [] };
     });
+    // VERIFIED interior probe (the faceProbe discipline): candidates
+    // at the midpoints of the longest segments, nudged along both
+    // normals at several widths, accepted only when the chain ITSELF
+    // contains the point. The old first-segment-toward-the-mean guess
+    // sat OUTSIDE concave chains (eraser cuts make C-shapes), flipped
+    // the containment tests, and rendered regions inverted/missing.
     entries.forEach(function (e) {
-      var n = e.poly.length;
-      var mx = 0, my = 0;
-      for (var i = 0; i < n; i++) { mx += e.poly[i].x; my += e.poly[i].y; }
-      mx /= n; my /= n;
-      var p0 = e.poly[0], p1 = e.poly[1 % n];
-      var ex = (p0.x + p1.x) / 2, ey = (p0.y + p1.y) / 2;
-      e.probe = { x: ex + (mx - ex) * 1e-3, y: ey + (my - ey) * 1e-3 };
+      var poly = e.poly, n = poly.length;
+      var segs = [];
+      for (var i = 0; i < n; i++) {
+        var a = poly[i], b = poly[(i + 1) % n];
+        segs.push({ a: a, b: b,
+                    len: (b.x - a.x) * (b.x - a.x) + (b.y - a.y) * (b.y - a.y) });
+      }
+      segs.sort(function (s1, s2) { return s2.len - s1.len; });
+      var probe = null;
+      var nudges = [30, 8, 2];
+      for (var si = 0; si < segs.length && si < 6 && !probe; si++) {
+        var s = segs[si];
+        var mx2 = (s.a.x + s.b.x) / 2, my2 = (s.a.y + s.b.y) / 2;
+        var dx = s.b.x - s.a.x, dy = s.b.y - s.a.y;
+        var len = Math.sqrt(s.len) || 1;
+        for (var ni = 0; ni < nudges.length && !probe; ni++) {
+          var ncand = [
+            { x: mx2 - dy / len * nudges[ni], y: my2 + dx / len * nudges[ni] },
+            { x: mx2 + dy / len * nudges[ni], y: my2 - dx / len * nudges[ni] }
+          ];
+          for (var ci = 0; ci < 2 && !probe; ci++) {
+            if (pointInPoly(ncand[ci], poly)) probe = ncand[ci];
+          }
+        }
+      }
+      e.probe = probe || { x: poly[0].x, y: poly[0].y };
     });
     entries.forEach(function (e, i) {
       var best = -1, bestArea = Infinity;
@@ -115,6 +140,63 @@
     return entries;
   }
 
+  /** Decompose a chain into SIMPLE loops at revisited anchors. The
+   *  planar map guarantees self-contact happens only at shared integer
+   *  nodes (never mid-edge), so a chain that pinches through a node
+   *  twice â€” eraser slits, figure-eights â€” splits exactly there. The
+   *  Canvas2D oracle renders such chains with even-odd (the revisited
+   *  pocket cancels); pixi triangulates nonzero and would FILL the
+   *  pocket, so each simple loop must nest independently (the log-30
+   *  eraser artifact). */
+  function splitAtRevisits(chain) {
+    var loops = [];
+    var pts = chain.pts.slice();
+    var guard = 0;
+    for (;;) {
+      if (guard++ > 64) break; // malformed chain: bail with what we have
+      var seen = new Map();
+      seen.set(chain.sx + "," + chain.sy, -1);
+      var cut = null;
+      for (var i = 0; i < pts.length; i++) {
+        var key = pts[i].x + "," + pts[i].y;
+        if (seen.has(key)) {
+          var j = seen.get(key);
+          // returning to the START at the very end is just the close;
+          // anything else is a genuine pinch
+          var pinch = j === -1 ? i < pts.length - 1 : i > j + 1;
+          if (pinch) {
+            cut = { from: j, to: i };
+            break;
+          }
+        }
+        seen.set(key, i);
+      }
+      if (!cut) break;
+      // segments (from+1 .. to) form a closed loop anchored at the
+      // revisited node; extract it and continue on the remainder
+      var loopPts = pts.slice(cut.from + 1, cut.to + 1);
+      var anchor = cut.from === -1
+        ? { x: chain.sx, y: chain.sy }
+        : { x: pts[cut.from].x, y: pts[cut.from].y };
+      if (loopPts.length > 1) {
+        loops.push({ sx: anchor.x, sy: anchor.y, pts: loopPts, closed: true });
+      }
+      pts.splice(cut.from + 1, cut.to - cut.from);
+    }
+    loops.push({ sx: chain.sx, sy: chain.sy, pts: pts, closed: chain.closed });
+    return loops;
+  }
+
+  function simplifyChains(chains) {
+    var out = [];
+    chains.forEach(function (c) {
+      splitAtRevisits(c).forEach(function (l) {
+        if (l.pts.length > 1) out.push(l);
+      });
+    });
+    return out;
+  }
+
   function rgb(c) { return (c.r << 16) | (c.g << 8) | c.b; }
 
   /** Hairline floor in twips for a zoom (>= 1 CSS px like render.js). */
@@ -122,7 +204,7 @@
     return Math.max(width, VB.TWIPS / zoom);
   }
 
-  /** Content hash of one cell (edges, styles, texts) — freshness is
+  /** Content hash of one cell (edges, styles, texts) â€” freshness is
    *  decided by hashing, never by invalidation call sites, so in-place
    *  mutations (floats, node drags) are always caught. */
   function hashCell(doc) {
@@ -158,8 +240,8 @@
   }
 
   // ---- gradient paint textures ------------------------------------------------
-  // One 256² texture per style, painted by the SAME Canvas2D gradient
-  // code the oracle uses, spanning the SWF gradient square (±16384tw).
+  // One 256Â² texture per style, painted by the SAME Canvas2D gradient
+  // code the oracle uses, spanning the SWF gradient square (Â±16384tw).
 
   var GRAD_TEX = 256;
   var gradTexCache = new Map(); // style JSON -> PIXI.Texture
@@ -187,7 +269,7 @@
   }
 
   /** Pixi's fill matrix maps LOCAL space -> TEXTURE px: build the
-   *  texture->local map (scale the 256² texture over the ±16384tw
+   *  texture->local map (scale the 256Â² texture over the Â±16384tw
    *  gradient square, then the style's SWF matrix) and invert it. */
   function gradientMatrix(style) {
     var m = style.matrix || { sx: 1, sy: 1, r0: 0, r1: 0, tx: 0, ty: 0 };
@@ -274,7 +356,7 @@
   }
 
   function fillNested(g, chains, paint) {
-    var nested = assignHoles(chains, flattenChain);
+    var nested = assignHoles(simplifyChains(chains), flattenChain);
     nested.forEach(function (e) {
       if (e.depth % 2 !== 0) return; // holes cut inside their parent
       drawChainPath(g, e.chain);
@@ -286,11 +368,127 @@
     });
   }
 
+  /** Fraction of poly B's boundary midpoints strictly inside poly A â€”
+   *  between the thresholds means B runs PARTIALLY through A. */
+  function partialThrough(pa, pb) {
+    var inside = 0;
+    for (var k = 0; k < pb.length; k++) {
+      var p1 = pb[k], p2 = pb[(k + 1) % pb.length];
+      if (pointInPoly({ x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 }, pa)) {
+        inside++;
+      }
+    }
+    var frac = inside / pb.length;
+    return frac > 0.05 && frac < 0.95;
+  }
+
+  /** Do any two chains of one fill OVERLAP without containment? Such
+   *  siblings encode even-odd XOR (their intersection is EMPTY space)
+   *  â€” inexpressible as fill+cut trees or earcut triangulation. */
+  function hasSiblingOverlap(nested) {
+    for (var i = 0; i < nested.length; i++) {
+      for (var j = i + 1; j < nested.length; j++) {
+        var a = nested[i], b = nested[j];
+        // ancestry means clean nesting â€” fine
+        if (a.parent === j || b.parent === i) continue;
+        var pa = a.poly, pb = b.poly;
+        // cheap bbox reject
+        var ax0 = Infinity, ay0 = Infinity, ax1 = -Infinity, ay1 = -Infinity;
+        var k;
+        for (k = 0; k < pa.length; k++) {
+          if (pa[k].x < ax0) ax0 = pa[k].x; if (pa[k].x > ax1) ax1 = pa[k].x;
+          if (pa[k].y < ay0) ay0 = pa[k].y; if (pa[k].y > ay1) ay1 = pa[k].y;
+        }
+        var bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+        for (k = 0; k < pb.length; k++) {
+          if (pb[k].x < bx0) bx0 = pb[k].x; if (pb[k].x > bx1) bx1 = pb[k].x;
+          if (pb[k].y < by0) by0 = pb[k].y; if (pb[k].y > by1) by1 = pb[k].y;
+        }
+        if (ax0 > bx1 || bx0 > ax1 || ay0 > by1 || by0 > ay1) continue;
+        // XOR signature: a sibling's boundary runs PARTIALLY through
+        // the other's interior (fully-inside = nesting, fully-outside
+        // = disjoint; both are fine). Interior probes miss this â€” each
+        // sibling's probe sits in its exclusive area â€” so measure the
+        // fraction of boundary midpoints inside the other.
+        if (partialThrough(pa, pb) || partialThrough(pb, pa)) {
+          var anc = a.parent, guard = 0;
+          var related = false;
+          while (anc >= 0 && guard++ < nested.length) {
+            if (anc === j) { related = true; break; }
+            anc = nested[anc].parent;
+          }
+          anc = b.parent; guard = 0;
+          while (!related && anc >= 0 && guard++ < nested.length) {
+            if (anc === i) { related = true; break; }
+            anc = nested[anc].parent;
+          }
+          if (!related) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /** Rasterize one fill through the ORACLE's painter (render.js
+   *  paintFill) into a sprite at the fill's bbox â€” pixel-exact
+   *  composition for even-odd-encoded fills, cached with the cell. */
+  var RASTER_MAX = 2048;
+  function rasterFillSprite(doc, fillIdx, style, chains, zoom) {
+    if (!VB.paintFill) return null;
+    var bb = { xmin: Infinity, ymin: Infinity, xmax: -Infinity, ymax: -Infinity };
+    chains.forEach(function (c) {
+      flattenChain(c, 4).forEach(function (p) {
+        if (p.x < bb.xmin) bb.xmin = p.x; if (p.x > bb.xmax) bb.xmax = p.x;
+        if (p.y < bb.ymin) bb.ymin = p.y; if (p.y > bb.ymax) bb.ymax = p.y;
+      });
+    });
+    if (bb.xmin > bb.xmax) return null;
+    bb.xmin -= 20; bb.ymin -= 20; bb.xmax += 20; bb.ymax += 20;
+    var wtw = bb.xmax - bb.xmin, htw = bb.ymax - bb.ymin;
+    var scale = Math.min((zoom || 1) / VB.TWIPS,
+                         RASTER_MAX / Math.max(wtw, htw));
+    var w = Math.max(2, Math.round(wtw * scale));
+    var h = Math.max(2, Math.round(htw * scale));
+    var cv = document.createElement("canvas");
+    cv.width = w; cv.height = h;
+    var ctx = cv.getContext("2d");
+    ctx.setTransform(w / wtw, 0, 0, h / htw, -bb.xmin * w / wtw, -bb.ymin * h / htw);
+    VB.paintFill(ctx, doc, fillIdx, style, chains);
+    var sprite = new PIXI.Sprite(PIXI.Texture.from(cv));
+    sprite.position.set(bb.xmin, bb.ymin);
+    sprite.width = wtw;
+    sprite.height = htw;
+    return sprite;
+  }
+
+  function styleFillPaint(style) {
+    if ((style.type === "linear" || style.type === "radial") &&
+        style.gradient && style.gradient.stops.length > 1) {
+      return {
+        texture: gradientTexture(style),
+        matrix: gradientMatrix(style),
+        // 'global' = matrix maps texture px straight into local twips;
+        // the default 'local' normalizes to shape bounds and would
+        // bend the paint per region
+        textureSpace: "global"
+      };
+    }
+    var base = style.type === "solid" ? style.color
+             : VB.materialBaseColor(style);
+    return { color: rgb(base), alpha: base.a / 255 };
+  }
+
   function buildCell(doc, zoom, cellState) {
     var cellC = new PIXI.Container();
 
-    // fills in style order — one child per style keeps paint order
-    // exact even when matcap sprites interleave with Graphics
+    // Fills from the claim-boundary chains â€” the SAME source the
+    // oracle paints. Chains that nest cleanly render as vector
+    // fill+cut trees; fills whose sibling chains OVERLAP without
+    // containment carry even-odd XOR encoding (eraser slits, pockets)
+    // that no cut tree â€” and no earcut triangulation â€” can express:
+    // those fills rasterize through the ORACLE's own painter into a
+    // cached sprite at the fill's bbox (crisp at the built zoom; the
+    // zoom-rebuild policy refreshes it, same as hairlines).
     var fillPaths = VB.buildFillPaths(doc);
     for (var f = 1; f < fillPaths.length; f++) {
       var chains = fillPaths[f];
@@ -315,32 +513,23 @@
             continue;
           }
         }
-        // texture still decoding / empty region: base-color fallback
-        var gFb = new PIXI.Graphics();
-        fillNested(gFb, chains, {
-          color: rgb(VB.materialBaseColor(style)),
-          alpha: VB.materialBaseColor(style).a / 255
-        });
-        cellC.addChild(gFb);
-        continue;
       }
-      var g = new PIXI.Graphics();
-      if ((style.type === "linear" || style.type === "radial") &&
-          style.gradient && style.gradient.stops.length > 1) {
-        fillNested(g, chains, {
-          texture: gradientTexture(style),
-          matrix: gradientMatrix(style),
-          // 'global' = matrix maps texture px straight into local
-          // twips; the default 'local' normalizes to shape bounds and
-          // would bend the paint per region
-          textureSpace: "global"
-        });
-      } else {
-        var base = style.type === "solid" ? style.color
-                 : VB.materialBaseColor(style);
-        fillNested(g, chains, { color: rgb(base), alpha: base.a / 255 });
+      // Planar-map fills rasterize through the ORACLE painter into a
+      // sprite — unconditionally. The walker's chains encode paint as
+      // MULTI-CHAIN EVEN-ODD PARITY (post-erase documents weave the
+      // ink ribbon's walls into overlapping chains whose XOR is the
+      // picture); no fill+cut tree or earcut triangulation can express
+      // that, and every geometric "is this fill simple?" test we tried
+      // was defeated by real documents (log 30). The sprite is exact
+      // by construction, cached with the cell, crisp at the built zoom
+      // (the zoom-rebuild policy refreshes it), and composited on the
+      // GPU. True GPU vector fills need stencil even-odd — a future
+      // pipeline. Strokes and text remain vector Graphics.
+      var rSprite = rasterFillSprite(doc, f, style, chains, zoom);
+      if (rSprite) {
+        cellState.hasHairlines = true; // zoom-sensitive: reuse the policy
+        cellC.addChild(rSprite);
       }
-      cellC.addChild(g);
     }
 
     // strokes on top, round caps/joins, hairline floor
@@ -364,7 +553,7 @@
     }
     cellC.addChild(strokesG);
 
-    // text blocks: one container each — live matrix moves stay cheap
+    // text blocks: one container each â€” live matrix moves stay cheap
     (doc.texts || []).forEach(function (block) {
       var tc = new PIXI.Container();
       var tg = new PIXI.Graphics();
@@ -484,6 +673,7 @@
   function renderDebugPixi(surface, doc, view, hoverIdx) { /* debug port slice */ }
 
   window.VB = window.VB || {};
+  VB.pixiRenderVersion = "oracle-fills-1";
   VB.createPixiSurface = createPixiSurface;
   VB.renderProjectPixi = renderProjectPixi;
   VB.renderOverlayPixi = renderOverlayPixi;
@@ -492,4 +682,6 @@
   VB.pixiFlattenChain = flattenChain;
   VB.pixiHairWidth = hairWidth;
   VB.pixiHashCell = hashCell;
+  VB.pixiSplitAtRevisits = splitAtRevisits;
+  VB.pixiSimplifyChains = simplifyChains;
 })();

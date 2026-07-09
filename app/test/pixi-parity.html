@@ -40,6 +40,7 @@
 <script src="../js/ttf.js"></script>
 <script src="../js/text.js"></script>
 <script src="ttffixture.js"></script>
+<script src="userlog30.js"></script>
 <script src="../lib/pixi.min.js"></script>
 <script src="../js/pixi-render.js"></script>
 <script>
@@ -208,7 +209,20 @@
       { x: 60, y: 60, what: "outside stays empty" }
     ], 2.5);
 
-    // 6. text block (embedded fixture font, wrap + holes in glyphs)
+    // 6. user log 30, mid-erase states: post-erase chains weave the
+    // ink ribbon's walls into overlapping even-odd siblings — the
+    // regression that shipped as "broken vector geometry". Every
+    // erase state must match the oracle.
+    for (var upTo = 9; upTo <= 11; upTo++) {
+      var l30 = await VB.replayJournal(window.VBUserLog30.ops.slice(0, upTo + 1));
+      var r30 = renderBoth(l30.project);
+      var p30 = diffPct(r30);
+      check("log30 erase op#" + upTo + " pixel diff " + p30.toFixed(2) + "% <= 1.0%",
+            p30 <= 1.0, p30.toFixed(2) + "%");
+      if (upTo === 9) { shot(r30.a, "log30 op9 · 2D"); shot(r30.b, "log30 op9 · pixi"); }
+    }
+
+    // 7. text block (embedded fixture font, wrap + holes in glyphs)
     var ttf = VB.parseTTF(window.VBTTFFixture.bytes());
     var tdoc = new VB.VBDocument();
     tdoc.width = 11000; tdoc.height = 8000;

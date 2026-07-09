@@ -239,5 +239,9 @@
   VB.render = render;
   VB.renderProject = renderProject;
   VB.applyViewTransform = applyViewTransform;
+  VB.paintFill = paintFill; // (ctx, doc, fillIdx, style, chains) — the
+  // oracle's fill painter; the Pixi backend rasterizes even-odd-encoded
+  // fills through it so both backends share ONE composition truth
+  VB.tracePath = tracePath;
   VB.drawTextBlock = drawText; // (ctx, doc, textBlock) — used by the text tool's live preview
 })();
