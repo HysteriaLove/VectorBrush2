@@ -54,9 +54,12 @@ here and cited per section.
    sections ship one at a time behind the same kind of gates.
 5. **Multiplatform model, iPad-first target.** The App/Document object
    model and every section view are built platform-neutral; nothing in
-   the model layer may assume a platform. iPad is the FIRST shipping
-   target — its constraints (touch + Pencil input, memory ceilings,
-   sandboxed files) set the floor every platform benefits from (see §10).
+   the model layer may assume a platform. The ladder is DECIDED: the
+   suite is prototyped in the app's CURRENT browser form first, then
+   ships as a native iPad App Store app, then Windows, macOS, Linux
+   (native or Electron-class shells, chosen per platform). iPad's
+   constraints (touch + Pencil input, memory ceilings, sandboxed files)
+   set the floor every platform benefits from (see §10).
 6. **Streaming, not loading.** The suite is data-heavy in every view —
    audio stems, bitmaps, onion-skin frame runs, scene renders, exports.
    Views subscribe to windows of data and the streaming layer feeds them
@@ -288,11 +291,12 @@ Proxy store   — persisted derived data: waveform peak tiles, thumbnails,
 
 ### 5.4 Platform backends
 
-One `ChunkSource` interface, three backends: browser dev build =
-`File.slice`/OPFS; iPad wrapper = native file bridge (WKWebView
-message-ports for range reads — measured before trusting, see OPEN);
-future desktop = whatever the wrapper gives us. The model layer sees
-none of this (multiplatform principle, §1.5).
+One `ChunkSource` interface, one backend per shell (§10 ladder): browser
+dev build = `File.slice`/OPFS; iPad native app = native file bridge
+(WKWebView message-ports for range reads — measured before trusting,
+see OPEN); desktop shells (Windows/macOS/Linux, Electron or native) =
+direct filesystem range reads, the easy case. The model layer sees none
+of this (multiplatform principle, §1.5).
 
 ### 5.5 OPEN questions — streaming
 
@@ -521,21 +525,55 @@ of scope for now and must not leak requirements into v1 beyond the hooks
 above. No CRDT/server work; just don't break id stability or op
 determinism, which we already enforce.
 
-## 10. Platform plan (multiplatform model, iPad first)
+## 10. Platform plan (DECIDED ladder)
 
-- Engine and app remain vanilla JS + vendored libs (no build step —
-  toolchain constraint stands). Ship as a wrapped WKWebView app
-  (Capacitor-style shell added at packaging time, not in the repo now);
-  the browser build remains the dev/oracle environment.
+Ship order (user, 2026-07-09):
+
+0. **Prototype in the current form.** The whole suite is prototyped as
+   the app exists today — the browser build, no native shell, no store.
+   Sections, formats, journal, streaming, and workflows get proven here
+   first; nothing below starts until the prototype has earned it.
+1. **iPad — native App Store app.** A real native shell (WKWebView-hosted
+   engine inside a native iPad app), distributed through the App Store.
+   Not a website, not a PWA.
+2. **Windows**, 3. **macOS**, 4. **Linux** — each natively or via
+   Electron "or some other solution"; the wrapper choice is per-platform
+   and deliberately deferred. Nothing in the model or views may care
+   which shell it is running in.
+
+Consequences:
+
+- **One engine, N shells.** Engine and app remain vanilla JS + vendored
+  libs (no build step — toolchain constraint stands). Each platform gets
+  a thin native shell exposing the same bridge surface: file/range I/O
+  (ChunkSource backend, §5.4), share/export handoff, memory-pressure
+  signals, window/document lifecycle. The bridge interface is defined
+  once, in the repo; shells implement it. The browser build is rung 0
+  AND stays the dev/oracle environment and CI gate runner forever — it
+  just never becomes a shipping target itself.
+- **Prototype honestly.** Rung 0 uses the browser `ChunkSource` backend
+  (`File.slice`/OPFS) and a placeholder memory budget — but streaming,
+  window subscriptions, and placeholder ladders are REAL in the
+  prototype, not stubbed, or rung 1 will surface every shortcut at
+  review time.
+- **Vendoring is unconstrained.** Packaged apps carry their libraries;
+  three.js (or anything else that earns its place) vendors in whole like
+  paper.js and pixi did. Trimming is a memory question, not a
+  distribution one.
+- App Store realities land early on purpose: NoteObject packs, themes,
+  and `.y2kactor` files are DATA-ONLY partly because review-safe
+  extensibility is a store requirement (no downloadable code).
 - Input: pointer events already unify mouse/touch/Pencil. Add: Pencil
   pressure → brush radius (op already records final geometry, so
   determinism is untouched), two-finger pan/zoom, long-press context
-  menus, palm rejection via pointerType.
+  menus, palm rejection via pointerType. Desktop shells inherit the
+  mouse/keyboard paths that exist today.
 - Memory: per-fill raster sprite caches and matcap buffers get an LRU
-  budget (iPad Safari WebGL/WebGPU process limits are the constraint);
-  package lazy-load (§3) keeps 40-scene projects openable.
-- Files: package folder maps to an iOS document package (Files app /
-  iCloud sync friendly); exports register with the share sheet.
+  budget (iPad WKWebView process limits set the floor; desktop budgets
+  are laxer but come from the same AssetCache knob, §5.2).
+- Files: the `.y2kproj` package maps to an iOS document package (Files
+  app / iCloud sync friendly); exports register with the share sheet.
+  Desktop shells map the same package to a plain folder.
 - WebGPU (Post, matcap stage 2b) ships behind capability detection with
   the CPU oracle as the always-available fallback — same policy as today.
 
@@ -567,8 +605,9 @@ Still open:
      (Recommendation: our records stay truth, three.js is a renderer —
      keeps determinism, journal, and Blender export independent of a
      library's scene graph.)
-   - bundle/vendoring: three.js is large; iPad memory + no-build-step
-     constraints argue for a trimmed vendored build.
+   - vendoring itself is a non-issue (packaged apps, §10) — vendor it
+     whole like paper.js/pixi; only runtime memory on iPad decides
+     whether a trimmed build is worth the maintenance.
    - oracle discipline: what is the CPU/Canvas2D reference for a 3D-ish
      compositor view — full parity like pixi, or golden-frame fixtures?
 4. **Streaming (§5.5)**: audio transport on iPad, WKWebView range-read
