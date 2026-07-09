@@ -613,3 +613,85 @@ Still open:
 4. **Streaming (§5.5)**: audio transport on iPad, WKWebView range-read
    throughput, proxy generation timing, memory budgets, y2kvector
    partial-parse header, journal segment alignment.
+
+---
+
+## Appendix A — Native-rebuild options for the iPad app (rung 1 study)
+
+What a "true native rebuild" would mean, recorded so the rung-1 decision
+is made against the full option space. Every option is really an answer
+to one question: **what happens to the engine we already have?** The
+geometry core (planar map, booleans, mask, journal, SWF/y2kvector
+codecs) is pure JS with no DOM dependencies, and the correctness
+discipline — the paper.js-faithful boolean contract, the flood
+baselines, the oracle battery — is welded to it.
+
+Two facts constrain every option below:
+
+- Any native iPad build — including Flutter/RN — requires a Mac with
+  Xcode to compile and submit. That is a new dev-machine requirement on
+  top of the current Windows/Python/Git toolchain.
+- Any move off paper.js booleans (to Skia PathOps, Clipper2, or a
+  hand-port) produces DIFFERENT geometry: every baseline and fixture
+  resets, and the standing "faithful to paper.js booleans" directive is
+  forfeited. The current app stops being an oracle and becomes a spec.
+
+### The options
+
+**A. Native shell hosting the JS engine in WKWebView** — the plan of
+record (rung 1, §10). All engine code survives bit-exact. WKWebView is
+the ONLY context Apple grants JIT, so the hot loops (brush commit,
+mask, booleans) keep their speed. UI chrome can go progressively native
+(SwiftUI panels around the web canvas). Ceiling: Pencil input arrives
+via pointer events ~1–2 frames later than native touch delivery, and
+no predicted-touches API.
+
+**B. Swift/SwiftUI + Metal, full rewrite** — the Procreate shape.
+Raw UITouch with coalesced + predicted touches gives the platform's
+best drawing latency (~9–16ms motion-to-photon); AVFoundation covers
+the audio suite; UIDocument covers packages. Cost is total: no Swift
+paper.js exists, so the boolean core is rewritten on Skia
+PathOps/Clipper2 (contract reset, above), and Swift buys nothing for
+rungs 2–4 — Windows/Linux would need a second app or Electron anyway.
+
+**C. C++ or Rust engine core + thin native UI per platform** — the
+professional-suite architecture (Affinity, Fresco, Clip Studio,
+Toon Boom). One native core owns geometry/document/journal/streaming;
+Swift+Metal shell on iPad; native or lightweight shells on desktop.
+Rust is notable because ruffle (mature Rust SWF implementation) is
+already vendored in this repo, and wgpu covers Metal/Vulkan/DX12 with
+one renderer. Strongest 10-year end-state; largest rewrite — today's
+app becomes the reference implementation the new core is validated
+against.
+
+**D. Native UI + JS core embedded in JavaScriptCore/Hermes (no
+WebView)** — a trap. App-embedded JSC runs WITHOUT JIT (only WKWebView
+gets JIT) and Hermes never JITs; interpreter-only execution multiplies
+the boolean hot path several-fold. Fine for journal/codecs, wrong for
+geometry. Only viable paired with a native geometry core — at which
+point it is option C.
+
+**E. Cross-platform native-ish frameworks — Flutter, React Native +
+Skia, Kotlin/Compose Multiplatform.** One rewrite, all four rungs from
+one codebase, store-legal. Flutter (Impeller) and RN-Skia both expose a
+Skia canvas — Skia includes PathOps, so the boolean story is at least
+industrial. RN is the odd standout because Hermes could host chunks of
+existing JS logic. All of them put a framework between us and the
+Pencil (latency between A and B) and still reset the boolean contract
+if geometry moves to Skia.
+
+**F. Game-engine shells (Unity/Godot).** Listed for completeness:
+strong GPU/touch, wrong shape for a document-centric suite. No.
+
+### Position
+
+The ladder stands: prototype at rung 0, ship rung 1 as **option A**.
+One targeted hybrid is worth planning for inside A: keep the JS engine
+in WKWebView for all COMMITTED geometry (JIT, determinism, baselines
+intact) and add a **native Metal overlay only for the live stroke
+preview**, fed by predicted touches. The architecture already separates
+the uncommitted overlay from journaled commits, so the seam exists
+today — this buys Procreate-class pen feel without rewriting the core.
+If the suite outgrows that, option C (Rust core, ruffle-adjacent) is
+the honest end-game, with today's app as its validation oracle rather
+than dead code.
