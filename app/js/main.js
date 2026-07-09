@@ -11,8 +11,13 @@
   var canvas = document.getElementById("stage-canvas");
   var ctx = canvas.getContext("2d");
 
+  // The session owns the open project's live state (session.js): store,
+  // journal, undo history, op dispatch. `app` is the GUI facade over it —
+  // tools keep their `app.*` surface, the coming shell (phase 5) mounts
+  // and disposes sessions.
+  var session = new VB.Session({ width: 550 * VB.TWIPS, height: 400 * VB.TWIPS });
+
   var app = {
-    project: new VB.Project(),
     fileName: null,
     sourceBytes: 0,
     tool: "select",
@@ -26,8 +31,10 @@
     debug: false,
     debugHover: -1,
     debugPin: -1,
-    journal: [{ op: "new", width: 550 * VB.TWIPS, height: 400 * VB.TWIPS }],
-    record: function (op) { app.journal.push(op); },
+    session: session,
+    history: session.history,
+    record: function (op) { session.record(op); },
+    exec: function (op) { return session.exec(op); },
     requestRender: requestRender,
     setMsg: setMsg,
     setCursor: function (c) { canvas.style.cursor = c || ""; },
@@ -43,46 +50,29 @@
     docChanged: docChanged
   };
 
+  Object.defineProperty(app, "project", {
+    get: function () { return session.project; },
+    set: function (p) { session.project = p; }
+  });
+  Object.defineProperty(app, "journal", {
+    get: function () { return session.journal; }
+  });
+  Object.defineProperty(app, "errors", {
+    get: function () { return session.errors; }
+  });
+
   // Every tool and the boolean core edit ONE planar map: the active
   // layer's frame cell. Assigning a bare document (file loads) wraps it
   // as a single-layer project.
   Object.defineProperty(app, "doc", {
-    get: function () { return app.project.activeCell(); },
-    set: function (d) { app.project = VB.wrapDoc(d); }
+    get: function () { return session.project.activeCell(); },
+    set: function (d) { session.project = VB.wrapDoc(d); }
   });
 
-  // Command-pattern workflow: journal + apply in ONE call, dispatched
-  // through the same registered command the replay uses (journal.js
-  // VB.defineOp/applyOp) — live and replay cannot diverge for anything
-  // routed through here. The command manages its own history snapshot.
-  var execCtx = {
-    get doc() { return app.doc; },
-    get project() { return app.project; },
-    set project(p) { app.project = p; },
-    get history() { return app.history; },
-    sync: function () {} // live doc/project are getters — always current
-  };
-  app.exec = function (op) {
-    app.record(op);
-    var r = VB.applyOp(execCtx, op);
-    app.docChanged();
-    return r;
-  };
-
-  // Undo snapshots capture the WHOLE project, so layer add/delete/move
-  // are single undo steps. Tools call app.history.push(app.doc) — the
-  // wrapper ignores the argument and snapshots the project.
-  var projectHistory = new VB.History();
-  app.history = {
-    push: function () { projectHistory.push(app.project); },
-    undo: function () { return projectHistory.undo(app.project); },
-    redo: function () { return projectHistory.redo(app.project); },
-    canUndo: function () { return projectHistory.canUndo(); },
-    canRedo: function () { return projectHistory.canRedo(); },
-    clear: function () { projectHistory.clear(); },
-    get undoStack() { return projectHistory.undoStack; },
-    get redoStack() { return projectHistory.redoStack; }
-  };
+  // exec applies ops through the session's registered-command dispatch
+  // (live and replay share one code path); docChanged refresh rides the
+  // session's changed hook so future sections trigger it too.
+  session.onChanged = function () { app.docChanged(); };
 
   var tools = {
     select: VB.ArrowTool(app),
@@ -187,26 +177,22 @@
 
   // ---- OperationEstimator debug hook -------------------------------------------
   // Every journaled op gets a deterministic PREFLIGHT profile in debug
-  // mode (docs/OperationEstimator.md). app.record runs before the
-  // mutation on every path (tools record, then apply), so the profile
-  // describes the document the op is about to act on. Debug-only and
-  // side-effect free — replay never depends on it.
-  (function () {
-    var baseRecord = app.record;
-    app.record = function (op) {
-      if (app.debug && VB.operationEstimate) {
-        try {
-          app.lastEstimate = VB.operationEstimate(
-            { doc: app.doc, project: app.project }, op, { phase: "preflight" });
-          updateEstimateBadge();
-          renderEstimatePanel();
-        } catch (err) {
-          trapError("estimator: " + err.message, err.stack);
-        }
+  // mode (docs/OperationEstimator.md). The session's record hook runs
+  // before the journal push on every path (tools record, then apply), so
+  // the profile describes the document the op is about to act on.
+  // Debug-only and side-effect free — replay never depends on it.
+  session.onRecord = function (op) {
+    if (app.debug && VB.operationEstimate) {
+      try {
+        app.lastEstimate = VB.operationEstimate(
+          { doc: app.doc, project: app.project }, op, { phase: "preflight" });
+        updateEstimateBadge();
+        renderEstimatePanel();
+      } catch (err) {
+        trapError("estimator: " + err.message, err.stack);
       }
-      baseRecord(op);
-    };
-  })();
+    }
+  };
 
   function fmtScore(n) {
     if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
@@ -403,8 +389,7 @@
   // Crash black box: any uncaught exception is captured (with stack and
   // the current op count) and shipped inside the exported log, so a
   // "the app crashed" report carries its own diagnosis. Replay ignores
-  // the errors field.
-  app.errors = [];
+  // the errors field. (The array itself lives on the session.)
   function trapError(msg, stack) {
     app.errors.push({ atOp: app.journal.length, msg: String(msg),
                       stack: String(stack || "").split("\n").slice(0, 8).join(" | ") });

@@ -55,6 +55,7 @@
 <script src="../js/lasso.js"></script>
 <script src="../js/ttf.js"></script>
 <script src="../js/fonts-builtin.js"></script>
+<script src="../js/session.js"></script>
 <script src="fixtures.js"></script>
 <script src="ttffixture.js"></script>
 <script src="fontswf.js"></script>
@@ -2954,6 +2955,51 @@
   } catch (err) {
     fail++;
     log("  VISUAL EXCEPTION: " + (err && err.stack || err), "fail");
+  }
+
+  // ============================ Session seam ================================
+  // The ProjectSession (session.js) is what the coming shell mounts
+  // sections against: it owns the store, journal, undo, and op dispatch.
+  // Exec-routed ops must journal, apply, fire the hooks, replay
+  // byte-exact, and undo — same guarantees the app facade had before
+  // the seam was carved (Implementation.md phase 2).
+  log("");
+  log("session:");
+  try {
+    var ses = new VB.Session({ width: 11000, height: 8000 });
+    check("session seeds the journal with the creating op",
+      ses.journal.length === 1 && ses.journal[0].op === "new" &&
+      ses.journal[0].width === 11000);
+    var sesRecorded = [], sesChanged = 0;
+    ses.onRecord = function (op) { sesRecorded.push(op.op); };
+    ses.onChanged = function () { sesChanged++; };
+    ses.exec({ op: "pencil",
+               points: [{ x: 1000, y: 1000 }, { x: 5000, y: 1200 }],
+               style: { width: 20, color: { r: 0, g: 0, b: 0, a: 255 } } });
+    ses.exec({ op: "brush",
+               points: [{ x: 2000, y: 4000 }, { x: 6000, y: 4200 }],
+               radius: 300, color: { r: 220, g: 40, b: 40, a: 255 } });
+    var sesEdges = ses.project.activeCell().edges.length;
+    check("exec journals and applies through the registry",
+      ses.journal.length === 3 && sesEdges > 0 &&
+      sesRecorded.join(",") === "pencil,brush" && sesChanged === 2,
+      ses.journal.length + " ops, " + sesEdges + " edges, hooks " +
+      sesRecorded.length + "/" + sesChanged);
+    var sesRep = await VB.replayJournal(JSON.parse(JSON.stringify(ses.journal)));
+    check("session journal replays byte-exact",
+      JSON.stringify(sesRep.doc.edges) ===
+      JSON.stringify(ses.project.activeCell().edges),
+      sesRep.doc.edges.length + " vs " + sesEdges + " edges");
+    check("session undo restores the pre-op project",
+      ses.history.canUndo() &&
+      (ses.history.undo(),
+       JSON.stringify(ses.project.activeCell().edges) ===
+       JSON.stringify((await VB.replayJournal(
+         JSON.parse(JSON.stringify(ses.journal.slice(0, 2))))).doc.edges)),
+      ses.project.activeCell().edges.length + " edges after undo");
+  } catch (err) {
+    fail++;
+    log("  SESSION EXCEPTION: " + (err && err.stack || err), "fail");
   }
 
   // ============== incremental swath union ≡ batch union ====================
