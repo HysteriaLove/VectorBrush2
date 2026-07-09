@@ -1562,7 +1562,7 @@
         return { doc: app.doc, fillIdx: i + 1 };
       }
     }
-    var d = new VB.VBDocument();
+    var d = new VB.Y2KVectorDocument();
     d.width = 3000; d.height = 2200;
     d.fills.push(VB.materialClone(style));
     d.edges.push(

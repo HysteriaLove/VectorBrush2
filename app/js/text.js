@@ -298,7 +298,7 @@
       var winding = fitted.map(function (e) {
         return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, 0, 0, 0);
       });
-      var preOp = new VB.VBDocument();
+      var preOp = new VB.Y2KVectorDocument();
       preOp.width = doc.width; preOp.height = doc.height;
       preOp.fills = doc.fills; preOp.lines = doc.lines;
       preOp.edges = doc.edges.map(function (e) {

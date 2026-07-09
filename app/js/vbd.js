@@ -667,7 +667,7 @@
         for (var li = 0; li < nLayers; li++) {
           var lname = readStr(r);
           var lflags = r.u8();
-          var cell = new VB.VBDocument();
+          var cell = new VB.Y2KVectorDocument();
           cell.width = project.width;
           cell.height = project.height;
           cell.background = project.background;
@@ -697,7 +697,7 @@
       };
     }
 
-    var doc = new VB.VBDocument();
+    var doc = new VB.Y2KVectorDocument();
     var stage = r.rect();
     doc.width = stage.xmax - stage.xmin;
     doc.height = stage.ymax - stage.ymin;

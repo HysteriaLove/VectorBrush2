@@ -1,4 +1,4 @@
-/* swf.js — loads Flash .swf files (SWF7 / MX 2004 era) into a VBDocument.
+/* swf.js — loads Flash .swf files (SWF7 / MX 2004 era) into a Y2KVectorDocument.
  *
  * Reads the tag stream up to the first ShowFrame, decodes every
  * DefineShape(1/2/3/4) into planar-map edges, and bakes PlaceObject
@@ -383,7 +383,7 @@
     var fps = r.u16() / 256;
     var frameCount = r.u16();
 
-    var doc = new VB.VBDocument();
+    var doc = new VB.Y2KVectorDocument();
     doc.width = frameRect.xmax - frameRect.xmin;
     doc.height = frameRect.ymax - frameRect.ymin;
 

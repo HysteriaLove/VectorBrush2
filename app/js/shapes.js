@@ -114,7 +114,7 @@
       return VB.geom.windingNumber(windingLoops, x, y) !== 0;
     }
 
-    var preOp = new VB.VBDocument();
+    var preOp = new VB.Y2KVectorDocument();
     preOp.width = doc.width; preOp.height = doc.height;
     preOp.fills = doc.fills; preOp.lines = doc.lines;
     preOp.edges = doc.edges.map(function (e) {

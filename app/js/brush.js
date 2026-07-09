@@ -68,7 +68,7 @@
 
     // Ground truth for faces outside the paint: the pre-op document is
     // consistent, so region queries against it are exact.
-    var preOp = new VB.VBDocument();
+    var preOp = new VB.Y2KVectorDocument();
     preOp.width = doc.width; preOp.height = doc.height;
     preOp.fills = doc.fills; preOp.lines = doc.lines;
     preOp.edges = doc.edges.map(function (e) {

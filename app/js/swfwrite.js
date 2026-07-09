@@ -143,7 +143,7 @@
     return pw.toUint8Array();
   }
 
-  /** Accepts a bare VBDocument or a VB.Project. A project exports its
+  /** Accepts a bare Y2KVectorDocument or a VB.Project. A project exports its
    *  ACTIVE scene: each visible non-empty layer becomes its own
    *  DefineShape at its own depth, bottom to top — the same flat
    *  depth-list Flash itself produces from layered authoring files. */

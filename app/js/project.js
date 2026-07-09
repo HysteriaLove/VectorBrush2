@@ -8,7 +8,7 @@
  *                  JSFL's convention; render walks the array backwards)
  *         frames[]  (layer.frames — frame 1 only for now; the array
  *                    exists so animation can land without reshaping)
- *           cell = VBDocument  (frame.elements: the merged-ink Shape
+ *           cell = Y2KVectorDocument  (frame.elements: the merged-ink Shape
  *                  element IS the planar map, and cell.texts are the
  *                  Text elements stacked above it — Flash MX keeps a
  *                  layer's raw ink behind its objects)
@@ -91,7 +91,7 @@
   }
 
   Project.prototype.newCell = function () {
-    var d = new VB.VBDocument();
+    var d = new VB.Y2KVectorDocument();
     d.width = this.width;
     d.height = this.height;
     d.background = this.background;
@@ -178,7 +178,7 @@
                               this.scene().layers.length - 1);
   };
 
-  /** Wrap a bare VBDocument (a loaded .swf / v1-v2 .vbd) as a
+  /** Wrap a bare Y2KVectorDocument (a loaded .swf / v1-v2 .vbd) as a
    *  single-layer project adopting its stage. */
   function wrapDoc(doc) {
     var p = new Project(doc.width, doc.height);

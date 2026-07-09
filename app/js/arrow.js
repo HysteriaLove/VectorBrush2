@@ -47,7 +47,7 @@
     var e = doc.edges[idx];
     // snapshot BEFORE any mutation — mask ground truth for faces outside
     // the swept lens
-    var preOp = new VB.VBDocument();
+    var preOp = new VB.Y2KVectorDocument();
     preOp.width = doc.width; preOp.height = doc.height;
     preOp.fills = doc.fills; preOp.lines = doc.lines;
     preOp.edges = doc.edges.map(function (pe) {
@@ -202,7 +202,7 @@
     function insideMoved(px, py) {
       return VB.geom.windingNumber(windingLoops, px, py) !== 0;
     }
-    var preOp = new VB.VBDocument();
+    var preOp = new VB.Y2KVectorDocument();
     preOp.width = doc.width; preOp.height = doc.height;
     preOp.fills = doc.fills; preOp.lines = doc.lines;
     preOp.edges = doc.edges.map(function (e) {
@@ -287,7 +287,7 @@
   /** Standalone clip doc from a fill/stroke selection, resolved against
    *  the CURRENT doc (call BEFORE any lifting). */
   function liftSelDoc(doc, fillPicks, edgeKeys) {
-    var lifted = new VB.VBDocument();
+    var lifted = new VB.Y2KVectorDocument();
     lifted.width = doc.width; lifted.height = doc.height;
     (fillPicks || []).forEach(function (p) {
       var got = faceLoopsAt(doc, p.x, p.y);
@@ -376,7 +376,7 @@
   }
 
   function cloneDoc(doc) {
-    var c = new VB.VBDocument();
+    var c = new VB.Y2KVectorDocument();
     c.width = doc.width; c.height = doc.height;
     c.background = doc.background;
     c.fills = doc.fills.map(function (f) {
@@ -395,7 +395,7 @@
     var fitted = loopEdges.map(function (e) {
       return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, 0, 0, 0);
     });
-    var preOp = new VB.VBDocument();
+    var preOp = new VB.Y2KVectorDocument();
     preOp.width = doc.width; preOp.height = doc.height;
     preOp.fills = doc.fills; preOp.lines = doc.lines;
     preOp.edges = doc.edges.map(function (e) {
@@ -550,7 +550,7 @@
     });
     if (moved.length === 0) return false;
 
-    var preOp = new VB.VBDocument();
+    var preOp = new VB.Y2KVectorDocument();
     preOp.width = doc.width; preOp.height = doc.height;
     preOp.fills = doc.fills; preOp.lines = doc.lines;
     preOp.edges = doc.edges.map(function (e) {
@@ -727,7 +727,7 @@
     // Build a standalone floating document from a fill/stroke selection
     // (resolved against the CURRENT doc, before any lifting).
     function liftSelectionDoc(items) {
-      var lifted = new VB.VBDocument();
+      var lifted = new VB.Y2KVectorDocument();
       lifted.width = app.doc.width; lifted.height = app.doc.height;
       items.fills.forEach(function (p) {
         var got = faceLoopsAt(app.doc, p.x, p.y);

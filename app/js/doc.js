@@ -55,7 +55,7 @@
 
   // ---- document -----------------------------------------------------------
 
-  function VBDocument() {
+  function Y2KVectorDocument() {
     this.width = 550 * 20;         // stage size, twips
     this.height = 400 * 20;
     this.background = { r: 255, g: 255, b: 255, a: 255 };
@@ -75,7 +75,7 @@
     this.texts = [];
   }
 
-  VBDocument.prototype.clear = function () {
+  Y2KVectorDocument.prototype.clear = function () {
     this.fills = [];
     this.lines = [];
     this.edges = [];
@@ -84,7 +84,7 @@
   };
 
   // Add a style, reusing an identical existing entry. Returns 1-based index.
-  VBDocument.prototype.addFillStyle = function (style) {
+  Y2KVectorDocument.prototype.addFillStyle = function (style) {
     for (var i = 0; i < this.fills.length; i++) {
       if (sameFill(this.fills[i], style)) return i + 1;
     }
@@ -92,7 +92,7 @@
     return this.fills.length;
   };
 
-  VBDocument.prototype.addLineStyle = function (style) {
+  Y2KVectorDocument.prototype.addLineStyle = function (style) {
     for (var i = 0; i < this.lines.length; i++) {
       var s = this.lines[i];
       if (s.width === style.width && sameColor(s.color, style.color)) return i + 1;
@@ -103,7 +103,7 @@
 
   // Bounds of the geometry itself (no stroke padding), in twips.
   // Returns null for an empty document.
-  VBDocument.prototype.edgeBounds = function () {
+  Y2KVectorDocument.prototype.edgeBounds = function () {
     if (this.edges.length === 0) return null;
     var xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
     for (var i = 0; i < this.edges.length; i++) {
@@ -120,7 +120,7 @@
     return { xmin: xmin, xmax: xmax, ymin: ymin, ymax: ymax };
   };
 
-  VBDocument.prototype.stats = function () {
+  Y2KVectorDocument.prototype.stats = function () {
     var straight = 0, curved = 0;
     for (var i = 0; i < this.edges.length; i++) {
       if (this.edges[i].cx === null) straight++; else curved++;
@@ -138,7 +138,7 @@
   // style index must resolve — the exact invariants that keep the document
   // bit-packable at Flash density. Returns a list of violation strings
   // (empty = valid).
-  VBDocument.prototype.validate = function () {
+  Y2KVectorDocument.prototype.validate = function () {
     var bad = [];
     function isInt(v) { return typeof v === "number" && Number.isInteger(v); }
     for (var i = 0; i < this.edges.length; i++) {
@@ -191,7 +191,10 @@
   }
 
   window.VB = window.VB || {};
-  VB.VBDocument = VBDocument;
+  VB.Y2KVectorDocument = Y2KVectorDocument;
+  // TRANSITIONAL alias (this commit only): catches stragglers loudly in
+  // external harnesses; dropped in the codec-rename commit.
+  VB.VBDocument = Y2KVectorDocument;
   VB.solidFill = solidFill;
   VB.lineStyle = lineStyle;
   VB.edge = edge;

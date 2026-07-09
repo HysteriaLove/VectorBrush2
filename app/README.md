@@ -89,8 +89,8 @@ no epsilons.
 | file | role |
 |---|---|
 | `js/bitio.js` | MSB-first bit reader/writer + SWF RECT, minimal-bit-width helpers |
-| `js/doc.js` | `VBDocument`: the planar edge map (edges with `fill0`/`fill1`/`line` style indices) + style tables |
-| `js/swf.js` | SWF loader: FWS/CWS container, DefineShape 1–4, PlaceObject matrix baking → `VBDocument` |
+| `js/doc.js` | `Y2KVectorDocument`: the planar edge map (edges with `fill0`/`fill1`/`line` style indices) + style tables |
+| `js/swf.js` | SWF loader: FWS/CWS container, DefineShape 1–4, PlaceObject matrix baking → `Y2KVectorDocument` |
 | `js/trace.js` | Resolves dual-sided edges into closed fill loops (fill1 forward, fill0 reversed, exact endpoint welding) and stroke chains |
 | `js/render.js` | Canvas2D renderer: fills first (even-odd), strokes on top (round/round, 1px hairline floor). Uses only `moveTo`/`lineTo`/`quadraticCurveTo`/`fill`/`stroke` so it ports 1:1 to `PIXI.Graphics` |
 | `js/vbd.js` | `.vbd` encoder/decoder — pen-continuity edge ordering, delta bit-packing, optional deflate |

@@ -383,7 +383,7 @@
     // samples. The common, healthy path is untouched.
     function selfCrosses(loop) {
       if (loop.length < 3) return false;
-      var temp = new VB.VBDocument();
+      var temp = new VB.Y2KVectorDocument();
       var pieces = VB.nodeEdges(temp, loop.map(function (e) {
         return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, 0, 0, 0);
       }));

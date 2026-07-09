@@ -163,7 +163,7 @@
     }
 
     // point-in-fill on a unit square
-    var doc = new VB.VBDocument();
+    var doc = new VB.Y2KVectorDocument();
     doc.fills.push(VB.solidFill(255, 0, 0));
     doc.edges.push(
       VB.edge(0, 0, null, null, 4000, 0, 0, 1, 0),
@@ -217,7 +217,7 @@
     var style = { width: 20, color: { r: 0, g: 0, b: 0, a: 255 } };
 
     // two crossing pencil strokes → both split at the shared node
-    var doc = new VB.VBDocument();
+    var doc = new VB.Y2KVectorDocument();
     VB.pencilCommit(doc, [{ x: 0, y: 0 }, { x: 2000, y: 0 }, { x: 4000, y: 0 }], style);
     check("first stroke = 1 edge", doc.edges.length === 1, doc.edges.length + " edges");
     VB.pencilCommit(doc, [{ x: 2000, y: -2000 }, { x: 2000, y: 0 }, { x: 2000, y: 2000 }], style);
@@ -229,7 +229,7 @@
     check("line styles deduped", doc.lines.length === 1, doc.lines.length + " styles");
 
     // stroke across a filled square inherits the fill on both sides
-    var doc2 = new VB.VBDocument();
+    var doc2 = new VB.Y2KVectorDocument();
     doc2.fills.push(VB.solidFill(0, 160, 60));
     doc2.edges.push(
       VB.edge(0, 0, null, null, 4000, 0, 0, 1, 0),
@@ -256,7 +256,7 @@
     }
 
     // self-crossing stroke splits itself
-    var doc3 = new VB.VBDocument();
+    var doc3 = new VB.Y2KVectorDocument();
     VB.pencilCommit(doc3, [
       { x: 0, y: 0 }, { x: 2000, y: 2000 }, { x: 2000, y: 0 }, { x: 0, y: 2000 }
     ], style);
@@ -280,7 +280,7 @@
     check("record bit width sane", rec.nbits >= 2 && rec.nbits <= 17, "nbits=" + rec.nbits);
 
     // undo / redo round-trip
-    var doc4 = new VB.VBDocument();
+    var doc4 = new VB.Y2KVectorDocument();
     var hist = new VB.History();
     VB.pencilCommit(doc4, [{ x: 0, y: 0 }, { x: 1000, y: 0 }, { x: 2000, y: 0 }], style);
     var before = doc4.edges.length;
@@ -302,7 +302,7 @@
 
     // 1. Fill a pencil-outlined rectangle: edges gain a fill on the
     //    interior side, keep their line style, nothing dissolves.
-    var doc = new VB.VBDocument();
+    var doc = new VB.Y2KVectorDocument();
     VB.pencilCommit(doc, [{ x: 0, y: 0 }, { x: 4000, y: 0 }], stroke);
     VB.pencilCommit(doc, [{ x: 4000, y: 0 }, { x: 4000, y: 3000 }], stroke);
     VB.pencilCommit(doc, [{ x: 4000, y: 3000 }, { x: 0, y: 3000 }], stroke);
@@ -334,7 +334,7 @@
 
     // 4. Dissolution: two rects sharing a lineless border; filling the
     //    right one with the left one's color merges them.
-    var doc2 = new VB.VBDocument();
+    var doc2 = new VB.Y2KVectorDocument();
     doc2.fills.push(VB.solidFill(200, 60, 60)); // style 1
     doc2.fills.push(VB.solidFill(60, 60, 200)); // style 2
     doc2.edges.push(
@@ -357,7 +357,7 @@
 
     // 5. Island: fill the annulus between two squares; the island keeps
     //    its own fill (hole assignment).
-    var doc3 = new VB.VBDocument();
+    var doc3 = new VB.Y2KVectorDocument();
     doc3.fills.push(VB.solidFill(0, 150, 80));  // style 1: island fill
     doc3.edges.push(
       // outer square (clockwise, no fill yet — outline-less region)
@@ -405,7 +405,7 @@
     }
 
     // near-closed pencil loop auto-closes and fills like a circle
-    var doc = new VB.VBDocument();
+    var doc = new VB.Y2KVectorDocument();
     VB.pencilCommit(doc, arc(4000, 4000, 900, 40, 30), stroke);
     var e0 = doc.edges[0], eN = doc.edges[doc.edges.length - 1];
     check("loop auto-closed", e0.ax === eN.bx && e0.ay === eN.by);
@@ -415,7 +415,7 @@
     check("loop planar", VB.validatePlanar(doc).length === 0);
 
     // outline + curved island + short divider: fill one lobe only
-    var doc2 = new VB.VBDocument();
+    var doc2 = new VB.Y2KVectorDocument();
     VB.pencilCommit(doc2, arc(6000, 6000, 4000, 40, 60), stroke);
     VB.pencilCommit(doc2, arc(4800, 6000, 900, 40, 30), stroke);
     VB.pencilCommit(doc2, [
@@ -435,7 +435,7 @@
   (function () {
     var stroke = { width: 20, color: { r: 0, g: 0, b: 0, a: 255 } };
     function filledSquare() {
-      var d = new VB.VBDocument();
+      var d = new VB.Y2KVectorDocument();
       d.fills.push(VB.solidFill(200, 60, 60));
       d.edges.push(
         VB.edge(0, 0, null, null, 4000, 0, 0, 1, 0),
@@ -477,7 +477,7 @@
     check("refill dissolves boundary", doc2.edges.length === 4, doc2.edges.length + " edges");
 
     // 3. Stroke trim: erasing the middle of a pencil line leaves two stubs.
-    var doc3 = new VB.VBDocument();
+    var doc3 = new VB.Y2KVectorDocument();
     VB.pencilCommit(doc3, [{ x: 0, y: 0 }, { x: 2000, y: 0 }, { x: 4000, y: 0 }], stroke);
     var r3 = VB.eraseStroke(doc3, [{ x: 2000, y: 0 }], 300);
     check("trim removed middle", r3.removed >= 1);
@@ -490,7 +490,7 @@
     check("trim gap is open", gapClear);
 
     // 4. Erasing blank canvas is a no-op.
-    var doc4 = new VB.VBDocument();
+    var doc4 = new VB.Y2KVectorDocument();
     var r4 = VB.eraseStroke(doc4, [{ x: 2000, y: 2000 }], 400);
     check("blank erase no-op", r4.removed === 0 && r4.boundary === 0 && doc4.edges.length === 0);
 
@@ -507,7 +507,7 @@
     //    because it failed before grazing-crossing repair existed.
     var lcg = 424242;
     function rnd() { lcg = (lcg * 1103515245 + 12345) & 0x7fffffff; return lcg / 0x7fffffff; }
-    var storm = new VB.VBDocument();
+    var storm = new VB.Y2KVectorDocument();
     storm.width = 16000; storm.height = 12000;
     for (var st = 0; st < 12; st++) {
       var pts = [];
@@ -558,7 +558,7 @@
     var stroke = { width: 20, color: { r: 0, g: 0, b: 0, a: 255 } };
 
     // 1. Dab on blank canvas — the Brush001/brush002.swf pattern.
-    var doc = new VB.VBDocument();
+    var doc = new VB.Y2KVectorDocument();
     var r1 = VB.brushStroke(doc, [{ x: 4000, y: 4000 }], 500, red);
     check("dab paints", r1.boundary > 0);
     check("dab has one fill style", doc.fills.length === 1);
@@ -572,7 +572,7 @@
       VB.integrityReport(doc)[0]);
 
     // 2. Same-color overlap = union (Brush002 series).
-    var doc2 = new VB.VBDocument();
+    var doc2 = new VB.Y2KVectorDocument();
     VB.brushStroke(doc2, [{ x: 2000, y: 4000 }, { x: 5000, y: 4000 }], 400, red);
     var edgesA = doc2.edges.length;
     VB.brushStroke(doc2, [{ x: 4000, y: 4000 }, { x: 7000, y: 4000 }], 400, red);
@@ -587,7 +587,7 @@
 
     // 3. Two colors crossing (Brush002/Brush003.swf): new color owns the
     //    overlap; shared borders are two-sided F|G.
-    var doc3 = new VB.VBDocument();
+    var doc3 = new VB.Y2KVectorDocument();
     VB.brushStroke(doc3, [{ x: 4000, y: 1500 }, { x: 4000, y: 6500 }], 400, red);
     VB.brushStroke(doc3, [{ x: 1500, y: 4000 }, { x: 6500, y: 4000 }], 400, blue);
     check("two styles registered", doc3.fills.length === 2);
@@ -606,7 +606,7 @@
     // 4. Brush across a pencil stroke: paint-over ERASES the covered
     //    stroke segments (Flash "paint normal") — the stroke is trimmed
     //    to stubs outside the paint, exactly like the eraser trims.
-    var doc4 = new VB.VBDocument();
+    var doc4 = new VB.Y2KVectorDocument();
     VB.pencilCommit(doc4, [{ x: 1000, y: 4000 }, { x: 4000, y: 4000 }, { x: 7000, y: 4000 }], stroke);
     VB.brushStroke(doc4, [{ x: 4000, y: 3000 }, { x: 4000, y: 5000 }], 600, red);
     var coveredStrokes = doc4.edges.filter(function (e) {
@@ -623,7 +623,7 @@
       VB.integrityReport(doc4)[0]);
 
     // 5. Brush across an existing fill (different color): paints over.
-    var doc5 = new VB.VBDocument();
+    var doc5 = new VB.Y2KVectorDocument();
     doc5.fills.push(VB.solidFill(51, 102, 204)); // blue square, style 1
     doc5.edges.push(
       VB.edge(2000, 2000, null, null, 6000, 2000, 0, 1, 0),
@@ -644,7 +644,7 @@
     (function () {
       var lcg = 777;
       function rr() { lcg = (lcg * 1103515245 + 12345) & 0x7fffffff; return lcg / 0x7fffffff; }
-      var sdoc = new VB.VBDocument();
+      var sdoc = new VB.Y2KVectorDocument();
       var x = 3000, y = 3000, heading = rr() * Math.PI * 2;
       var spts = [];
       for (var i = 0; i < 180; i++) {
@@ -680,7 +680,7 @@
   log("fill normalization:");
   (function () {
     // A stale lineless claim inside a filled region is outvoted and healed.
-    var doc = new VB.VBDocument();
+    var doc = new VB.Y2KVectorDocument();
     doc.fills.push(VB.solidFill(60, 200, 60));
     doc.edges.push(
       VB.edge(0, 0, null, null, 8000, 0, 0, 1, 0),
@@ -701,7 +701,7 @@
 
     // Overlapping erases leaving a sub-probe sliver must still yield a
     // consistent document (the stranded-claim wedge bug).
-    var doc2 = new VB.VBDocument();
+    var doc2 = new VB.Y2KVectorDocument();
     doc2.fills.push(VB.solidFill(60, 200, 60));
     doc2.edges.push(
       VB.edge(0, 0, null, null, 8000, 0, 0, 1, 0),
@@ -719,7 +719,7 @@
       VB.geom.fillAt(doc2, 4000, 3801) === 0);
 
     // Cross-channel scrub over a previous channel at an angle.
-    var doc3 = new VB.VBDocument();
+    var doc3 = new VB.Y2KVectorDocument();
     doc3.fills.push(VB.solidFill(60, 200, 60));
     doc3.edges.push(
       VB.edge(0, 0, null, null, 8000, 0, 0, 1, 0),
@@ -1109,7 +1109,7 @@
       }));
 
     // whole pipeline on a synthetic square fill
-    var mdoc = new VB.VBDocument();
+    var mdoc = new VB.Y2KVectorDocument();
     mdoc.width = 11000; mdoc.height = 8000;
     mdoc.fills.push(VB.materialDefaults("matcap"));
     mdoc.edges.push(
@@ -1188,7 +1188,7 @@
     // vbd: tag-4 matcap with builtin id and embedded texture round-trips
     var mstyle = VB.materialDefaults("matcap");
     mstyle.matcap = "chrome";
-    var mdoc2 = new VB.VBDocument();
+    var mdoc2 = new VB.Y2KVectorDocument();
     mdoc2.width = 11000; mdoc2.height = 8000;
     mdoc2.fills.push(mstyle);
     mdoc2.fills.push({ type: "matcap", color: { r: 1, g: 2, b: 3, a: 255 },
@@ -1229,7 +1229,7 @@
     check("hairline floor", VB.pixiHairWidth(20, 1) === 20 &&
       VB.pixiHairWidth(5, 1) === 20 && VB.pixiHairWidth(5, 4) === 5);
     // content hash: stable, and sensitive to claim changes
-    var hd = new VB.VBDocument();
+    var hd = new VB.Y2KVectorDocument();
     hd.width = 11000; hd.height = 8000;
     hd.fills.push({ type: "solid", color: { r: 1, g: 2, b: 3, a: 255 } });
     hd.edges.push(VB.edge(0, 0, null, null, 100, 0, 0, 1, 0));
@@ -1258,7 +1258,7 @@
       JSON.stringify(mp));
 
     // line into an EMPTY doc: 2+12+20+0+0 cpu, 40 record bits = 74
-    var edoc = new VB.VBDocument();
+    var edoc = new VB.Y2KVectorDocument();
     edoc.width = 11000; edoc.height = 8000;
     var lineOp = { op: "line", a: { x: 1000, y: 1000 }, b: { x: 5000, y: 4000 },
                    style: { width: 20, color: { r: 0, g: 0, b: 0, a: 255 } } };
@@ -1270,7 +1270,7 @@
 
     // renderFrame of a 4-edge filled square: cpu 20 + solid paint over
     // the 550×400px stage (220000 px-ops) = 220020
-    var rdoc2 = new VB.VBDocument();
+    var rdoc2 = new VB.Y2KVectorDocument();
     rdoc2.width = 11000; rdoc2.height = 8000;
     rdoc2.fills.push({ type: "solid", color: { r: 9, g: 9, b: 9, a: 255 } });
     rdoc2.edges.push(
@@ -1453,7 +1453,7 @@
 
     // text copy: self-contained parts recreate the block in a FRESH doc
     var ttfC = VB.parseTTF(window.VBTTFFixture.bytes());
-    var tdc = new VB.VBDocument();
+    var tdc = new VB.Y2KVectorDocument();
     tdc.width = 11000; tdc.height = 8000;
     VB.textApplyOp(tdc, VB.buildTextOp(ttfC, { name: "VBTest" }, "AB AB", 400,
       { r: 20, g: 60, b: 200, a: 255 }, 1000, 1000, 1500, 1, 30));
@@ -1461,7 +1461,7 @@
     check("text copy yields one self-contained part",
       parts.length === 1 && parts[0].font.glyphs.length > 0,
       parts.length + " parts");
-    var tdc2 = new VB.VBDocument();
+    var tdc2 = new VB.Y2KVectorDocument();
     tdc2.width = 11000; tdc2.height = 8000;
     VB.textApplyOp(tdc2, parts[0]);
     var srcB = tdc.texts[0], dstB = tdc2.texts[0];
@@ -1488,7 +1488,7 @@
     var blk = { width: 40, color: { r: 0, g: 0, b: 0, a: 255 } };
 
     // 1. filled + stroked oval on a blank canvas
-    var doc = new VB.VBDocument();
+    var doc = new VB.Y2KVectorDocument();
     doc.width = 11000; doc.height = 8000;
     var n = VB.shapeCommit(doc, VB.ellipseLoop(4000, 3000, 2000, 1500), red, blk);
     check("oval is 8 records", n === 8, n + " records");
@@ -1554,7 +1554,7 @@
 
     // 1. reshape a straight stroke: L -> Q, endpoints pinned, curve
     //    through the drag point
-    var doc = new VB.VBDocument();
+    var doc = new VB.Y2KVectorDocument();
     doc.width = 11000; doc.height = 8000;
     VB.lineCommit(doc, { x: 2000, y: 2000 }, { x: 8000, y: 2000 }, blk, 0);
     check("reshape target is one straight record",
@@ -1572,7 +1572,7 @@
     check("reshape keeps the stroke", doc.edges[0].line === 1);
 
     // 2. move a stroked rectangle's corner node
-    var doc2 = new VB.VBDocument();
+    var doc2 = new VB.Y2KVectorDocument();
     doc2.width = 11000; doc2.height = 8000;
     VB.shapeCommit(doc2, VB.rectLoop(2100, 3700, 6300, 5400), null, blk);
     VB.arrowMoveNode(doc2, 2100, 3700, 1500, 1200);
@@ -1587,7 +1587,7 @@
       VB.integrityReport(doc2)[0]);
 
     // 3. fill face: lift-and-drop, then delete
-    var doc3 = new VB.VBDocument();
+    var doc3 = new VB.Y2KVectorDocument();
     doc3.width = 11000; doc3.height = 8000;
     VB.shapeCommit(doc3, VB.ellipseLoop(4000, 3000, 1500, 1200), red, null);
     VB.arrowMoveFill(doc3, 4000, 3000, 3000, 1500);
@@ -1617,7 +1617,7 @@
       VB.integrityReport(res.doc)[0]);
 
     // 5. connected strokes: a pencil zig-zag is one attached chain
-    var doc5 = new VB.VBDocument();
+    var doc5 = new VB.Y2KVectorDocument();
     doc5.width = 11000; doc5.height = 8000;
     VB.lineCommit(doc5, { x: 1000, y: 1000 }, { x: 3000, y: 2000 }, blk, 0);
     VB.lineCommit(doc5, { x: 3000, y: 2000 }, { x: 5000, y: 1000 }, blk, 0);
@@ -1628,7 +1628,7 @@
       chain.length + " records");
 
     // 6. deleting a shared stroked border collapses same-color fills
-    var doc6 = new VB.VBDocument();
+    var doc6 = new VB.Y2KVectorDocument();
     doc6.width = 11000; doc6.height = 8000;
     VB.shapeCommit(doc6, VB.rectLoop(2000, 2000, 5000, 5000), red, blk);
     VB.shapeCommit(doc6, VB.rectLoop(5000, 2000, 8000, 5000), red, blk);
@@ -1653,7 +1653,7 @@
       VB.integrityReport(doc6)[0]);
 
     // 7. free transform: rotate 90° + scale 1.5 about the fill's center
-    var doc7 = new VB.VBDocument();
+    var doc7 = new VB.Y2KVectorDocument();
     doc7.width = 11000; doc7.height = 8000;
     VB.shapeCommit(doc7, VB.rectLoop(3000, 3000, 5000, 4000), red, null);
     var cx7 = 4000, cy7 = 3500, s7 = 1.5;
@@ -1694,7 +1694,7 @@
       VB.integrityReport(res8.doc).length === 0, VB.integrityReport(res8.doc)[0]);
 
     // 9. marquee region CUTS through geometry: drag half a fill away
-    var doc9 = new VB.VBDocument();
+    var doc9 = new VB.Y2KVectorDocument();
     doc9.width = 11000; doc9.height = 8000;
     VB.shapeCommit(doc9, VB.rectLoop(2000, 2000, 6000, 4000), red, null);
     var regionPts = [{ x: 4000, y: 1500 }, { x: 6500, y: 1500 },
@@ -1743,7 +1743,7 @@
     // 12. reshape SWEEPS its lens across a fill island: the swept area
     //     changes owner and the island's stale boundary inside the lens
     //     is reconciled (the invisible-overlap bug)
-    var doc12 = new VB.VBDocument();
+    var doc12 = new VB.Y2KVectorDocument();
     doc12.width = 11000; doc12.height = 8000;
     VB.shapeCommit(doc12, VB.rectLoop(2000, 2000, 6000, 4000), red, null);
     VB.regionDelete(doc12, [{ x: 3000, y: 2600 }, { x: 4000, y: 2600 },
@@ -1772,7 +1772,7 @@
       VB.integrityReport(doc12).length === 0, VB.integrityReport(doc12)[0]);
 
     // 13. reshaping OUTWARD drags the fill with the boundary
-    var doc13 = new VB.VBDocument();
+    var doc13 = new VB.Y2KVectorDocument();
     doc13.width = 11000; doc13.height = 8000;
     VB.shapeCommit(doc13, VB.rectLoop(2000, 2000, 6000, 4000), red, null);
     var leftKey13 = null;
@@ -1790,7 +1790,7 @@
 
     // 14. moving strokes OFF a bucket-filled region leaves the fill
     //     behind a lineless boundary (fills don't follow their strokes)
-    var doc14 = new VB.VBDocument();
+    var doc14 = new VB.Y2KVectorDocument();
     doc14.width = 11000; doc14.height = 8000;
     VB.shapeCommit(doc14, VB.rectLoop(2000, 2000, 5000, 4000), null, blk);
     VB.bucketFill(doc14, 3500, 3000, { color: { r: 102, g: 204, b: 255, a: 255 } });
@@ -1822,7 +1822,7 @@
     //     The first gesture LIFTS the selection into a floating clip
     //     (un-journaled, like the arrow's float) so the drawing updates
     //     live; clicking away merges it back as ONE journal op.
-    var doc15 = new VB.VBDocument();
+    var doc15 = new VB.Y2KVectorDocument();
     doc15.width = 11000; doc15.height = 8000;
     VB.shapeCommit(doc15, VB.rectLoop(2000, 2000, 5000, 4000), red, null);
     var edges15 = doc15.edges.length;
@@ -2134,7 +2134,7 @@
       "v" + back.info.version + " fonts=" + back.doc.fonts.length +
       " texts=" + back.doc.texts.length);
     // a doc without text still writes v1
-    var plain = new VB.VBDocument();
+    var plain = new VB.Y2KVectorDocument();
     plain.width = 11000; plain.height = 8000;
     var v1 = await VB.decodeVBD(await VB.encodeVBD(plain, { compress: false }));
     check("textless vbd stays v1", v1.info.version === 1);
@@ -2281,7 +2281,7 @@
       op.matrix[4] === 1000 && op.matrix[5] === 2000,
       op.records[0].y + "/" + op.records[1].y);
 
-    var doc = new VB.VBDocument();
+    var doc = new VB.Y2KVectorDocument();
     VB.textApplyOp(doc, op);
     check("textApplyOp installs font + block",
       doc.fonts.length === 1 && doc.fonts[0].glyphs.length === 3 &&
@@ -2321,7 +2321,7 @@
       JSON.stringify(back.doc.fonts) === JSON.stringify(ra.doc.fonts));
 
     // ---- text as an OBJECT: hit, move, transform, edit, delete ----
-    var hdoc = new VB.VBDocument();
+    var hdoc = new VB.Y2KVectorDocument();
     VB.textApplyOp(hdoc, VB.buildTextOp(ttf, { name: "VBTest" }, "AB", 400, red, 1000, 2000));
     // block-local bounds: A triangle spans y -682..0, x 0..1024 EM at
     // scale 400/1024 -> local x 0..~688 (A 400 wide + B), y -266..0
@@ -2374,7 +2374,7 @@
 
     // transform-tool session on a text block: rotate via the knob,
     // commit ONE textTransform op, text stays text
-    var tdoc = new VB.VBDocument();
+    var tdoc = new VB.Y2KVectorDocument();
     tdoc.width = 11000; tdoc.height = 8000;
     VB.textApplyOp(tdoc, VB.buildTextOp(ttf, { name: "VBTest" }, "AB", 400, red, 3000, 3000));
     var journalT = [], toolT;
@@ -2419,7 +2419,7 @@
       JSON.stringify(tdoc.texts[0] && tdoc.texts[0].matrix));
 
     // ---- rotation field math: snap a rotated block back upright ----
-    var rdoc = new VB.VBDocument();
+    var rdoc = new VB.Y2KVectorDocument();
     VB.textApplyOp(rdoc, VB.buildTextOp(ttf, { name: "VBTest" }, "A", 400, red, 2000, 2000));
     var a30 = 30 * Math.PI / 180;
     VB.textTransformApply(rdoc, 0, [Math.cos(a30), Math.sin(a30),
@@ -2442,7 +2442,7 @@
       JSON.stringify(rdoc.texts[0].matrix));
 
     // ---- transform rotateTo (the toolbar field on a session) ----
-    var t2doc = new VB.VBDocument();
+    var t2doc = new VB.Y2KVectorDocument();
     t2doc.width = 11000; t2doc.height = 8000;
     VB.textApplyOp(t2doc, VB.buildTextOp(ttf, { name: "VBTest" }, "A", 400, red, 3000, 3000));
     var journal2 = [], tool2;
@@ -2469,7 +2469,7 @@
       JSON.stringify({ ops: journal2.length, m: t2doc.texts[0].matrix }));
 
     // ---- textBreak: glyph outlines land in the planar map ----
-    var bdoc = new VB.VBDocument();
+    var bdoc = new VB.Y2KVectorDocument();
     bdoc.width = 11000; bdoc.height = 8000;
     VB.textApplyOp(bdoc, VB.buildTextOp(ttf, { name: "VBTest" }, "A", 400, red, 2000, 3000));
     // rotate it first: break-apart must honor the matrix
@@ -2511,7 +2511,7 @@
       wop.records[1].y === wop.records[0].y + wop.pitch &&
       wop.wrapWidth === 900,
       JSON.stringify(wop.records.map(function (r) { return r.str; })));
-    var wdoc = new VB.VBDocument();
+    var wdoc = new VB.Y2KVectorDocument();
     VB.textApplyOp(wdoc, wop);
     check("wrap metadata lands on the block",
       wdoc.texts[0].wrapWidth === 900 && wdoc.texts[0].pitch === wop.pitch &&
@@ -2538,7 +2538,7 @@
       JSON.stringify(wdoc.texts).slice(0, 260));
 
     // ---- arrow-selection box tabs: wrap, don't scale ----
-    var adoc = new VB.VBDocument();
+    var adoc = new VB.Y2KVectorDocument();
     adoc.width = 11000; adoc.height = 8000;
     VB.textApplyOp(adoc, VB.buildTextOp(ttf, { name: "VBTest" }, "AB AB", 400, red, 2000, 3000));
     var journalA = [], toolA;
@@ -2596,7 +2596,7 @@
     check("center alignment offsets short lines",
       alOp.records[0].x === 0 && alOp.records[1].x === 164,
       alOp.records[0].x + "/" + alOp.records[1].x);
-    var alDoc = new VB.VBDocument();
+    var alDoc = new VB.Y2KVectorDocument();
     VB.textApplyOp(alDoc, alOp);
     check("align/spacing persist on the block",
       alDoc.texts[0].align === 1 && alDoc.texts[0].spacing === 40);
@@ -2611,7 +2611,7 @@
       JSON.stringify(alDoc.texts[0].records[0]));
 
     // ---- arrow vertical tab = BOX HEIGHT (container only) ----
-    var vDoc = new VB.VBDocument();
+    var vDoc = new VB.Y2KVectorDocument();
     vDoc.width = 11000; vDoc.height = 8000;
     VB.textApplyOp(vDoc, VB.buildTextOp(ttf, { name: "VBTest" }, "AB", 400, red, 2000, 3000));
     var journalV = [], toolV;
@@ -2694,7 +2694,7 @@
       JSON.stringify(journalA.slice(beforeOps)));
 
     // ---- corner handles DRAG on a rotated text frame (user report) ----
-    var rotDoc = new VB.VBDocument();
+    var rotDoc = new VB.Y2KVectorDocument();
     rotDoc.width = 11000; rotDoc.height = 8000;
     VB.textApplyOp(rotDoc, VB.buildTextOp(ttf, { name: "VBTest" }, "AB", 400, red, 3000, 3000));
     VB.textTransformApply(rotDoc, 0, [Math.cos(0.5), Math.sin(0.5),
@@ -2766,7 +2766,7 @@
   log("swf export:");
   await (async function () {
     // A document drawn with the real tools.
-    var doc = new VB.VBDocument();
+    var doc = new VB.Y2KVectorDocument();
     doc.width = 11000; doc.height = 8000;
     VB.brushStroke(doc, [{ x: 2000, y: 4000 }, { x: 4200, y: 3400 }, { x: 6000, y: 4400 }],
       400, { r: 204, g: 102, b: 102, a: 255 });
@@ -2906,7 +2906,7 @@
     VB.renderDebug(ctxD, resB.doc, { zoom: zD, panX: 0, panY: 0, dpr: 1 }, -1);
 
     // Synthetic pencil drawing: wavy stroke + crossing stroke over a square.
-    var docP = new VB.VBDocument();
+    var docP = new VB.Y2KVectorDocument();
     docP.width = 8000; docP.height = 6000;
     docP.fills.push(VB.solidFill(120, 200, 255));
     docP.edges.push(
@@ -2983,16 +2983,16 @@
     // capsule counts 0(dab),1,2,4,7,8,15,16,32 — every tree shape class
     [1, 2, 3, 5, 8, 9, 16, 17, 33].forEach(function (nPts) {
       var ptsB = iuStroke(nPts, 7 + nPts);
-      var docA = new VB.VBDocument(); iuBase(docA);
-      var docB = new VB.VBDocument(); iuBase(docB);
+      var docA = new VB.Y2KVectorDocument(); iuBase(docA);
+      var docB = new VB.Y2KVectorDocument(); iuBase(docB);
       VB.brushStroke(docA, ptsB, IU_RADIUS, red);
       VB.brushStroke(docB, ptsB, IU_RADIUS, red, iuFeed(ptsB));
       check("brush " + nPts + " pts: incremental == batch",
             edgeString(docA) === edgeString(docB),
             docA.edges.length + " vs " + docB.edges.length + " edges");
 
-      var docC = new VB.VBDocument(); iuBase(docC);
-      var docD = new VB.VBDocument(); iuBase(docD);
+      var docC = new VB.Y2KVectorDocument(); iuBase(docC);
+      var docD = new VB.Y2KVectorDocument(); iuBase(docD);
       VB.eraseStroke(docC, ptsB, IU_RADIUS);
       VB.eraseStroke(docD, ptsB, IU_RADIUS, iuFeed(ptsB));
       check("erase " + nPts + " pts: incremental == batch",
@@ -3005,8 +3005,8 @@
     // from the authoritative path
     var ptsR = iuStroke(9, 99);
     ptsR.push({ x: ptsR[8].x + 30, y: ptsR[8].y - 25 });
-    var docE = new VB.VBDocument(); iuBase(docE);
-    var docF = new VB.VBDocument(); iuBase(docF);
+    var docE = new VB.Y2KVectorDocument(); iuBase(docE);
+    var docF = new VB.Y2KVectorDocument(); iuBase(docF);
     VB.brushStroke(docE, ptsR, IU_RADIUS, red);
     VB.brushStroke(docF, ptsR, IU_RADIUS, red, iuFeed(ptsR));
     check("brush end-replacement: incremental == batch",
@@ -3017,8 +3017,8 @@
     var ptsW = iuStroke(9, 42);
     var uW = new VB.SwathUnion(IU_RADIUS + 40);
     for (var w = 0; w < ptsW.length; w++) uW.add(ptsW[w]);
-    var docG = new VB.VBDocument(); iuBase(docG);
-    var docH = new VB.VBDocument(); iuBase(docH);
+    var docG = new VB.Y2KVectorDocument(); iuBase(docG);
+    var docH = new VB.Y2KVectorDocument(); iuBase(docH);
     VB.brushStroke(docG, ptsW, IU_RADIUS, red);
     VB.brushStroke(docH, ptsW, IU_RADIUS, red, uW);
     check("radius-mismatch union falls back to batch",

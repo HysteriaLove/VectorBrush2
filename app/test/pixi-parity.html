@@ -224,7 +224,7 @@
 
     // 7. text block (embedded fixture font, wrap + holes in glyphs)
     var ttf = VB.parseTTF(window.VBTTFFixture.bytes());
-    var tdoc = new VB.VBDocument();
+    var tdoc = new VB.Y2KVectorDocument();
     tdoc.width = 11000; tdoc.height = 8000;
     VB.textApplyOp(tdoc, VB.buildTextOp(ttf, { name: "VBTest" }, "AB AB\nD",
       800, { r: 20, g: 60, b: 200, a: 255 }, 1200, 1500, 4000, 0, 0));

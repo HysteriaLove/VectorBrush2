@@ -248,7 +248,7 @@
   // one-pass region merge a transform drop uses.
   defineOp("paste", function (c, op) {
     c.history.push(c.project);
-    var clip = new VB.VBDocument();
+    var clip = new VB.Y2KVectorDocument();
     clip.width = c.doc.width; clip.height = c.doc.height;
     clip.fills = op.clip.fills.map(function (f) {
       return { type: "solid", color: { r: f.color.r, g: f.color.g,

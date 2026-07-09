@@ -408,7 +408,7 @@
      *  10px paste offset. */
     self.adoptClip = function (clipJSON, seedM) {
       self.commitPending();
-      var clip = new VB.VBDocument();
+      var clip = new VB.Y2KVectorDocument();
       clip.width = app.doc.width; clip.height = app.doc.height;
       clip.fills = clipJSON.fills.map(function (f) {
         return { type: "solid", color: { r: f.color.r, g: f.color.g,

@@ -41,7 +41,7 @@
     doc.texts = snap.texts || [];
   }
 
-  // A snapshot target is either a bare VBDocument or a whole VB.Project
+  // A snapshot target is either a bare Y2KVectorDocument or a whole VB.Project
   // (scenes -> layers -> frame cells). Undo/redo restores the entire
   // structure, so layer add/delete/reorder are single undo steps.
   function snapshot(target) {
@@ -80,7 +80,7 @@
           return {
             name: l.name, visible: l.visible, locked: l.locked,
             frames: l.frames.map(function (cellSnap) {
-              var d = new VB.VBDocument();
+              var d = new VB.Y2KVectorDocument();
               restoreDoc(d, cellSnap);
               return d;
             })
