@@ -30,6 +30,95 @@
         function () { return null; })
     : Promise.resolve(null);
 
+  // ---- persistence (Implementation.md phase 6) ---------------------------------
+  // The journal IS the project: a debounced flush writes the journal's
+  // tail segments + manifest into the package after every mutation, and
+  // opening a project replays its segments — which is also crash
+  // recovery by construction. Undo/redo are journaled ops, so replay is
+  // always faithful to the live document.
+
+  var SEG_OPS = 256;
+  var FLUSH_MS = 600;
+  var flushTimer = null;
+  var activeProjectId = null;
+
+  function persistState(sess) {
+    if (!sess._persist) {
+      sess._persist = { flushedOps: 0, segCount: 0, chain: Promise.resolve() };
+    }
+    return sess._persist;
+  }
+
+  function flushProject(id) {
+    var sess = sessions.get(id);
+    if (!sess || !store) return Promise.resolve();
+    var st = persistState(sess);
+    st.chain = st.chain.then(async function () {
+      var ops = sess.journal;
+      if (st.flushedOps === ops.length && st.segCount) return; // clean
+      var handle = store.open(id);
+      var segs = VB.segmentJournal(ops, SEG_OPS);
+      // only the tail changed — unless the journal shrank (a load op
+      // resets it), which forces a full rewrite
+      var firstDirty = ops.length < st.flushedOps
+        ? 0 : Math.floor(st.flushedOps / SEG_OPS);
+      for (var i = firstDirty; i < segs.length; i++) {
+        await handle.writeUnit(segs[i].path, segs[i].json);
+      }
+      for (var j = segs.length; j < st.segCount; j++) { // stale segments
+        await handle.deleteUnit(
+          "journal/seg-" + String(j + 1).padStart(5, "0") + ".json");
+      }
+      await handle.flushManifest({
+        format: "y2kproj", version: 1, ops: ops.length, saved: Date.now()
+      });
+      st.flushedOps = ops.length;
+      st.segCount = segs.length;
+    });
+    return st.chain;
+  }
+
+  window.VBApp.onDocChanged = function () {
+    if (!activeProjectId) return;
+    if (flushTimer) clearTimeout(flushTimer);
+    var id = activeProjectId;
+    flushTimer = setTimeout(function () {
+      flushTimer = null;
+      flushProject(id);
+    }, FLUSH_MS);
+  };
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "hidden" && activeProjectId) {
+      flushProject(activeProjectId);
+    }
+  });
+  window.addEventListener("beforeunload", function () {
+    if (activeProjectId) flushProject(activeProjectId); // best effort
+  });
+
+  async function loadSessionFromPackage(id) {
+    var handle = store.open(id);
+    var segPaths = await handle.listUnits("journal/");
+    if (!segPaths.length) {
+      var fresh = new VB.Session({ width: 550 * VB.TWIPS, height: 400 * VB.TWIPS });
+      persistState(fresh);
+      return fresh;
+    }
+    var jsons = [];
+    for (var i = 0; i < segPaths.length; i++) {
+      jsons.push(await handle.readUnitText(segPaths[i]));
+    }
+    var ops = VB.joinJournalSegments(jsons);
+    var res = await VB.replayJournal(JSON.parse(JSON.stringify(ops)));
+    var sess = new VB.Session({});
+    ops.forEach(function (op) { sess.journal.push(op); });
+    sess.project = res.project;
+    var st = persistState(sess);
+    st.flushedOps = ops.length;
+    st.segCount = Math.ceil(ops.length / SEG_OPS);
+    return sess;
+  }
+
   // ---- homescreen --------------------------------------------------------------
 
   function fmtWhen(t) {
@@ -68,9 +157,19 @@
       renderHome();
     }));
     div.appendChild(btn("Duplicate", "Duplicate project (package copy)", async function () {
+      await flushProject(rec.id); // unsaved session ops join the copy
       var zip = await store.open(rec.id).exportZip();
       await store.importZip(zip, { name: rec.name + " copy" });
       renderHome();
+    }));
+    div.appendChild(btn("Export", "Download as a .y2kproj package", async function () {
+      await flushProject(rec.id);
+      var zip = await store.open(rec.id).exportZip();
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(zip);
+      a.download = rec.name.replace(/[^\w\- ]+/g, "_") + ".y2kproj";
+      a.click();
+      URL.revokeObjectURL(a.href);
     }));
     div.appendChild(btn("Delete", "Delete project", async function () {
       if (!confirm('Delete "' + rec.name + '"?')) return;
@@ -110,6 +209,26 @@
     location.hash = "#project/" + rec.id + "/sketch";
   });
 
+  var importInput = document.getElementById("home-import-file");
+  document.getElementById("home-import").addEventListener("click", function () {
+    importInput.click();
+  });
+  importInput.addEventListener("change", async function () {
+    var file = importInput.files && importInput.files[0];
+    importInput.value = "";
+    if (!file) return;
+    await storeReady;
+    if (!store) return;
+    try {
+      await store.importZip(file, {
+        name: file.name.replace(/\.(y2kproj|zip)$/i, "")
+      });
+      renderHome();
+    } catch (err) {
+      alert("Import failed: " + (err && err.message));
+    }
+  });
+
   // ---- routing ------------------------------------------------------------------
 
   function showHome() {
@@ -127,6 +246,13 @@
 
   async function doApplyRoute() {
     var h = location.hash || "#home";
+    // leaving a project flushes it before anything else routes
+    if (activeProjectId && h !== "#project/" + activeProjectId + "/sketch") {
+      if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+      var leaving = activeProjectId;
+      activeProjectId = null;
+      await flushProject(leaving);
+    }
     if (h === "#demo" || h === "#sketch" || h === "#canvas2d") {
       // the boot session: demo fixture (built by main.js) or a scratch
       // sketch with no package behind it
@@ -147,11 +273,19 @@
       if (!rec) { location.hash = "#home"; return; }
       var sess = sessions.get(id);
       if (!sess) {
-        sess = new VB.Session({ width: 550 * VB.TWIPS, height: 400 * VB.TWIPS });
+        try {
+          sess = await loadSessionFromPackage(id);
+        } catch (err) {
+          // a corrupt package must not be overwritten by a fresh session
+          alert("Project failed to load: " + (err && err.message));
+          location.hash = "#home";
+          return;
+        }
         sessions.set(id, sess);
       }
       app.bindSession(sess);
       app.fileName = rec.name;
+      activeProjectId = id;
       showEditor();
       return;
     }
@@ -177,6 +311,7 @@
       if (location.hash !== h) location.hash = h;
       return applyRoute();
     },
+    flush: flushProject,
     storeReady: function () { return storeReady; },
     store: function () { return store; }
   };

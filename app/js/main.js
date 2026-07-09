@@ -184,6 +184,8 @@
         setMsg("⚠ " + problems.join(" · ") + " — use Save log to export a repro");
       }
     }
+    // the shell's autosave rides every mutation path (draw, undo, load)
+    if (app.onDocChanged) app.onDocChanged();
   }
 
   function refreshDebugPanel() {

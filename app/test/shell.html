@@ -25,6 +25,7 @@
   function check(name, cond, detail) {
     if (cond) { pass++; log("  ok " + name); }
     else { fail++; log(name + (detail ? " — " + detail : ""), "fail"); }
+    flush(); // progress stays visible if a later await wedges
   }
   function flush() { document.getElementById("out").textContent = out.join("\n"); }
 
@@ -97,11 +98,68 @@
       W.VB.assets.stats().resident === 0,
       W.VB.assets.stats().resident + " bytes resident");
 
-    await store.remove(A.id);
-    await store.remove(B.id);
+    // ---- persistence DoD (Implementation.md phase 6) ----------------------
+    // flush → forget the in-memory session → reopen: the package alone
+    // must reproduce the art (this is also crash recovery)
+    await shell.goto("#project/" + A.id + "/sketch");
+    await shell.flush(A.id);
+    await shell.goto("#home");
+    shell.sessions.delete(A.id); // simulate a fresh page load
+    await shell.goto("#project/" + A.id + "/sketch");
+    check("art restored from the package after the session is dropped",
+      app.doc.edges.length === edgesA,
+      app.doc.edges.length + " vs " + edgesA + " edges");
+
+    // full page reload: registry, session, DOM — everything gone
+    await shell.goto("#home");
+    var W2 = await new Promise(function (res) {
+      var tries = 0;
+      function probe() {
+        var w = fr.contentWindow;
+        var state = "no-window";
+        try {
+          if (w) {
+            state = w.VBShell ? "ready"
+              : w.VBApp ? "app-only"
+              : w.document ? "doc " + w.document.readyState +
+                             " title=" + w.document.title
+              : "no-doc";
+          }
+        } catch (e) { state = "blocked: " + e.message; }
+        if (state === "ready") { res(w); return; }
+        if (++tries % 400 === 0) { log("  … reload probe: " + state); flush(); }
+        setTimeout(probe, 5);
+      }
+      fr.addEventListener("load", function onl() {
+        fr.removeEventListener("load", onl);
+        probe();
+      });
+      fr.src = "../index.html#project/" + A.id + "/sketch";
+      setTimeout(probe, 50); // belt-and-braces if load already fired
+    });
+    var shell2 = W2.VBShell, app2 = W2.VBApp;
+    await shell2.storeReady();
+    await shell2.applyRoute();
+    check("art survives a full page reload",
+      app2.doc.edges.length === edgesA,
+      app2.doc.edges.length + " vs " + edgesA + " edges");
+
+    // zip round-trip: export → import → identical replay
+    var store2 = shell2.store();
+    var zip = await store2.open(A.id).exportZip();
+    var copy = await store2.importZip(zip, { name: "Tripwire A copy" });
+    await shell2.goto("#project/" + copy.id + "/sketch");
+    check("imported .y2kproj replays identical art",
+      app2.doc.edges.length === edgesA,
+      app2.doc.edges.length + " vs " + edgesA + " edges");
+
+    await shell2.goto("#home");
+    await store2.remove(A.id);
+    await store2.remove(B.id);
+    await store2.remove(copy.id);
     check("cleanup removed the tripwire projects",
-      !(await store.list()).some(function (r) {
-        return r.id === A.id || r.id === B.id;
+      !(await store2.list()).some(function (r) {
+        return r.id === A.id || r.id === B.id || r.id === copy.id;
       }));
   } catch (err) {
     fail++;
