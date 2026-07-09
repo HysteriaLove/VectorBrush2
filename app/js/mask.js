@@ -124,9 +124,30 @@
              !survivorKeys.has(edgeKey(e.bx, e.by, e.cx, e.cy, e.ax, e.ay));
     });
 
+    // Everything this op changed lies within the fence's neighborhood:
+    // covered deletions make no crossings, noding split old edges ON
+    // fence curves, span alignment split at fence endpoints. Scoping
+    // the planarity repair there keeps commits O(op), not O(document).
+    var scope = null;
+    fence.forEach(function (e) {
+      var bb = VB.geom.edgeBBox(e);
+      if (!scope) {
+        scope = { xmin: bb.xmin, xmax: bb.xmax, ymin: bb.ymin, ymax: bb.ymax };
+      } else {
+        if (bb.xmin < scope.xmin) scope.xmin = bb.xmin;
+        if (bb.xmax > scope.xmax) scope.xmax = bb.xmax;
+        if (bb.ymin < scope.ymin) scope.ymin = bb.ymin;
+        if (bb.ymax > scope.ymax) scope.ymax = bb.ymax;
+      }
+    });
+    if (scope) {
+      scope.xmin -= 300; scope.xmax += 300;
+      scope.ymin -= 300; scope.ymax += 300;
+    }
+
     // Rounding can turn grazing contacts into real crossings; the face
     // walk needs a properly noded map.
-    VB.repairPlanar(doc);
+    VB.repairPlanar(doc, undefined, scope);
 
     // Contract micro-edges. Noding two near-tangent hugging fences (a
     // stroke re-tracing existing paint) shreds them into micro-fragments
@@ -170,12 +191,28 @@
         contracted++;
       });
       if (contracted === 0) break;
+      // Welds can move nodes OUTSIDE the fence neighborhood (stray
+      // pre-existing micro-fragments) — grow the repair scope to cover
+      // every endpoint a weld actually touched.
+      function scopePoint(x, y) {
+        if (!scope) return;
+        if (x - 300 < scope.xmin) scope.xmin = x - 300;
+        if (x + 300 > scope.xmax) scope.xmax = x + 300;
+        if (y - 300 < scope.ymin) scope.ymin = y - 300;
+        if (y + 300 > scope.ymax) scope.ymax = y + 300;
+      }
       doc.edges.forEach(function (e) {
         var ka = resolve(e.ax + "," + e.ay);
         var pa = ka.split(",");
+        if (+pa[0] !== e.ax || +pa[1] !== e.ay) {
+          scopePoint(e.ax, e.ay); scopePoint(+pa[0], +pa[1]);
+        }
         e.ax = +pa[0]; e.ay = +pa[1];
         var kb = resolve(e.bx + "," + e.by);
         var pb = kb.split(",");
+        if (+pb[0] !== e.bx || +pb[1] !== e.by) {
+          scopePoint(e.bx, e.by); scopePoint(+pb[0], +pb[1]);
+        }
         e.bx = +pb[0]; e.by = +pb[1];
       });
       // Welding collapses chords but leaves controls behind: a quad whose
@@ -191,7 +228,7 @@
         if (e.cx === null) return false; // zero-length line
         return Math.hypot(e.cx - e.ax, e.cy - e.ay) > MICRO * 2;
       });
-      VB.repairPlanar(doc);
+      VB.repairPlanar(doc, undefined, scope);
     }
 
     var built = VB.buildFaces(doc);
@@ -264,6 +301,26 @@
       return VB.probeForCycle(doc.edges, f.outer); // last resort
     }
 
+    // Pre-op fill queries walk only the queried fill's own boundary:
+    // one boundary-list pass here replaces a whole-document scan per
+    // face stamp (there is one query per outside-mask face).
+    var preBoundary = [null];
+    for (var pf = 1; pf <= preOp.fills.length; pf++) preBoundary.push([]);
+    for (var pei = 0; pei < preOp.edges.length; pei++) {
+      var pe2 = preOp.edges[pei];
+      if (pe2.fill0 !== pe2.fill1) {
+        if (pe2.fill0 > 0) preBoundary[pe2.fill0].push(pe2);
+        if (pe2.fill1 > 0) preBoundary[pe2.fill1].push(pe2);
+      }
+    }
+    function preOpFillAt(x, y) {
+      for (var qf = preOp.fills.length; qf >= 1; qf--) {
+        if (preBoundary[qf].length &&
+            VB.geom.fillParity(preBoundary[qf], qf, x, y)) return qf;
+      }
+      return 0;
+    }
+
     // One decision per face.
     var diag = [];
     VB._maskDiag = diag;
@@ -271,7 +328,7 @@
       var probe = faceProbe(f);
       var inMask = insideMask(probe.x, probe.y);
       var stamp = inMask ? stampFor(probe.x, probe.y)
-                         : VB.geom.fillAt(preOp, probe.x, probe.y);
+                         : preOpFillAt(probe.x, probe.y);
       diag.push({
         probe: { x: Math.round(probe.x), y: Math.round(probe.y) },
         area: Math.round(f.area), inMask: inMask, stamp: stamp,

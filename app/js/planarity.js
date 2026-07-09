@@ -24,10 +24,17 @@
   }
 
   /**
-   * Scans all edge pairs (bbox-grid pruned) for transversal crossings
-   * away from shared anchors. Returns [{i, j, point}] (capped).
+   * Scans edge pairs (bbox-grid pruned) for transversal crossings away
+   * from shared anchors. Returns [{i, j, point}] (capped).
+   *
+   * scope (optional {xmin, xmax, ymin, ymax}): only edges whose bbox
+   * overlaps it are candidates. Sound when the scope covers everything
+   * an op changed: a NEW crossing lies where geometry moved, so both
+   * partners' bboxes contain a point inside the scope — pairs of
+   * untouched edges were planar before the op and still are. Turns the
+   * per-commit repair from O(document) into O(op neighborhood).
    */
-  function validatePlanar(doc, cap) {
+  function validatePlanar(doc, cap, scope) {
     cap = cap || 50;
     var edges = doc.edges;
     var violations = [];
@@ -46,6 +53,10 @@
     }
     var bboxes = edges.map(VB.geom.edgeBBox);
     for (var i = 0; i < edges.length; i++) {
+      if (scope && (bboxes[i].xmin > scope.xmax || bboxes[i].xmax < scope.xmin ||
+                    bboxes[i].ymin > scope.ymax || bboxes[i].ymax < scope.ymin)) {
+        continue;
+      }
       var cells = cellsOf(bboxes[i]);
       for (var c = 0; c < cells.length; c++) {
         var list = grid.get(cells[c]);
@@ -88,10 +99,10 @@
    * twip or two long, invisible, but without a shared node they leak
    * faces. Returns the number of crossings repaired.
    */
-  function repairPlanar(doc, maxPasses) {
+  function repairPlanar(doc, maxPasses, scope) {
     var total = 0;
     for (var pass = 0; pass < (maxPasses || 3); pass++) {
-      var violations = validatePlanar(doc, 200);
+      var violations = validatePlanar(doc, 200, scope);
       if (violations.length === 0) break;
       total += violations.length;
 

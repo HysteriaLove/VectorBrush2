@@ -412,11 +412,11 @@
   function regionLift(doc, points) {
     var lifted = cloneDoc(doc);
     var loop = polyLoop(points);
-    var winding = loop.map(function (e) {
+    var oracle = VB.geom.windingOracle(loop.map(function (e) {
       return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, 0, 0, 0);
-    });
+    }));
     maskWith(lifted, loop, function (x, y) {
-      return VB.geom.windingNumber(winding, x, y) === 0; // erase the COMPLEMENT
+      return oracle.at(x, y) === 0; // erase the COMPLEMENT
     }, 0);
     return lifted;
   }
@@ -424,11 +424,11 @@
   /** Erase everything inside the region (marquee/lasso Delete). */
   function regionDelete(doc, points) {
     var loop = polyLoop(points);
-    var winding = loop.map(function (e) {
+    var oracle = VB.geom.windingOracle(loop.map(function (e) {
       return VB.edge(e.ax, e.ay, e.cx, e.cy, e.bx, e.by, 0, 0, 0);
-    });
+    }));
     maskWith(doc, loop, function (x, y) {
-      return VB.geom.windingNumber(winding, x, y) !== 0;
+      return oracle.at(x, y) !== 0;
     }, 0);
     return true;
   }
@@ -485,7 +485,7 @@
 
     // winding oracles per source fill, from the clip's own directed
     // boundary loops (fill-on-right), transformed
-    var oracles = []; // {srcIdx, edges}
+    var oracles = []; // {src, test} — precompiled winding with bbox reject
     for (var f = 1; f <= lifted.fills.length; f++) {
       var got = VB.fillLoops(lifted, f);
       if (!got.loops.length) continue;
@@ -496,19 +496,17 @@
           if (!VB.edgeIsDegenerate(ne)) w.push(ne);
         });
       });
-      if (w.length) oracles.push({ src: f, edges: w });
+      if (w.length) oracles.push({ src: f, test: VB.geom.windingOracle(w) });
     }
     function stampAt(x, y) {
       for (var i = 0; i < oracles.length; i++) {
-        if (VB.geom.windingNumber(oracles[i].edges, x, y) !== 0) {
-          return fillMap[oracles[i].src];
-        }
+        if (oracles[i].test.at(x, y) !== 0) return fillMap[oracles[i].src];
       }
       return 0;
     }
     function insideMoved(x, y) {
       for (var i = 0; i < oracles.length; i++) {
-        if (VB.geom.windingNumber(oracles[i].edges, x, y) !== 0) return true;
+        if (oracles[i].test.at(x, y) !== 0) return true;
       }
       return false;
     }

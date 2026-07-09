@@ -249,6 +249,10 @@
       if (e.cx === null) {
         crossings += lineRay(e.ax, e.ay, e.bx, e.by, px, py);
       } else {
+        // conservative reject before any quad math (controls bound the arc)
+        if (py < e.ay && py < e.cy && py < e.by) continue;
+        if (py > e.ay && py > e.cy && py > e.by) continue;
+        if (px > e.ax && px > e.cx && px > e.bx) continue;
         // split into y-monotonic pieces at dy/dt = 0
         var denom = e.ay - 2 * e.cy + e.by;
         var tExt = denom !== 0 ? (e.ay - e.cy) / denom : -1;
@@ -300,6 +304,10 @@
           if (e.ax + (e.bx - e.ax) * t > px) w += (e.by > e.ay) ? 1 : -1;
         }
       } else {
+        // conservative reject before any quad math (controls bound the arc)
+        if (py < e.ay && py < e.cy && py < e.by) continue;
+        if (py > e.ay && py > e.cy && py > e.by) continue;
+        if (px > e.ax && px > e.cx && px > e.bx) continue;
         var denom = e.ay - 2 * e.cy + e.by;
         var tExt = denom !== 0 ? (e.ay - e.cy) / denom : -1;
         var ts = [0];
@@ -322,6 +330,34 @@
       }
     }
     return w;
+  }
+
+  // Precompiled winding test for a FIXED closed-loop set: the loops'
+  // bbox is computed once, and any query outside it is a 4-compare
+  // reject (a closed loop's winding is 0 on every side of its bbox).
+  // Mask pipelines ask "is this point inside the op?" once per document
+  // edge and once per face — most of those points are nowhere near the
+  // op, so the reject carries the bulk of the load.
+  function windingOracle(loopEdges) {
+    var xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
+    for (var i = 0; i < loopEdges.length; i++) {
+      var e = loopEdges[i];
+      if (e.ax < xmin) xmin = e.ax; if (e.ax > xmax) xmax = e.ax;
+      if (e.bx < xmin) xmin = e.bx; if (e.bx > xmax) xmax = e.bx;
+      if (e.ay < ymin) ymin = e.ay; if (e.ay > ymax) ymax = e.ay;
+      if (e.by < ymin) ymin = e.by; if (e.by > ymax) ymax = e.by;
+      if (e.cx !== null) {
+        if (e.cx < xmin) xmin = e.cx; if (e.cx > xmax) xmax = e.cx;
+        if (e.cy < ymin) ymin = e.cy; if (e.cy > ymax) ymax = e.cy;
+      }
+    }
+    return {
+      bbox: { xmin: xmin, xmax: xmax, ymin: ymin, ymax: ymax },
+      at: function (x, y) {
+        if (x < xmin || x > xmax || y < ymin || y > ymax) return 0;
+        return windingNumber(loopEdges, x, y);
+      }
+    };
   }
 
   // Which fill contains the point (0 = none). In a consistent planar map at
@@ -413,6 +449,7 @@
     fillParity: fillParity,
     fillAt: fillAt,
     windingNumber: windingNumber,
+    windingOracle: windingOracle,
     distToEdge: distToEdge,
     distToSegment: distToSegment,
     nearestOnEdge: nearestOnEdge
