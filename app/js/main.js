@@ -172,6 +172,8 @@
     // WITHOUT committing (its own commit calls docChanged after landing)
     if (tools.transform && tools.transform.discard) tools.transform.discard();
     refreshLayers(); // undo/redo/load can change the layer structure
+    refreshActors(); // …and the actor library / edit mode
+    syncEditCrumb();
     app.debugPin = -1;
     app.debugHover = -1;
     refreshDebugPanel();
@@ -1733,6 +1735,116 @@
   app.regionSelectStyle = function () {
     return returnTool === "lasso" ? "lasso" : "marquee";
   };
+
+  // ---- Actors panel (actors.js; Architecture §6.6, step-2 beat 2) --------------
+  // The library lists actors and their poses; clicking a pose enters the
+  // journaled symbol-edit mode (editTargetSet) — the stage, the tools,
+  // and every art op retarget to that pose's cell. The breadcrumb over
+  // the canvas is the way back.
+
+  function actorPanelBtn(label, title, fn) {
+    var b = document.createElement("button");
+    b.textContent = label;
+    b.title = title;
+    b.addEventListener("click", function (ev) {
+      ev.stopPropagation();
+      fn();
+    });
+    return b;
+  }
+
+  function refreshActors() {
+    var list = document.getElementById("actorlist");
+    list.innerHTML = "";
+    var t = app.project.editTarget;
+    (app.project.actors || []).forEach(function (a) {
+      var row = document.createElement("div");
+      row.className = "actrow" + (t && t.actor === a.id ? " active" : "");
+      var name = document.createElement("span");
+      name.className = "aname";
+      name.textContent = a.name;
+      name.title = "Double-click to rename";
+      name.addEventListener("dblclick", function () {
+        var n = prompt("Actor name", a.name);
+        if (n && n !== a.name) {
+          app.exec({ op: "actorRename", actor: a.id, name: n });
+        }
+      });
+      row.appendChild(name);
+      row.appendChild(actorPanelBtn("＋", "New pose", function () {
+        app.exec({ op: "poseAdd", actor: a.id, id: VB.actorNewId("pose") });
+      }));
+      row.appendChild(actorPanelBtn("⭳", "Export .y2kactor", function () {
+        var bytes = VB.encodeY2KActor(a);
+        var blob = new Blob([bytes], { type: "application/json" });
+        var link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = a.name.replace(/[^\w\- ]+/g, "_") + ".y2kactor";
+        link.click();
+        URL.revokeObjectURL(link.href);
+      }));
+      row.appendChild(actorPanelBtn("✕", "Delete actor", function () {
+        if (!confirm('Delete actor "' + a.name + '"?')) return;
+        if (t && t.actor === a.id) app.exec({ op: "editTargetClear" });
+        app.exec({ op: "actorRemove", actor: a.id });
+      }));
+      list.appendChild(row);
+      a.poses.forEach(function (p) {
+        var pr = document.createElement("div");
+        var editing = t && t.actor === a.id && t.pose === p.id;
+        pr.className = "actrow posesub" + (editing ? " editing" : "");
+        pr.textContent = (editing ? "✎ " : "") + p.name;
+        pr.title = "Edit this pose's art";
+        pr.addEventListener("click", function () {
+          if (editing) return;
+          app.exec({ op: "editTargetSet", target: { actor: a.id, pose: p.id } });
+          fitView();
+        });
+        list.appendChild(pr);
+      });
+    });
+  }
+
+  // Layer/scene structure ops make no sense inside an actor cell; the
+  // crumb is the only way back so the mode is always visible.
+  function syncEditCrumb() {
+    var res = app.project.resolveEditCell ? app.project.resolveEditCell() : null;
+    document.getElementById("editcrumb").classList.toggle("hidden", !res);
+    if (res) document.getElementById("crumb-label").textContent = res.label;
+    ["btn-layer-add", "btn-layer-del", "btn-layer-up", "btn-layer-down",
+     "btn-scene-add", "scene-select"].forEach(function (id) {
+      document.getElementById(id).disabled = !!res;
+    });
+  }
+
+  document.getElementById("crumb-back").addEventListener("click", function () {
+    app.exec({ op: "editTargetClear" });
+    fitView();
+  });
+
+  document.getElementById("btn-actor-add").addEventListener("click", function () {
+    app.exec({ op: "actorAdd", id: VB.actorNewId("actor"),
+               poseId: VB.actorNewId("pose") });
+  });
+
+  var actorImportInput = document.getElementById("actor-import-file");
+  document.getElementById("btn-actor-import").addEventListener("click", function () {
+    actorImportInput.click();
+  });
+  actorImportInput.addEventListener("change", function () {
+    var file = actorImportInput.files && actorImportInput.files[0];
+    actorImportInput.value = "";
+    if (!file) return;
+    file.arrayBuffer().then(function (buf) {
+      var actor = VB.decodeY2KActor(new Uint8Array(buf));
+      app.exec({ op: "actorImport", actor: actor });
+      toast("Imported actor “" + actor.name + "”");
+    }, function () {
+      toast("Import failed: unreadable file", 5000);
+    }).catch(function (err) {
+      toast("Import failed: " + err.message, 5000);
+    });
+  });
 
   // ---- boot ------------------------------------------------------------------------
 

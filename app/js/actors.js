@@ -273,6 +273,21 @@
     c.sync();
   });
 
+  // Actor edit mode — Flash's symbol-edit. Selection-class ops (no
+  // history snapshot, like sceneSelect); project.scene()/stage()/
+  // activeCell() resolve through the target, so tools, renderers, and
+  // every journaled art op follow — live and replay agree because the
+  // mode switch itself is journaled.
+  VB.defineOp("editTargetSet", function (c, op) {
+    c.project.editTarget = JSON.parse(JSON.stringify(op.target));
+    c.sync();
+  });
+
+  VB.defineOp("editTargetClear", function (c) {
+    c.project.editTarget = null;
+    c.sync();
+  });
+
   // The import op carries the WHOLE actor as plain JSON (cells included)
   // — self-contained, so replay never depends on a file. Ids must be
   // regenerated BEFORE recording (decodeY2KActor does it).

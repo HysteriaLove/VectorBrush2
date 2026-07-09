@@ -190,6 +190,42 @@
     color: var(--text-dim); white-space: pre-wrap;
   }
 
+  /* Actors panel (actors.js) + the symbol-edit breadcrumb */
+  #actorhead {
+    display: flex; align-items: center; gap: 2px;
+    padding: 4px 6px;
+    border-top: 1px solid var(--panel-edge);
+    border-bottom: 1px solid var(--panel-edge);
+    color: var(--text-dim);
+  }
+  #actorlist { max-height: 170px; overflow-y: auto; }
+  .actrow {
+    display: flex; align-items: center; gap: 4px;
+    padding: 3px 6px; cursor: pointer;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    color: var(--text);
+  }
+  .actrow.active { background: #3d5a80; }
+  .actrow .aname {
+    flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .actrow.posesub { padding-left: 20px; font-size: 11px; color: var(--text-dim); }
+  .actrow.posesub.editing { color: #6cf; }
+  #editcrumb {
+    position: absolute; top: 8px; left: 8px; z-index: 5;
+    display: flex; align-items: center; gap: 8px;
+    background: #16181be0; border: 1px solid var(--panel-edge);
+    border-radius: 4px; padding: 4px 10px 4px 4px;
+    color: var(--text); font-size: 12px;
+  }
+  #editcrumb.hidden { display: none; }
+  #editcrumb button {
+    background: #2b2d31; color: var(--text);
+    border: 1px solid var(--panel-edge); border-radius: 3px;
+    padding: 2px 8px; cursor: pointer;
+  }
+  #editcrumb button:hover { background: #3d5a80; }
+
   #debugpanel {
     width: 280px;
     background: var(--panel);
@@ -413,6 +449,10 @@
     </div>
     <div id="canvaswrap">
       <canvas id="stage-canvas"></canvas>
+      <div id="editcrumb" class="hidden">
+        <button id="crumb-back" title="Back to the scene">◀ Scene</button>
+        <span id="crumb-label"></span>
+      </div>
       <div id="ctxmenu" class="hidden"></div>
       <div id="toast"></div>
     </div>
@@ -473,6 +513,15 @@
         </div>
         <div id="mat-profile"></div>
       </div>
+      <div id="actorhead">
+        <span>Actors</span>
+        <span class="spacer"></span>
+        <button id="btn-actor-add" title="New actor">+</button>
+        <button id="btn-actor-import" title="Import .y2kactor">⭱</button>
+        <input type="file" id="actor-import-file" accept=".y2kactor"
+               style="display:none">
+      </div>
+      <div id="actorlist"></div>
     </div>
     <div id="debugpanel" class="hidden">
       <div id="dbg-est"></div>

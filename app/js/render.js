@@ -22,7 +22,8 @@
   // skips the backdrop/stage paint — used when the Pixi backend draws
   // those beneath this canvas (docs/PixiPort.md two-canvas stacking).
   function renderProject(ctx, project, view, opts) {
-    setupStage(ctx, project, view, opts && opts.transparent);
+    setupStage(ctx, project.stage ? project.stage() : project, view,
+               opts && opts.transparent);
     var layers = project.scene().layers;
     for (var i = layers.length - 1; i >= 0; i--) {
       if (!layers[i].visible) continue;

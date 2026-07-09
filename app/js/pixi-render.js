@@ -615,13 +615,14 @@
     surface.world.scale.set(view.zoom / VB.TWIPS);
     surface.world.position.set(view.panX, view.panY);
 
-    var bg = project.background || { r: 255, g: 255, b: 255 };
+    var stage = project.stage ? project.stage() : project;
+    var bg = stage.background || { r: 255, g: 255, b: 255 };
     surface.stageLayer.clear();
     surface.stageLayer
-      .rect(120, 160, project.width, project.height)
+      .rect(120, 160, stage.width, stage.height)
       .fill({ color: 0x000000, alpha: 0.25 });
     surface.stageLayer
-      .rect(0, 0, project.width, project.height)
+      .rect(0, 0, stage.width, stage.height)
       .fill(rgb(bg));
 
     // cells: rebuild only what changed (content hash / hairline zoom).

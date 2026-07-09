@@ -102,6 +102,7 @@
       background: JSON.parse(JSON.stringify(target.background)),
       cur: { scene: target.cur.scene, layer: target.cur.layer },
       materials: JSON.parse(JSON.stringify(target.materials || [])),
+      editTarget: JSON.parse(JSON.stringify(target.editTarget || null)),
       actors: (target.actors || []).map(snapshotActor),
       scenes: target.scenes.map(function (sc) {
         return {
@@ -124,6 +125,7 @@
     target.background = snap.background;
     target.cur = { scene: snap.cur.scene, layer: snap.cur.layer };
     target.materials = JSON.parse(JSON.stringify(snap.materials || []));
+    target.editTarget = JSON.parse(JSON.stringify(snap.editTarget || null));
     target.actors = (snap.actors || []).map(restoreActor);
     target.scenes = snap.scenes.map(function (sc) {
       return {

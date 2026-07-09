@@ -48,6 +48,13 @@
     // cells y2kvector documents. Rides the journal; not yet part of the
     // .y2kvector project-file body.
     this.actors = [];
+    // Actor edit mode (Flash's symbol-edit): when set, scene()/stage()/
+    // activeCell() resolve to the targeted actor cell, so every tool,
+    // renderer, and journaled art op follows. Set ONLY through the
+    // journaled editTargetSet/Clear ops — replay must agree.
+    // { actor: id, pose: id } or { actor: id, symbol: id } (the
+    // symbol's active drawing).
+    this.editTarget = null;
   }
 
   function sameStyle(a, b) {
@@ -102,14 +109,73 @@
     return d;
   };
 
+  /** Resolves the actor-edit target to { cell, actor, label } or null.
+   *  Symbol targets edit the symbol's ACTIVE drawing. */
+  Project.prototype.resolveEditCell = function () {
+    var t = this.editTarget;
+    if (!t) return null;
+    var actors = this.actors || [];
+    var actor = null;
+    for (var i = 0; i < actors.length; i++) {
+      if (actors[i].id === t.actor) { actor = actors[i]; break; }
+    }
+    if (!actor) return null;
+    if (t.pose) {
+      for (var p = 0; p < actor.poses.length; p++) {
+        if (actor.poses[p].id === t.pose) {
+          return { cell: actor.poses[p].cell, actor: actor,
+                   label: actor.name + " ▸ " + actor.poses[p].name };
+        }
+      }
+      return null;
+    }
+    if (t.symbol) {
+      var hit = null;
+      var walk = function (list) {
+        for (var s = 0; s < list.length && !hit; s++) {
+          if (list[s].id === t.symbol) { hit = list[s]; return; }
+          walk(list[s].symbols);
+        }
+      };
+      for (var p2 = 0; p2 < actor.poses.length && !hit; p2++) {
+        walk(actor.poses[p2].symbols);
+      }
+      if (!hit) return null;
+      var d = hit.drawings[hit.cur.drawing];
+      return d ? { cell: d.cell, actor: actor,
+                   label: actor.name + " ▸ " + hit.name + " ▸ " + d.name }
+               : null;
+    }
+    return null;
+  };
+
   Project.prototype.scene = function () {
+    var t = this.resolveEditCell();
+    if (t) {
+      // virtual single-layer scene: renderers, the layers panel, and
+      // activeCell() all see the actor cell without special cases
+      return { name: "(actor edit)", layers: [{
+        name: t.label, visible: true, locked: false, frames: [t.cell]
+      }] };
+    }
     return this.scenes[this.cur.scene];
   };
   Project.prototype.activeLayer = function () {
-    return this.scene().layers[this.cur.layer];
+    var layers = this.scene().layers;
+    return layers[Math.min(this.cur.layer, layers.length - 1)];
   };
   Project.prototype.activeCell = function () {
     return this.activeLayer().frames[0];
+  };
+  /** Stage rect for the renderers: the actor canvas in edit mode. */
+  Project.prototype.stage = function () {
+    var t = this.resolveEditCell();
+    if (t) {
+      return { width: t.cell.width, height: t.cell.height,
+               background: t.cell.background };
+    }
+    return { width: this.width, height: this.height,
+             background: this.background };
   };
 
   Project.prototype.resize = function (width, height) {

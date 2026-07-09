@@ -3118,6 +3118,65 @@
         VB.actorById(repImp.project, imported.id))) ===
       JSON.stringify(VB.actorToPlain(impLive)));
 
+    // edit target: journaled symbol-edit mode — the active cell, the
+    // stage rect, and every journaled ART op retarget to the actor cell,
+    // and replay agrees because the mode switch is itself an op
+    var sceneCell = ase.project.scenes[0].layers[0].frames[0];
+    var sceneEdges = sceneCell.edges.length;
+    ase.exec({ op: "editTargetSet",
+               target: { actor: "actor_t2", pose: "pose_t2" } });
+    var t2cell = VB.actorById(ase.project, "actor_t2").poses[0].cell;
+    check("edit target retargets the active cell",
+      ase.project.activeCell() === t2cell &&
+      ase.project.stage().width === 15360 &&
+      ase.project.scene().layers.length === 1,
+      ase.project.scene().layers[0].name);
+    ase.exec({ op: "brush",
+               points: [{ x: 2000, y: 3000 }, { x: 9000, y: 3600 }],
+               radius: 400, color: { r: 220, g: 40, b: 40, a: 255 } });
+    ase.exec({ op: "pencil",
+               points: [{ x: 1500, y: 6000 }, { x: 9000, y: 6400 }],
+               style: { width: 20, color: { r: 0, g: 0, b: 0, a: 255 } } });
+    check("journaled art ops land in the actor cell, not the scene",
+      t2cell.edges.length > 0 && sceneCell.edges.length === sceneEdges,
+      t2cell.edges.length + " actor edges, scene " +
+      sceneCell.edges.length + "/" + sceneEdges);
+    check("actor-mode undo restores the actor cell",
+      (function () {
+        var before = t2cell.edges.length;
+        ase.history.undo(); // undoes the pencil
+        var after = VB.actorById(ase.project, "actor_t2").poses[0].cell.edges.length;
+        return after < before;
+      })(), "");
+    ase.history.redo();
+    ase.exec({ op: "editTargetClear" });
+    // undo/redo rebuilt every cell object — compare against the LIVE one
+    check("clearing the target returns to the scene cell",
+      ase.project.activeCell() === ase.project.scenes[0].layers[0].frames[0] &&
+      ase.project.stage().width === 11000);
+    var repT = await VB.replayJournal(JSON.parse(JSON.stringify(ase.journal)));
+    check("actor art ops replay byte-exact through the mode switch",
+      JSON.stringify(VB.actorById(repT.project, "actor_t2").poses[0].cell.edges) ===
+      JSON.stringify(VB.actorById(ase.project, "actor_t2").poses[0].cell.edges),
+      VB.actorById(repT.project, "actor_t2").poses[0].cell.edges.length + " edges");
+
+    // the oracle renders the actor cell in edit mode (stage + art)
+    ase.exec({ op: "editTargetSet",
+               target: { actor: "actor_t2", pose: "pose_t2" } });
+    var ecv = document.createElement("canvas");
+    ecv.width = 550; ecv.height = 400;
+    var ectx = ecv.getContext("2d");
+    VB.renderProject(ectx, ase.project, { zoom: 0.5, panX: 0, panY: 0, dpr: 1 });
+    var brushPx = ectx.getImageData(
+      Math.round(2000 / 20 * 0.5) + 50, Math.round(3000 / 20 * 0.5), 1, 1).data;
+    var brushMid = ectx.getImageData(
+      Math.round(5500 / 20 * 0.5), Math.round(3300 / 20 * 0.5), 1, 1).data;
+    check("edit-mode render shows the actor art",
+      (brushMid[0] > 180 && brushMid[1] < 120) ||
+      (brushPx[0] > 180 && brushPx[1] < 120),
+      "rgb(" + brushMid[0] + "," + brushMid[1] + "," + brushMid[2] + ")");
+    ase.exec({ op: "editTargetClear" });
+
     // guards: the last pose / last drawing stay
     ase.exec({ op: "poseRemove", actor: "actor_t2", pose: "pose_t2" });
     check("the last pose cannot be removed",
