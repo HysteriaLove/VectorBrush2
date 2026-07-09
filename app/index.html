@@ -101,11 +101,29 @@
     overflow-y: auto;
   }
   #panelgrip {
-    flex: none; width: 5px; cursor: ew-resize;
+    flex: none; width: 8px; cursor: ew-resize;
     background: var(--panel);
     border-left: 1px solid var(--panel-edge);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #panelgrip::before {
+    content: ""; width: 2px; height: 34px; border-radius: 2px;
+    background: var(--text-dim); opacity: 0.5;
   }
   #panelgrip:hover, #panelgrip.dragging { background: #3d5a80; }
+  /* section grips: drag to resize the list above (heights persist) */
+  .vgrip {
+    flex: none; height: 7px; cursor: ns-resize;
+    background: var(--panel);
+    border-top: 1px solid var(--panel-edge);
+    border-bottom: 1px solid var(--panel-edge);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .vgrip::before {
+    content: ""; height: 2px; width: 34px; border-radius: 2px;
+    background: var(--text-dim); opacity: 0.5;
+  }
+  .vgrip:hover, .vgrip.dragging { background: #3d5a80; }
   #scenebar {
     display: flex; gap: 4px; padding: 6px;
     border-bottom: 1px solid var(--panel-edge);
@@ -124,7 +142,7 @@
     cursor: pointer; padding: 0;
   }
   #layerspanel button:hover { background: #3a3d42; }
-  #layerlist { flex: 1; overflow-y: auto; }
+  #layerlist { flex: none; overflow-y: auto; } /* height via its grip */
   .layerrow {
     display: flex; align-items: center; gap: 4px;
     padding: 4px 6px; cursor: pointer;
@@ -149,7 +167,7 @@
     color: var(--text-dim);
   }
   #mat-gpu { font-size: 10px; }
-  #matlist { max-height: 150px; overflow-y: auto; }
+  #matlist { overflow-y: auto; } /* height via its grip */
   .matrow2 {
     display: flex; align-items: center; gap: 6px;
     padding: 3px 6px; cursor: pointer;
@@ -198,7 +216,7 @@
     border-bottom: 1px solid var(--panel-edge);
     color: var(--text-dim);
   }
-  #actorlist { max-height: 170px; overflow-y: auto; }
+  #actorlist { overflow-y: auto; } /* height via its grip */
   .actrow {
     display: flex; align-items: center; gap: 4px;
     padding: 3px 6px; cursor: pointer;
@@ -471,6 +489,7 @@
         <button id="btn-layer-down" title="Move layer down">▼</button>
       </div>
       <div id="layerlist"></div>
+      <div class="vgrip" id="grip-layers" title="Drag to resize the layer list"></div>
       <div id="mathead">
         <span>Materials</span>
         <span class="spacer"></span>
@@ -478,6 +497,7 @@
         <span id="mat-gpu" title="WebGPU availability for gpu-class materials"></span>
       </div>
       <div id="matlist"></div>
+      <div class="vgrip" id="grip-mats" title="Drag to resize the material list"></div>
       <div id="matedit" class="hidden">
         <label>Type
           <select id="mat-type"></select>
@@ -522,6 +542,7 @@
                style="display:none">
       </div>
       <div id="actorlist"></div>
+      <div class="vgrip" id="grip-actors" title="Drag to resize the actor list"></div>
     </div>
     <div id="debugpanel" class="hidden">
       <div id="dbg-est"></div>

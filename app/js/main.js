@@ -1667,6 +1667,42 @@
     grip.addEventListener("pointercancel", endDrag);
   })();
 
+  // ---- resizable panel sections ------------------------------------------------
+  // Every list in the side column has a grip UNDER it (ns-resize): drag
+  // sets the list's height, persisted like the panel width. The column
+  // itself scrolls, so oversized sections never hide their neighbors.
+  function sectionGrip(gripId, listId, defaultH) {
+    var grip = document.getElementById(gripId);
+    var list = document.getElementById(listId);
+    var key = "vb-h-" + listId;
+    function clamp(h) { return Math.max(50, Math.min(500, h)); }
+    var saved = parseInt(localStorage.getItem(key), 10);
+    list.style.height = clamp(isFinite(saved) ? saved : defaultH) + "px";
+    var drag = null;
+    grip.addEventListener("pointerdown", function (ev) {
+      drag = { y: ev.clientY, h: list.getBoundingClientRect().height };
+      grip.classList.add("dragging");
+      grip.setPointerCapture(ev.pointerId);
+      ev.preventDefault();
+    });
+    grip.addEventListener("pointermove", function (ev) {
+      if (!drag) return;
+      list.style.height = clamp(drag.h + ev.clientY - drag.y) + "px";
+    });
+    function endSectionDrag() {
+      if (!drag) return;
+      drag = null;
+      grip.classList.remove("dragging");
+      localStorage.setItem(key,
+        String(Math.round(list.getBoundingClientRect().height)));
+    }
+    grip.addEventListener("pointerup", endSectionDrag);
+    grip.addEventListener("pointercancel", endSectionDrag);
+  }
+  sectionGrip("grip-layers", "layerlist", 150);
+  sectionGrip("grip-mats", "matlist", 150);
+  sectionGrip("grip-actors", "actorlist", 170);
+
   document.getElementById("btn-layer-add").addEventListener("click", function () {
     flushSelections();
     app.record({ op: "layerAdd" });
