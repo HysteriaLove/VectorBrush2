@@ -440,7 +440,7 @@
   function matcapPaint(ctx, doc, fillIdx, style, chains, tracePath) {
     var tex = matcapTexture(style);
     if (!tex) return false; // embedded image still decoding
-    if (paintCache.size > 64) paintCache.clear(); // stale-fill backstop
+    if (!VB.assets && paintCache.size > 64) paintCache.clear(); // legacy backstop
     var key = styleGeoKey(doc, fillIdx, style);
     var hit = paintCache.get(fillIdx);
     if (!hit || hit.key !== key) {
@@ -453,6 +453,15 @@
       cv.getContext("2d").putImageData(id, 0, 0);
       hit = { key: key, canvas: cv, bbox: buffers.bbox };
       paintCache.set(fillIdx, hit);
+      // paints are AssetCache tenants (streaming.js): eviction drops the
+      // composite and the next paint recomputes it — never wrong pixels,
+      // only spent milliseconds
+      if (VB.assets) {
+        VB.assets.claim("matcap:" + fillIdx, buffers.w * buffers.h * 4,
+          function () { paintCache.delete(fillIdx); });
+      }
+    } else if (VB.assets) {
+      VB.assets.touch("matcap:" + fillIdx);
     }
     ctx.save();
     ctx.beginPath();

@@ -21,6 +21,7 @@
 
 <script src="../js/bitio.js"></script>
 <script src="../js/doc.js"></script>
+<script src="../js/streaming.js"></script>
 <script src="../js/geom.js"></script>
 <script src="../js/swf.js"></script>
 <script src="../js/trace.js"></script>
@@ -2956,6 +2957,111 @@
   } catch (err) {
     fail++;
     log("  VISUAL EXCEPTION: " + (err && err.stack || err), "fail");
+  }
+
+  // =========================== streaming skeleton ============================
+  // AssetCache (one global LRU byte budget), Prefetcher (priority queue),
+  // and the eviction contract: dropping a resident asset costs a
+  // recompute, never wrong pixels (Implementation.md phase 4).
+  log("");
+  log("streaming:");
+  try {
+    var ac = new VB.AssetCache(100);
+    var acEv = [];
+    ac.claim("a", 40, function () { acEv.push("a"); });
+    ac.claim("b", 40, function () { acEv.push("b"); });
+    ac.touch("a"); // b becomes LRU
+    ac.claim("c", 40, function () { acEv.push("c"); });
+    check("LRU eviction under budget",
+      acEv.join(",") === "b" && ac.resident === 80 && ac.stats().count === 2,
+      "evicted [" + acEv.join(",") + "], resident " + ac.resident);
+    ac.claim("a", 10, function () { acEv.push("a2"); }); // same-key replace
+    check("same-key claim replaces accounting",
+      ac.resident === 50 && acEv.join(",") === "b", ac.resident + " bytes");
+    ac.release("a");
+    check("release drops without evict callback",
+      ac.resident === 40 && acEv.join(",") === "b", ac.resident + " bytes");
+
+    var ac2 = new VB.AssetCache(10);
+    var ac2Ev = [];
+    ac2.claim("big", 100, function () { ac2Ev.push("big"); });
+    check("oversized lone asset stays resident",
+      ac2Ev.length === 0 && ac2.resident === 100, ac2.resident + " bytes");
+    ac2.claim("second", 5, function () { ac2Ev.push("second"); });
+    check("next claim evicts the oversized LRU",
+      ac2Ev.join(",") === "big" && ac2.resident === 5, ac2.resident + " bytes");
+
+    var ac3 = new VB.AssetCache(50);
+    var ac3Ev = [];
+    ac3.frameStart();
+    ac3.claim("f1", 40, function () { ac3Ev.push("f1"); });
+    ac3.claim("f2", 40, function () { ac3Ev.push("f2"); });
+    check("in-frame claims are eviction-exempt (frame may run over budget)",
+      ac3Ev.length === 0 && ac3.resident === 80, ac3.resident + " bytes");
+    ac3.frameStart();
+    ac3.claim("f3", 40, function () { ac3Ev.push("f3"); });
+    check("next frame evicts the previous frame's claims LRU-first",
+      ac3Ev.join(",") === "f1,f2" && ac3.resident === 40,
+      "evicted [" + ac3Ev.join(",") + "]");
+
+    // Prefetcher: priority order, dedup, cancel — all under concurrency 1
+    var pf = new VB.Prefetcher(1);
+    var pfOrder = [];
+    var pfGate;
+    var pfGateP = new Promise(function (r) { pfGate = r; });
+    var pfP1 = pf.schedule("one", 1, function () { pfOrder.push("one"); return pfGateP; });
+    var pfP2 = pf.schedule("two", 5, function () { pfOrder.push("two"); return "T"; });
+    var pfP3 = pf.schedule("three", 9, function () { pfOrder.push("three"); return "H"; });
+    var pfDup = pf.schedule("two", 99, function () { pfOrder.push("DUP"); return "X"; });
+    check("duplicate keys share one scheduled load", pfP2 === pfDup);
+    pfGate("done");
+    var pfV1 = await pfP1, pfV2 = await pfP2;
+    await pfP3;
+    check("priority order under the concurrency cap",
+      pfOrder.join(",") === "one,two,three" && pfV1 === "done" && pfV2 === "T",
+      pfOrder.join(","));
+    var pf2 = new VB.Prefetcher(1);
+    var pf2Gate;
+    var pf2GateP = new Promise(function (r) { pf2Gate = r; });
+    pf2.schedule("running", 1, function () { return pf2GateP; });
+    var pfVictim = pf2.schedule("victim", 1, function () { pfOrder.push("victim"); return 1; });
+    pf2.cancel("victim");
+    pf2Gate();
+    check("cancel resolves null without running the load",
+      (await pfVictim) === null && pfOrder.indexOf("victim") < 0);
+
+    // matcap paints under eviction: starve the global cache between two
+    // oracle renders — the recomputed composite must be pixel-identical
+    var mcStyle = VB.materialDefaults("matcap");
+    mcStyle.matcap = "studio"; mcStyle.bumpScale = 120; mcStyle.blurPx = 2;
+    var mcRes = await VB.replayJournal([
+      { op: "new", width: 11000, height: 8000 },
+      { op: "brush", points: [{ x: 2500, y: 3000 }, { x: 6500, y: 3400 }],
+        radius: 700, color: { r: 102, g: 204, b: 255, a: 255 } },
+      { op: "fillStyle", index: 0, style: mcStyle }]);
+    function renderShot(doc) {
+      var cv = document.createElement("canvas");
+      cv.width = 550; cv.height = 400;
+      var c2 = cv.getContext("2d");
+      VB.render(c2, doc, { zoom: 1, panX: 0, panY: 0, dpr: 1 });
+      return c2.getImageData(0, 0, 550, 400).data;
+    }
+    var shotA = renderShot(mcRes.doc);
+    var savedBudget = VB.assets.budget;
+    VB.assets.setBudget(1);
+    VB.assets.claim("test:starver", 2, function () {});
+    var shotB = renderShot(mcRes.doc); // recomputed after eviction
+    VB.assets.release("test:starver");
+    VB.assets.setBudget(savedBudget);
+    var mcDiff = 0;
+    for (var mi3 = 0; mi3 < shotA.length; mi3++) {
+      if (shotA[mi3] !== shotB[mi3]) mcDiff++;
+    }
+    check("matcap paint recomputes pixel-identical after eviction",
+      mcDiff === 0, mcDiff + " differing bytes");
+  } catch (err) {
+    fail++;
+    log("  STREAMING EXCEPTION: " + (err && err.stack || err), "fail");
   }
 
   // ============================ package store ================================

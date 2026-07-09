@@ -12,6 +12,7 @@
 <script src="../js/bitio.js"></script>
 <script src="../js/geom.js"></script>
 <script src="../js/doc.js"></script>
+<script src="../js/streaming.js"></script>
 <script src="../js/materials.js"></script>
 <script src="../js/matcap.js"></script>
 <script src="../js/swf.js"></script>
@@ -234,6 +235,28 @@
     check("text pixel diff " + pctT.toFixed(2) + "% <= 1.5%", pctT <= 1.5,
           pctT.toFixed(2) + "%");
     shot(rT.a, "text · 2D"); shot(rT.b, "text · pixi");
+
+    // 8. AssetCache eviction correctness: force every cell texture out
+    // between frames — the rebuild must land on identical pixels
+    // (streaming is caching, never truth).
+    var savedBudget = VB.assets.budget;
+    var l30e = await VB.replayJournal(window.VBUserLog30.ops.slice(0, 11));
+    var rBefore = renderBoth(l30e.project);
+    var cellsBefore = surface._cells.size;
+    VB.assets.frameStart();      // end the frame: everything evictable
+    VB.assets.setBudget(1);
+    VB.assets.claim("parity:starver", 2, function () {}); // pushes the rest out
+    check("starvation budget evicts the cell cache",
+          surface._cells.size === 0, cellsBefore + " -> " + surface._cells.size);
+    var rEvicted = renderBoth(l30e.project); // cells rebuilt from scratch
+    VB.assets.release("parity:starver");
+    VB.assets.setBudget(savedBudget);
+    var evictDiff = 0;
+    for (var ei = 0; ei < rBefore.db.length; ei++) {
+      if (rBefore.db[ei] !== rEvicted.db[ei]) { evictDiff++; }
+    }
+    check("eviction rebuild is pixel-identical", evictDiff === 0,
+          evictDiff + " differing bytes");
 
     var summary = "PIXI PARITY DONE pass=" + pass + " fail=" + fail;
     log(""); log(summary, fail ? "fail" : "pass");

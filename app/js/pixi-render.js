@@ -322,8 +322,9 @@
       overlayLayer: new PIXI.Container(),
       debugLayer: new PIXI.Container(),
       _backdrop: new PIXI.Graphics(),
-      _cells: new Map(),   // "scene:layer" -> {hash, zoom, hasHairlines, container}
-      _structure: ""
+      _cells: new Map(),   // "scene:layer" -> {hash, zoom, hasHairlines, bytes, container}
+      _structure: "",
+      _id: ++surfaceSeq    // scopes this surface's AssetCache claims
     };
     surface.backdropLayer.addChild(surface._backdrop);
     surface.world.addChild(surface.stageLayer);
@@ -337,6 +338,12 @@
 
     surface.resize = function () { app.resize(); };
     surface.destroy = function () {
+      if (VB.assets) {
+        surface._cells.forEach(function (st, key) {
+          VB.assets.release("pixicell:" + surface._id + ":" + key);
+        });
+      }
+      surface._cells.clear();
       try { app.destroy(true, { children: true, texture: true }); }
       catch (e) { /* already gone */ }
       if (cv.parentElement) cv.parentElement.removeChild(cv);
@@ -433,6 +440,7 @@
    *  paintFill) into a sprite at the fill's bbox â€” pixel-exact
    *  composition for even-odd-encoded fills, cached with the cell. */
   var RASTER_MAX = 2048;
+  var surfaceSeq = 0; // scopes AssetCache claims per created surface
   function rasterFillSprite(doc, fillIdx, style, chains, zoom) {
     if (!VB.paintFill) return null;
     var bb = { xmin: Infinity, ymin: Infinity, xmax: -Infinity, ymax: -Infinity };
@@ -458,6 +466,7 @@
     sprite.position.set(bb.xmin, bb.ymin);
     sprite.width = wtw;
     sprite.height = htw;
+    sprite.vbBytes = w * h * 4; // texture residency, tallied per cell
     return sprite;
   }
 
@@ -509,6 +518,7 @@
             sprite.position.set(buffers.bbox.xmin, buffers.bbox.ymin);
             sprite.width = buffers.bbox.xmax - buffers.bbox.xmin;
             sprite.height = buffers.bbox.ymax - buffers.bbox.ymin;
+            cellState.bytes += buffers.w * buffers.h * 4;
             cellC.addChild(sprite);
             continue;
           }
@@ -528,6 +538,7 @@
       var rSprite = rasterFillSprite(doc, f, style, chains, zoom);
       if (rSprite) {
         cellState.hasHairlines = true; // zoom-sensitive: reuse the policy
+        cellState.bytes += rSprite.vbBytes;
         cellC.addChild(rSprite);
       }
     }
@@ -613,7 +624,18 @@
       .rect(0, 0, project.width, project.height)
       .fill(rgb(bg));
 
-    // cells: rebuild only what changed (content hash / hairline zoom)
+    // cells: rebuild only what changed (content hash / hairline zoom).
+    // Cell raster textures are AssetCache tenants (streaming.js):
+    // budget eviction destroys the cell so the next frame rebuilds it —
+    // never wrong pixels, only spent milliseconds. frameStart() exempts
+    // everything this pass claims or touches from eviction mid-render.
+    if (VB.assets) VB.assets.frameStart();
+    function cellAssetKey(key) { return "pixicell:" + surface._id + ":" + key; }
+    function dropCell(key, st) {
+      if (st.container) st.container.destroy({ children: true });
+      surface._cells.delete(key);
+      if (VB.assets) VB.assets.release(cellAssetKey(key));
+    }
     var layers = project.scene().layers;
     var structure = project.cur.scene + "|" + layers.map(function (l) {
       return l.visible ? 1 : 0;
@@ -630,19 +652,29 @@
       var zoomStale = st && st.hasHairlines &&
         Math.abs(view.zoom - st.zoom) / st.zoom > 0.02;
       if (!st || st.hash !== hash || zoomStale) {
-        if (st && st.container) st.container.destroy({ children: true });
-        st = { hash: hash, zoom: view.zoom, hasHairlines: false };
+        if (st) dropCell(key, st);
+        st = { hash: hash, zoom: view.zoom, hasHairlines: false, bytes: 0 };
         st.container = buildCell(doc, view.zoom, st);
         surface._cells.set(key, st);
+        if (VB.assets) {
+          (function (k) {
+            VB.assets.claim(cellAssetKey(k), st.bytes, function () {
+              var evicted = surface._cells.get(k);
+              if (evicted) {
+                if (evicted.container) evicted.container.destroy({ children: true });
+                surface._cells.delete(k);
+              }
+            });
+          })(key);
+        }
+      } else if (VB.assets) {
+        VB.assets.touch(cellAssetKey(key));
       }
       order.push(st.container);
     }
     // drop cells for deleted/hidden layers
     surface._cells.forEach(function (st, key) {
-      if (!live[key]) {
-        if (st.container) st.container.destroy({ children: true });
-        surface._cells.delete(key);
-      }
+      if (!live[key]) dropCell(key, st);
     });
     if (structure !== surface._structure ||
         surface.documentLayer.children.length !== order.length ||
