@@ -100,20 +100,22 @@
 
   // ---- rendering loop ------------------------------------------------------
 
-  // ---- Pixi backend (docs/PixiPort.md, opt-in) ---------------------------------
-  // Stage 1: Pixi draws backdrop + stage background on a canvas UNDER
-  // #stage-canvas; document content, overlays and debug stay on the
-  // Canvas2D overlay (transparent mode). Falls back silently when
-  // WebGL/Pixi is unavailable.
+  // ---- Pixi backend (docs/PixiPort.md) -------------------------------------------
+  // THE document renderer: pixi draws everything drawing-related
+  // (backdrop, stage, fills, strokes, materials, text) on a canvas
+  // UNDER #stage-canvas; the Canvas2D overlay above keeps tool
+  // overlays, debug decorations and pointer routing. Canvas2D remains
+  // the tested oracle (app/test/pixi-parity.html) and the silent
+  // fallback when WebGL is unavailable; ?canvas2d (or
+  // localStorage.vbRenderer = "canvas2d") forces it.
   var pixiSurface = null;
-  var pixiWanted =
-    /(^|[?&#])pixi(\b|=|$)/.test(location.search + location.hash) ||
-    localStorage.getItem("vbRenderer") === "pixi";
-  if (pixiWanted && VB.createPixiSurface) {
+  var canvas2dForced =
+    /(^|[?&#])canvas2d(\b|=|$)/.test(location.search + location.hash) ||
+    localStorage.getItem("vbRenderer") === "canvas2d";
+  if (!canvas2dForced && VB.createPixiSurface) {
     VB.createPixiSurface(canvas.parentElement, canvas).then(function (s) {
       pixiSurface = s;
-      setMsg(s ? "pixi backend active (stage 1: backdrop/stage)"
-               : "pixi backend unavailable — Canvas2D");
+      if (!s) setMsg("WebGL unavailable — Canvas2D renderer");
       requestRender();
     });
   }
@@ -126,7 +128,7 @@
       renderQueued = false;
       if (pixiSurface) {
         VB.renderProjectPixi(pixiSurface, app.project, app.view);
-        VB.renderProject(ctx, app.project, app.view, { transparent: true });
+        VB.applyViewTransform(ctx, app.view); // overlays/debug only
       } else {
         VB.renderProject(ctx, app.project, app.view);
       }

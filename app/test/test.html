@@ -29,6 +29,7 @@
 <script src="../js/swfwrite.js"></script>
 <script src="../js/materials.js"></script>
 <script src="../js/matcap.js"></script>
+<script src="../js/pixi-render.js"></script>
 <script src="../js/operation-estimator.js"></script>
 <script src="../js/fit.js"></script>
 <script src="../js/merge.js"></script>
@@ -1147,6 +1148,41 @@
     check("vbd round-trips embedded matcap texture",
       mback.fills[1].matcap && mback.fills[1].matcap.b64 === "aGVsbG8h",
       JSON.stringify(mback.fills[1].matcap));
+  })();
+
+  // ======================= pixi backend: pure helpers ===========================
+  // GPU-free pieces of the Pixi backend (the full renderer gates on
+  // app/test/pixi-parity.html, which needs WebGL).
+  log("pixi backend helpers:");
+  (function () {
+    // hole nesting: square, its hole, a sibling, an island in the hole
+    var sq = function (x0, y0, s) {
+      return { sx: x0, sy: y0, pts: [
+        { x: x0 + s, y: y0, cx: null, cy: null },
+        { x: x0 + s, y: y0 + s, cx: null, cy: null },
+        { x: x0, y: y0 + s, cx: null, cy: null },
+        { x: x0, y: y0, cx: null, cy: null }], closed: true };
+    };
+    var nested = VB.pixiAssignHoles([
+      sq(0, 0, 1000), sq(200, 200, 600), sq(2000, 0, 300), sq(350, 350, 100)
+    ], VB.pixiFlattenChain);
+    check("hole nesting depths 0/1/0/2",
+      nested[0].depth === 0 && nested[1].depth === 1 &&
+      nested[2].depth === 0 && nested[3].depth === 2,
+      nested.map(function (e) { return e.depth; }).join("/"));
+    check("hole attaches to its outline",
+      nested[0].children.length === 1 && nested[0].children[0] === 1);
+    check("hairline floor", VB.pixiHairWidth(20, 1) === 20 &&
+      VB.pixiHairWidth(5, 1) === 20 && VB.pixiHairWidth(5, 4) === 5);
+    // content hash: stable, and sensitive to claim changes
+    var hd = new VB.VBDocument();
+    hd.width = 11000; hd.height = 8000;
+    hd.fills.push({ type: "solid", color: { r: 1, g: 2, b: 3, a: 255 } });
+    hd.edges.push(VB.edge(0, 0, null, null, 100, 0, 0, 1, 0));
+    var h1 = VB.pixiHashCell(hd);
+    check("cell hash is stable", h1 === VB.pixiHashCell(hd));
+    hd.edges[0].fill1 = 0;
+    check("cell hash tracks claim changes", h1 !== VB.pixiHashCell(hd));
   })();
 
   // ======================= OperationEstimator ===================================

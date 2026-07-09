@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>PIXI PARITY RUNNING</title>
+<style>
+  body { background: #202225; color: #ddd; font: 12px Consolas, monospace; }
+  .pass { color: #7fbf7f; } .fail { color: #ff7a7a; font-weight: bold; }
+  .shots div { display: inline-block; margin: 4px; text-align: center; }
+  canvas { border: 1px solid #444; width: 260px; }
+</style>
+</head><body>
+<pre id="out"></pre>
+<div class="shots" id="shots"></div>
+<script src="../js/bitio.js"></script>
+<script src="../js/geom.js"></script>
+<script src="../js/doc.js"></script>
+<script src="../js/materials.js"></script>
+<script src="../js/matcap.js"></script>
+<script src="../js/swf.js"></script>
+<script src="../js/vbd.js"></script>
+<script src="../js/fit.js"></script>
+<script src="../js/merge.js"></script>
+<script src="../js/planarity.js"></script>
+<script src="../js/faces.js"></script>
+<script src="../js/trace.js"></script>
+<script src="../js/render.js"></script>
+<script src="../js/normalize.js"></script>
+<script src="../js/swath.js"></script>
+<script src="../lib/paper-core.min.js"></script>
+<script src="../js/paperglue.js"></script>
+<script src="../js/mask.js"></script>
+<script src="../js/eraser.js"></script>
+<script src="../js/brush.js"></script>
+<script src="../js/bucket.js"></script>
+<script src="../js/pencil.js"></script>
+<script src="../js/shapes.js"></script>
+<script src="../js/arrow.js"></script>
+<script src="../js/transform.js"></script>
+<script src="../js/journal.js"></script>
+<script src="../js/history.js"></script>
+<script src="../js/project.js"></script>
+<script src="../js/ttf.js"></script>
+<script src="../js/text.js"></script>
+<script src="ttffixture.js"></script>
+<script src="../lib/pixi.min.js"></script>
+<script src="../js/pixi-render.js"></script>
+<script>
+/* pixi-parity.html — the oracle gate (docs/PixiPort.md §Visual parity).
+ * Renders each fixture through Canvas2D (render.js, the oracle) and
+ * through the Pixi backend, compares pixels, and hard-fails topology
+ * probes (hole centers, fill presence). AA tolerance is a percentage
+ * of differing pixels; topology probes have none. */
+(function () {
+  "use strict";
+  var out = [];
+  var pass = 0, fail = 0;
+  function log(s, cls) {
+    out.push((cls === "fail" ? "FAIL " : cls === "pass" ? "  ok " : "") + s);
+  }
+  function check(name, cond, detail) {
+    if (cond) { pass++; log(name, "pass"); }
+    else { fail++; log(name + (detail ? " — " + detail : ""), "fail"); }
+  }
+
+  var W = 550, H = 400;
+  var VIEW = { zoom: 1, panX: 0, panY: 0, dpr: 1 };
+
+  function shot(cv, title) {
+    var d = document.createElement("div");
+    d.appendChild(cv);
+    var l = document.createElement("div");
+    l.textContent = title;
+    d.appendChild(l);
+    document.getElementById("shots").appendChild(d);
+  }
+
+  async function run() {
+    var host = document.createElement("div");
+    host.style.cssText = "position:relative;width:" + W + "px;height:" + H + "px;";
+    document.body.appendChild(host);
+    var marker = document.createElement("canvas"); // insertion anchor
+    host.appendChild(marker);
+    var surface = await VB.createPixiSurface(host, marker);
+    if (!surface) {
+      document.title = "PIXI PARITY NO-GL";
+      log("WebGL unavailable — parity cannot run here", "fail");
+      document.getElementById("out").textContent = out.join("\n");
+      return;
+    }
+
+    function renderBoth(project) {
+      var a = document.createElement("canvas");
+      a.width = W; a.height = H;
+      VB.renderProject(a.getContext("2d"), project, VIEW);
+      VB.renderProjectPixi(surface, project, VIEW);
+      var b = document.createElement("canvas");
+      b.width = W; b.height = H;
+      b.getContext("2d").drawImage(surface.canvas, 0, 0, W, H);
+      return { a: a, b: b,
+               da: a.getContext("2d").getImageData(0, 0, W, H).data,
+               db: b.getContext("2d").getImageData(0, 0, W, H).data };
+    }
+
+    function diffPct(r) {
+      var bad = 0;
+      for (var i = 0; i < r.da.length; i += 4) {
+        var d = Math.max(Math.abs(r.da[i] - r.db[i]),
+                         Math.abs(r.da[i + 1] - r.db[i + 1]),
+                         Math.abs(r.da[i + 2] - r.db[i + 2]));
+        if (d > 48) bad++;
+      }
+      return 100 * bad / (W * H);
+    }
+
+    function px(data, x, y) {
+      var o = (y * W + x) * 4;
+      return [data[o], data[o + 1], data[o + 2]];
+    }
+    function near(c1, c2, tol) {
+      return Math.abs(c1[0] - c2[0]) <= tol &&
+             Math.abs(c1[1] - c2[1]) <= tol &&
+             Math.abs(c1[2] - c2[2]) <= tol;
+    }
+
+    async function fixture(name, ops, probes, tolPct) {
+      var res = await VB.replayJournal(ops);
+      var r = renderBoth(res.project);
+      var pct = diffPct(r);
+      check(name + " pixel diff " + pct.toFixed(2) + "% <= " + tolPct + "%",
+            pct <= tolPct, pct.toFixed(2) + "%");
+      (probes || []).forEach(function (p) {
+        var ca = px(r.da, p.x, p.y), cb = px(r.db, p.x, p.y);
+        check(name + " topology @" + p.x + "," + p.y + " (" + p.what + ")",
+              near(ca, cb, 64),
+              "2d rgb(" + ca + ") vs pixi rgb(" + cb + ")");
+      });
+      shot(r.a, name + " · 2D");
+      shot(r.b, name + " · pixi");
+      return r;
+    }
+
+    var blue = { r: 102, g: 204, b: 255, a: 255 };
+    var red = { r: 204, g: 60, b: 60, a: 255 };
+    var blk = { width: 40, color: { r: 0, g: 0, b: 0, a: 255 } };
+    var NEW = { op: "new", width: 11000, height: 8000 };
+
+    // 1. solid rect + stroked oval
+    await fixture("rect+oval", [NEW,
+      { op: "rect", x0: 1000, y0: 1000, x1: 5000, y1: 4000, fill: red, line: blk },
+      { op: "oval", x0: 6000, y0: 1500, x1: 9500, y1: 4500, fill: blue, line: blk }
+    ], [
+      { x: 150, y: 120, what: "rect fill" },
+      { x: 385, y: 150, what: "oval fill" },
+      { x: 30, y: 30, what: "empty stage" }
+    ], 1.5);
+
+    // 2. fill with an island (hole): brush ring — hole center must be
+    // stage-white in BOTH (the even-odd bridge)
+    var ring = [];
+    for (var i = 0; i <= 40; i++) {
+      var ang = i / 40 * Math.PI * 2;
+      ring.push({ x: Math.round(4500 + 2200 * Math.cos(ang)),
+                  y: Math.round(3500 + 2200 * Math.sin(ang)) });
+    }
+    await fixture("ring hole", [NEW,
+      { op: "brush", points: ring, radius: 420, color: blue }
+    ], [
+      { x: 225, y: 175, what: "HOLE center stays empty" },
+      { x: 225, y: 68, what: "ring tube filled" }
+    ], 1.5);
+
+    // 3. pencil + bucket + hairline at low zoom
+    await fixture("pencil+bucket", [NEW,
+      { op: "rect", x0: 1500, y0: 1500, x1: 8000, y1: 6000, fill: blue, line: blk },
+      { op: "pencil", points: [{ x: 1500, y: 3700 }, { x: 8000, y: 3900 }],
+        style: { width: 20, color: { r: 200, g: 40, b: 40, a: 255 } } },
+      { op: "bucket", x: 4700, y: 5000, color: red }
+    ], [
+      { x: 235, y: 130, what: "upper region stays blue" },
+      { x: 235, y: 250, what: "bucketed region red" }
+    ], 1.6);
+
+    // 4. linear + radial gradients (texture-exact path)
+    var lin = VB.materialDefaults("linear");
+    lin.matrix = { sx: 0.14, sy: 0.14, r0: 0.05, r1: -0.05, tx: 2800, ty: 2600 };
+    lin.gradient.stops = [
+      { ratio: 0, color: { r: 0, g: 0, b: 0, a: 255 } },
+      { ratio: 255, color: { r: 255, g: 255, b: 255, a: 255 } }];
+    var rad = VB.materialDefaults("radial");
+    rad.matrix = { sx: 0.12, sy: 0.09, r0: 0, r1: 0, tx: 7400, ty: 2800 };
+    await fixture("gradients", [NEW,
+      { op: "rect", x0: 800, y0: 800, x1: 4800, y1: 4400, fill: lin, line: null },
+      { op: "oval", x0: 5400, y0: 900, x1: 9400, y1: 4700, fill: rad, line: null }
+    ], [
+      { x: 90, y: 130, what: "linear dark end" },
+      { x: 200, y: 130, what: "linear light end" },
+      { x: 370, y: 140, what: "radial center" }
+    ], 2.5);
+
+    // 5. matcap fill (sprite upload of the CPU pipeline)
+    var mc = VB.materialDefaults("matcap");
+    mc.matcap = "studio"; mc.bumpScale = 120; mc.blurPx = 2;
+    await fixture("matcap", [NEW,
+      { op: "brush", points: [{ x: 2500, y: 3000 }, { x: 5000, y: 2400 },
+                              { x: 7000, y: 3600 }],
+        radius: 700, color: blue },
+      { op: "fillStyle", index: 0, style: mc }
+    ], [
+      { x: 240, y: 150, what: "matcap shaded interior" },
+      { x: 60, y: 60, what: "outside stays empty" }
+    ], 2.5);
+
+    // 6. text block (embedded fixture font, wrap + holes in glyphs)
+    var ttf = VB.parseTTF(window.VBTTFFixture.bytes());
+    var tdoc = new VB.VBDocument();
+    tdoc.width = 11000; tdoc.height = 8000;
+    VB.textApplyOp(tdoc, VB.buildTextOp(ttf, { name: "VBTest" }, "AB AB\nD",
+      800, { r: 20, g: 60, b: 200, a: 255 }, 1200, 1500, 4000, 0, 0));
+    var tproj = VB.wrapDoc(tdoc);
+    var rT = renderBoth(tproj);
+    var pctT = diffPct(rT);
+    check("text pixel diff " + pctT.toFixed(2) + "% <= 1.5%", pctT <= 1.5,
+          pctT.toFixed(2) + "%");
+    shot(rT.a, "text · 2D"); shot(rT.b, "text · pixi");
+
+    var summary = "PIXI PARITY DONE pass=" + pass + " fail=" + fail;
+    log(""); log(summary, fail ? "fail" : "pass");
+    document.title = summary;
+    document.getElementById("out").textContent = out.join("\n");
+  }
+
+  run().catch(function (err) {
+    document.title = "PIXI PARITY ERR";
+    log("ERROR " + err.message + " :: " +
+        (err.stack || "").split("\n").slice(0, 4).join(" | "), "fail");
+    document.getElementById("out").textContent = out.join("\n");
+  });
+})();
+</script>
+</body></html>

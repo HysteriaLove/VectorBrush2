@@ -212,6 +212,18 @@
     if (chain.closed) ctx.closePath();
   }
 
+  /** Overlay-canvas frame prep when the Pixi backend draws the
+   *  content beneath: clear, then set the stage transform so tool
+   *  overlays and debug decorations keep drawing in twips. */
+  function applyViewTransform(ctx, view) {
+    var canvas = ctx.canvas;
+    var dpr = view.dpr || 1;
+    var s = view.zoom * dpr / VB.TWIPS;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(s, 0, 0, s, view.panX * dpr, view.panY * dpr);
+  }
+
   function fillToCSS(style) {
     if (style.type === "solid") return VB.colorToCSS(style.color);
     // single-stop gradients, gpu-class fallbacks, legacy bitmap: the
@@ -226,5 +238,6 @@
   window.VB = window.VB || {};
   VB.render = render;
   VB.renderProject = renderProject;
+  VB.applyViewTransform = applyViewTransform;
   VB.drawTextBlock = drawText; // (ctx, doc, textBlock) — used by the text tool's live preview
 })();
