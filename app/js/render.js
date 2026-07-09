@@ -25,9 +25,10 @@
     setupStage(ctx, project.stage ? project.stage() : project, view,
                opts && opts.transparent);
     var layers = project.scene().layers;
+    var frame = project.cur ? project.cur.frame || 0 : 0;
     for (var i = layers.length - 1; i >= 0; i--) {
       if (!layers[i].visible) continue;
-      drawDocContent(ctx, layers[i].frames[0], view);
+      drawDocContent(ctx, VB.frameCell(layers[i], frame), view);
     }
   }
 

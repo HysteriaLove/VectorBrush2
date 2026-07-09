@@ -3015,6 +3015,71 @@
     log("  VISUAL EXCEPTION: " + (err && err.stack || err), "fail");
   }
 
+  // ============================ frames (step 3) ==============================
+  // Sequence/Roughs beat 1: a layer's frames[] is its sub-timeline,
+  // cur.frame the shared playhead. Frame ops journal like layer ops;
+  // shorter layers HOLD their last frame at any playhead (Flash).
+  log("");
+  log("frames:");
+  try {
+    var fse = new VB.Session({ width: 11000, height: 8000 });
+    fse.exec({ op: "pencil",
+               points: [{ x: 1000, y: 1000 }, { x: 5000, y: 1200 }],
+               style: { width: 20, color: { r: 0, g: 0, b: 0, a: 255 } } });
+    var f0edges = fse.project.activeCell().edges.length;
+    fse.exec({ op: "frameAdd", layer: 0 });
+    check("frameAdd appends a blank frame and moves the playhead",
+      fse.project.cur.frame === 1 && fse.project.frameCount() === 2 &&
+      fse.project.activeCell().edges.length === 0,
+      "frame " + fse.project.cur.frame + ", " +
+      fse.project.activeCell().edges.length + " edges");
+    fse.exec({ op: "brush",
+               points: [{ x: 2000, y: 4000 }, { x: 6000, y: 4400 }],
+               radius: 300, color: { r: 220, g: 40, b: 40, a: 255 } });
+    var baseLayer = fse.project.scene().layers[0];
+    check("art lands on frame 2 only",
+      baseLayer.frames[1].edges.length > 0 &&
+      baseLayer.frames[0].edges.length === f0edges,
+      baseLayer.frames[1].edges.length + " / " + baseLayer.frames[0].edges.length);
+    fse.exec({ op: "frameSelect", index: 0 });
+    check("frameSelect returns to frame 1's art",
+      fse.project.cur.frame === 0 &&
+      fse.project.activeCell().edges.length === f0edges);
+
+    // a single-frame layer holds its art at any playhead
+    fse.exec({ op: "layerAdd" }); // inserts ABOVE and selects (index 0)
+    fse.exec({ op: "frameSelect", index: 1 });
+    check("short layers hold their last frame at the playhead",
+      fse.project.activeCell() ===
+      fse.project.scene().layers[0].frames[0] &&
+      fse.project.frameCount() === 2);
+
+    var fRep = await VB.replayJournal(JSON.parse(JSON.stringify(fse.journal)));
+    var frameSig = function (p) {
+      return p.scene().layers.map(function (l) {
+        return l.frames.map(function (cell) {
+          return JSON.stringify(cell.edges);
+        }).join("#");
+      }).join("|") + "@" + p.cur.frame;
+    };
+    check("frame ops replay byte-exact",
+      frameSig(fRep.project) === frameSig(fse.project));
+
+    fse.exec({ op: "frameRemove", layer: 1, index: 1 });
+    check("frameRemove drops the frame",
+      fse.project.scene().layers[1].frames.length === 1);
+    fse.history.undo();
+    check("undo restores the removed frame with its art",
+      fse.project.scene().layers[1].frames.length === 2 &&
+      fse.project.scene().layers[1].frames[1].edges.length > 0);
+    fse.exec({ op: "frameRemove", layer: 0, index: 0 });
+    check("a layer never goes frameless",
+      fse.project.scene().layers[0].frames.length === 1);
+  } catch (err) {
+    fail++;
+    log("  FRAMES EXCEPTION: " + (err && err.stack || err), "fail");
+  }
+
   // ============================== Actors =====================================
   // Step-2 beat 1 (Implementation.md §2): the pose → symbol → drawing
   // tree as journaled ops (ids carried IN the op — live and replay build

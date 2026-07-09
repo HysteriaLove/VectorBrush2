@@ -37,7 +37,7 @@
     this.height = height || 400 * 20;
     this.background = { r: 255, g: 255, b: 255, a: 255 };
     this.scenes = [new Scene("Scene 1", this.newCell())];
-    this.cur = { scene: 0, layer: 0 };
+    this.cur = { scene: 0, layer: 0, frame: 0 };
     // The GLOBAL 2DMaterial library (Flash's library, not per-layer):
     // crafted material definitions usable on any layer or scene. Cells
     // keep their own fills[] (the SWF wire grammar); painting with a
@@ -165,7 +165,34 @@
     return layers[Math.min(this.cur.layer, layers.length - 1)];
   };
   Project.prototype.activeCell = function () {
-    return this.activeLayer().frames[0];
+    return VB.frameCell(this.activeLayer(), this.cur.frame || 0);
+  };
+  /** Longest sub-timeline in the active scene (≥ 1). */
+  Project.prototype.frameCount = function () {
+    return this.scene().layers.reduce(function (n, l) {
+      return Math.max(n, l.frames.length);
+    }, 1);
+  };
+  /** Appends a blank frame cell to a layer and moves the playhead to
+   *  it. Shorter layers keep holding their last frame. */
+  Project.prototype.addFrame = function (layerIndex) {
+    var layers = this.scene().layers;
+    var l = layers[Math.min(layerIndex || 0, layers.length - 1)];
+    l.frames.push(this.newCell());
+    this.cur.frame = l.frames.length - 1;
+    return this.cur.frame;
+  };
+  Project.prototype.removeFrame = function (layerIndex, index) {
+    var layers = this.scene().layers;
+    var l = layers[Math.min(layerIndex || 0, layers.length - 1)];
+    if (l.frames.length <= 1) return false; // a layer never goes frameless
+    if (index < 0 || index >= l.frames.length) return false;
+    l.frames.splice(index, 1);
+    this.cur.frame = Math.min(this.cur.frame, this.frameCount() - 1);
+    return true;
+  };
+  Project.prototype.selectFrame = function (index) {
+    this.cur.frame = Math.max(0, Math.min(this.frameCount() - 1, index));
   };
   /** Stage rect for the renderers: the actor canvas in edit mode. */
   Project.prototype.stage = function () {
@@ -258,8 +285,15 @@
     return p;
   }
 
+  /** The cell a layer SHOWS at playhead `frame`: its own frame, or its
+   *  last one held (Flash's frame-hold). */
+  function frameCell(layer, frame) {
+    return layer.frames[Math.min(frame || 0, layer.frames.length - 1)];
+  }
+
   window.VB = window.VB || {};
   VB.Project = Project;
   VB.wrapDoc = wrapDoc;
+  VB.frameCell = frameCell;
   VB.projectCollectMaterials = collectMaterials;
 })();

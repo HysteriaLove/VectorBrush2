@@ -109,6 +109,23 @@
     c.project.selectScene(op.index);
     c.sync();
   });
+  // frames (Sequence/Roughs step 3): a layer's frames[] is its
+  // sub-timeline; cur.frame is the shared playhead column. Layers
+  // shorter than the playhead HOLD their last frame (Flash).
+  defineOp("frameAdd", function (c, op) {
+    c.history.push(c.project);
+    c.project.addFrame(op.layer);
+    c.sync();
+  });
+  defineOp("frameRemove", function (c, op) {
+    c.history.push(c.project);
+    c.project.removeFrame(op.layer, op.index);
+    c.sync();
+  });
+  defineOp("frameSelect", function (c, op) {
+    c.project.selectFrame(op.index);
+    c.sync();
+  });
   defineOp("pencil", function (c, op) {
     c.history.push(c.project);
     VB.pencilCommit(c.doc, op.points, op.style,

@@ -638,6 +638,7 @@
       if (VB.assets) VB.assets.release(cellAssetKey(key));
     }
     var layers = project.scene().layers;
+    var frame = project.cur.frame || 0;
     var structure = project.cur.scene + "|" + layers.map(function (l) {
       return l.visible ? 1 : 0;
     }).join("");
@@ -647,7 +648,7 @@
       if (!layers[i].visible) continue;
       var key = project.cur.scene + ":" + i;
       live[key] = true;
-      var doc = layers[i].frames[0];
+      var doc = VB.frameCell(layers[i], frame);
       var hash = hashCell(doc);
       var st = surface._cells.get(key);
       var zoomStale = st && st.hasHairlines &&

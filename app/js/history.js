@@ -100,7 +100,8 @@
       project: true,
       width: target.width, height: target.height,
       background: JSON.parse(JSON.stringify(target.background)),
-      cur: { scene: target.cur.scene, layer: target.cur.layer },
+      cur: { scene: target.cur.scene, layer: target.cur.layer,
+             frame: target.cur.frame || 0 },
       materials: JSON.parse(JSON.stringify(target.materials || [])),
       editTarget: JSON.parse(JSON.stringify(target.editTarget || null)),
       actors: (target.actors || []).map(snapshotActor),
@@ -123,7 +124,8 @@
     target.width = snap.width;
     target.height = snap.height;
     target.background = snap.background;
-    target.cur = { scene: snap.cur.scene, layer: snap.cur.layer };
+    target.cur = { scene: snap.cur.scene, layer: snap.cur.layer,
+                   frame: snap.cur.frame || 0 };
     target.materials = JSON.parse(JSON.stringify(snap.materials || []));
     target.editTarget = JSON.parse(JSON.stringify(snap.editTarget || null));
     target.actors = (snap.actors || []).map(restoreActor);
