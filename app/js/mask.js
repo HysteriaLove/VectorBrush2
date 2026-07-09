@@ -229,7 +229,20 @@
         return l2 - l1;
       });
       var params = [0.5, 0.3, 0.7];
-      var nudges = [60, 25, 8, 2.5, 1];
+      // Deep nudges only where they can fit: 2*area/perimeter estimates
+      // the face's thickness, and a nudge over half of it is doomed on
+      // ribbon faces (stroke outlines - the common case), which would
+      // pay 3 failed containment walks per candidate before the fine
+      // nudges land. Thick faces keep the full deep-first ladder.
+      var perim = 0;
+      for (var pi0 = 0; pi0 < f.outer.length; pi0++) {
+        var pe = doc.edges[f.outer[pi0].edge];
+        perim += Math.hypot(pe.bx - pe.ax, pe.by - pe.ay);
+      }
+      var thick = perim > 0 ? 2 * Math.abs(f.area) / perim : 0;
+      var nudges = [60, 25, 8, 2.5, 1].filter(function (n) {
+        return n <= 2.5 || n <= thick / 2;
+      });
       for (var oi = 0; oi < order.length && oi < 5; oi++) {
         var h = order[oi];
         var e = doc.edges[h.edge];
