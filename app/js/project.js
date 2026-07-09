@@ -44,6 +44,10 @@
     // library material copies the definition into the target cell,
     // deduped by sameFill.
     this.materials = [];
+    // The Actors library (actors.js): poses → symbols → drawings, all
+    // cells y2kvector documents. Rides the journal; not yet part of the
+    // .y2kvector project-file body.
+    this.actors = [];
   }
 
   function sameStyle(a, b) {

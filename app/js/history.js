@@ -41,6 +41,56 @@
     doc.texts = snap.texts || [];
   }
 
+  // Actor snapshots: poses → nested symbols → drawings, each cell via
+  // snapshotDoc — actor structure ops are single undo steps like layers.
+  function snapshotSymbol(s) {
+    return {
+      id: s.id, name: s.name,
+      symbols: s.symbols.map(snapshotSymbol),
+      drawings: s.drawings.map(function (d) {
+        return { id: d.id, name: d.name, cell: snapshotDoc(d.cell) };
+      }),
+      cur: { drawing: s.cur.drawing }
+    };
+  }
+
+  function restoreSymbol(s) {
+    return {
+      id: s.id, name: s.name,
+      symbols: s.symbols.map(restoreSymbol),
+      drawings: s.drawings.map(function (d) {
+        var cell = new VB.Y2KVectorDocument();
+        restoreDoc(cell, d.cell);
+        return { id: d.id, name: d.name, cell: cell };
+      }),
+      cur: { drawing: s.cur.drawing }
+    };
+  }
+
+  function snapshotActor(a) {
+    return {
+      id: a.id, name: a.name, width: a.width, height: a.height,
+      poses: a.poses.map(function (p) {
+        return { id: p.id, name: p.name, cell: snapshotDoc(p.cell),
+                 symbols: p.symbols.map(snapshotSymbol) };
+      }),
+      cur: { pose: a.cur.pose }
+    };
+  }
+
+  function restoreActor(a) {
+    return {
+      id: a.id, name: a.name, width: a.width, height: a.height,
+      poses: a.poses.map(function (p) {
+        var cell = new VB.Y2KVectorDocument();
+        restoreDoc(cell, p.cell);
+        return { id: p.id, name: p.name, cell: cell,
+                 symbols: p.symbols.map(restoreSymbol) };
+      }),
+      cur: { pose: a.cur.pose }
+    };
+  }
+
   // A snapshot target is either a bare Y2KVectorDocument or a whole VB.Project
   // (scenes -> layers -> frame cells). Undo/redo restores the entire
   // structure, so layer add/delete/reorder are single undo steps.
@@ -52,6 +102,7 @@
       background: JSON.parse(JSON.stringify(target.background)),
       cur: { scene: target.cur.scene, layer: target.cur.layer },
       materials: JSON.parse(JSON.stringify(target.materials || [])),
+      actors: (target.actors || []).map(snapshotActor),
       scenes: target.scenes.map(function (sc) {
         return {
           name: sc.name,
@@ -73,6 +124,7 @@
     target.background = snap.background;
     target.cur = { scene: snap.cur.scene, layer: snap.cur.layer };
     target.materials = JSON.parse(JSON.stringify(snap.materials || []));
+    target.actors = (snap.actors || []).map(restoreActor);
     target.scenes = snap.scenes.map(function (sc) {
       return {
         name: sc.name,

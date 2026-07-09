@@ -47,6 +47,7 @@
 <script src="../js/journal.js"></script>
 <script src="../js/history.js"></script>
 <script src="../js/project.js"></script>
+<script src="../js/actors.js"></script>
 <script src="../js/text.js"></script>
 <script src="../js/debug.js"></script>
 <script src="../js/pencil.js"></script>
@@ -3011,6 +3012,126 @@
   } catch (err) {
     fail++;
     log("  VISUAL EXCEPTION: " + (err && err.stack || err), "fail");
+  }
+
+  // ============================== Actors =====================================
+  // Step-2 beat 1 (Implementation.md §2): the pose → symbol → drawing
+  // tree as journaled ops (ids carried IN the op — live and replay build
+  // identical structures), cells as y2kvector docs the whole tool suite
+  // applies to, and the .y2kactor interchange (ids regenerate on import).
+  log("");
+  log("actors:");
+  try {
+    var ase = new VB.Session({ width: 11000, height: 8000 });
+    ase.exec({ op: "actorAdd", id: "actor_t1", poseId: "pose_t1" });
+    ase.exec({ op: "actorAdd", id: "actor_t2", poseId: "pose_t2",
+               name: "Hero", width: 15360, height: 10240 });
+    var aT1 = VB.actorById(ase.project, "actor_t1");
+    var aT2 = VB.actorById(ase.project, "actor_t2");
+    check("actors land in the project library with auto/explicit names",
+      ase.project.actors.length === 2 &&
+      aT1.name === "actor001" && aT2.name === "Hero" &&
+      aT1.poses.length === 1 && aT1.poses[0].name === "pose_01" &&
+      aT1.poses[0].cell.width === 512 * 20 && aT2.poses[0].cell.width === 15360,
+      aT1.name + "/" + aT2.name);
+
+    ase.exec({ op: "poseAdd", actor: "actor_t1", id: "pose_t1b" });
+    ase.exec({ op: "symbolAdd", actor: "actor_t1", pose: "pose_t1",
+               id: "sym_eyes", drawingId: "drw_e1", name: "eyes" });
+    ase.exec({ op: "symbolAdd", actor: "actor_t1", parent: "sym_eyes",
+               id: "sym_pupils", drawingId: "drw_p1", name: "pupils" });
+    ase.exec({ op: "drawingAdd", actor: "actor_t1", symbol: "sym_pupils",
+               id: "drw_p2" });
+    ase.exec({ op: "drawingSelect", actor: "actor_t1", symbol: "sym_pupils",
+               index: 0 });
+    var pupils = VB.actorFindSymbol(aT1, "sym_pupils");
+    check("symbols nest and drawings accumulate",
+      aT1.poses.length === 2 &&
+      VB.actorFindSymbol(aT1, "sym_eyes").symbol.symbols.length === 1 &&
+      pupils.symbol.drawings.length === 2 &&
+      pupils.symbol.cur.drawing === 0 &&
+      pupils.symbol.drawings[1].name === "drawing_02",
+      JSON.stringify(pupils && pupils.symbol.cur));
+
+    // art in an actor cell: the SAME planar-map pipeline
+    var pupilCell = pupils.symbol.drawings[0].cell;
+    VB.pencilCommit(pupilCell, [{ x: 1000, y: 1000 }, { x: 6000, y: 1400 }],
+                    { width: 20, color: { r: 0, g: 0, b: 0, a: 255 } });
+    VB.brushStroke(pupilCell, [{ x: 2000, y: 3000 }, { x: 6000, y: 3300 }],
+                   300, { r: 220, g: 40, b: 40, a: 255 });
+    check("actor drawing cells take real geometry",
+      pupilCell.edges.length > 0 && VB.integrityReport(pupilCell).length === 0,
+      pupilCell.edges.length + " edges");
+
+    // structural replay determinism (art ops inside cells journal in a
+    // later beat; structure must already replay bit-for-bit)
+    var aRep = await VB.replayJournal(JSON.parse(JSON.stringify(
+      ase.journal.filter(function (o) { return o.op !== "load"; }))));
+    var stripCells = function (plain) {
+      var noCells = JSON.parse(JSON.stringify(plain));
+      (function strip(o) {
+        if (o && typeof o === "object") {
+          if (o.cell) o.cell = "CELL";
+          Object.keys(o).forEach(function (k) { strip(o[k]); });
+        }
+      })(noCells);
+      return JSON.stringify(noCells);
+    };
+    check("actor structure replays identically",
+      stripCells(aRep.project.actors.map(VB.actorToPlain)) ===
+      stripCells(ase.project.actors.map(VB.actorToPlain)));
+
+    // undo: actorRemove is one step back to the full structure
+    var beforeRemove = stripCells(ase.project.actors.map(VB.actorToPlain));
+    ase.exec({ op: "actorRemove", actor: "actor_t1" });
+    check("actorRemove drops the actor", ase.project.actors.length === 1);
+    ase.history.undo();
+    check("undo restores the actor tree (cells included)",
+      stripCells(ase.project.actors.map(VB.actorToPlain)) === beforeRemove &&
+      VB.actorById(ase.project, "actor_t1")
+        .poses[0].symbols[0].symbols[0].drawings[0].cell.edges.length ===
+        pupilCell.edges.length,
+      ase.project.actors.length + " actors after undo");
+
+    // .y2kactor: export → import regenerates every id, art byte-identical
+    var bytesA = VB.encodeY2KActor(VB.actorById(ase.project, "actor_t1"));
+    var imported = VB.decodeY2KActor(bytesA);
+    check("y2kactor import regenerates ids",
+      imported.id !== "actor_t1" &&
+      imported.poses[0].id !== "pose_t1" &&
+      imported.poses[0].symbols[0].id !== "sym_eyes" &&
+      imported.poses[0].symbols[0].symbols[0].drawings[0].id !== "drw_p1",
+      imported.id);
+    ase.exec({ op: "actorImport", actor: imported });
+    var impLive = VB.actorById(ase.project, imported.id);
+    check("actorImport lands the copy with identical art",
+      ase.project.actors.length === 3 &&
+      JSON.stringify(impLive.poses[0].symbols[0].symbols[0].drawings[0]
+        .cell.edges) === JSON.stringify(pupilCell.edges),
+      ase.project.actors.length + " actors");
+    // full-cell replay equality on the IMPORTED actor: its art travels
+    // INSIDE the actorImport op (t1's direct-drawn art journals in the
+    // beat-2 editing slice)
+    var repImp = await VB.replayJournal(JSON.parse(JSON.stringify(ase.journal)));
+    check("actorImport replays byte-exact (art included)",
+      JSON.stringify(VB.actorToPlain(
+        VB.actorById(repImp.project, imported.id))) ===
+      JSON.stringify(VB.actorToPlain(impLive)));
+
+    // guards: the last pose / last drawing stay
+    ase.exec({ op: "poseRemove", actor: "actor_t2", pose: "pose_t2" });
+    check("the last pose cannot be removed",
+      VB.actorById(ase.project, "actor_t2").poses.length === 1);
+    check("wrong-version y2kactor is rejected", (function () {
+      try {
+        VB.decodeY2KActor(new TextEncoder().encode(
+          '{"format":"y2kactor","version":9,"actor":{}}'));
+        return false;
+      } catch (e) { return /version 9/.test(e.message); }
+    })());
+  } catch (err) {
+    fail++;
+    log("  ACTORS EXCEPTION: " + (err && err.stack || err), "fail");
   }
 
   // =========================== streaming skeleton ============================
