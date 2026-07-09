@@ -2047,6 +2047,12 @@
       toolT2.drag && toolT2.drag.kind === "boxtab",
       toolT2.drag && toolT2.drag.kind);
     toolT2.onMove({ x: 2900, y: 3000 + (bbT.y0 + bbT.y1) / 2 });
+    // the frame must follow the reflowing block LIVE, before release:
+    // pre-drag right edge was 2000+1776; wrapped line 1 = "AB " =
+    // 368+320+400 = 1088 local (trailing wrap space included)
+    var fqLive = toolT2.frameQuad();
+    check("transform frame resizes in realtime during a tab drag",
+      Math.abs(fqLive[1].x - 3088) < 4, JSON.stringify(fqLive[1]));
     toolT2.onUp({ x: 2900, y: 3000 + (bbT.y0 + bbT.y1) / 2 });
     // and the BOTTOM tab grows the box height in the same session
     var bbT2 = toolT2.box;

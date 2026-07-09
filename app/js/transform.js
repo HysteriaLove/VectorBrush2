@@ -126,14 +126,30 @@
       });
     }
 
+    /** The frame's CURRENT box + pristine->world map. During a text
+     *  box-tab drag the frame follows the reflowing working block LIVE
+     *  (the session box only rebases on release). */
+    function liveFrame() {
+      if (self.drag && self.drag.kind === "boxtab" &&
+          self.float && self.float.textBlock) {
+        var wb = VB.textBoxBounds(app.doc, self.float.textBlock);
+        if (wb) {
+          var tm = matMul(gestureM(), self.float.textBlock.matrix);
+          return { box: wb, m: tm };
+        }
+      }
+      return self.box ? { box: self.box, m: composedM() } : null;
+    }
+
     /** The frame's world-space corners: the pristine box mapped through
      *  the session — the box ROTATES WITH the content and keeps that
      *  orientation until the selection is dropped (Flash's behavior),
      *  instead of refitting to an upright bbox after every gesture. */
     self.frameQuad = function (total) {
-      var b = self.box;
-      if (!b) return null;
-      var m = total || composedM();
+      var lf = liveFrame();
+      if (!lf) return null;
+      var b = lf.box;
+      var m = total || lf.m;
       return [applyPt(m, b.x0, b.y0), applyPt(m, b.x1, b.y0),
               applyPt(m, b.x1, b.y1), applyPt(m, b.x0, b.y1)];
     };
@@ -309,8 +325,8 @@
     // Handles live in PRISTINE space (ax/ay say which frame axes the
     // handle scales); their world positions come from the session
     // matrix, so they ride the rotated frame.
-    function handles() {
-      var b = self.box;
+    function handles(bOpt) {
+      var b = bOpt || self.box;
       if (!b) return [];
       var mx = (b.x0 + b.x1) / 2, my = (b.y0 + b.y1) / 2;
       return [
@@ -334,8 +350,8 @@
 
     /** The rotation handle: a knob floating a fixed screen distance
      *  outward from the frame's mid-top edge (it rides the rotation). */
-    function rotKnob(m) {
-      var b = self.box;
+    function rotKnob(m, bOpt) {
+      var b = bOpt || self.box;
       if (!b) return null;
       var mx = (b.x0 + b.x1) / 2;
       var P = applyPt(m, mx, b.y0);
@@ -818,31 +834,38 @@
         });
         ctx.stroke();
       }
-      // box + handles: the pristine frame mapped through the session —
-      // it stays glued to the content, rotation and all; the handle
-      // squares themselves stay screen-aligned (Flash's look)
-      var b2 = self.box;
+      // box + handles: the frame mapped through the session — glued to
+      // the content, rotation and all; during a text box-tab drag it
+      // follows the reflowing block LIVE (liveFrame), so the input area
+      // resizes in realtime, not just on release
+      var lf = liveFrame();
+      if (!lf) return;
+      var b2 = lf.box;
+      var bmp = function (x, y) {
+        var lm = m ? matMul(m, lf.m) : lf.m;
+        return applyPt(lm, x, y);
+      };
       var corners = [[b2.x0, b2.y0], [b2.x1, b2.y0], [b2.x1, b2.y1], [b2.x0, b2.y1]];
       ctx.strokeStyle = "rgba(0,0,0,0.85)";
       ctx.lineWidth = hair;
       ctx.beginPath();
       corners.forEach(function (c, i) {
-        var p = mp(c[0], c[1]);
+        var p = bmp(c[0], c[1]);
         if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
       });
       ctx.closePath();
       ctx.stroke();
-      var hs = handles();
+      var hs = handles(b2);
       var r = 4 * hair;
       // text sessions: corners free-transform, mid-edges are BOX TABS
       // (flat bars — sides re-wrap the width, top/bottom set the size)
       var isText = self.items && self.items.textIndex != null;
       hs.forEach(function (h, hi) {
-        var p = mp(h.x, h.y);
+        var p = bmp(h.x, h.y);
         if (isText && hi % 2 === 1) {
           var ci = (hi - 1) / 2;
-          var ca = mp(corners[ci][0], corners[ci][1]);
-          var cb = mp(corners[(ci + 1) % 4][0], corners[(ci + 1) % 4][1]);
+          var ca = bmp(corners[ci][0], corners[ci][1]);
+          var cb = bmp(corners[(ci + 1) % 4][0], corners[(ci + 1) % 4][1]);
           var dx = cb.x - ca.x, dy = cb.y - ca.y;
           var len = Math.hypot(dx, dy) || 1;
           var ux = dx / len * 8 * hair, uy = dy / len * 8 * hair;
@@ -858,7 +881,7 @@
         }
       });
       // rotation knob on a stem off the mid-top edge
-      var knob = rotKnob(total);
+      var knob = rotKnob(m ? matMul(m, lf.m) : lf.m, b2);
       if (knob) {
         ctx.strokeStyle = "rgba(0,0,0,0.85)";
         ctx.lineWidth = hair;
