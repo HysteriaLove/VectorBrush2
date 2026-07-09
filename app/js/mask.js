@@ -230,6 +230,26 @@
       return VB.probeForCycle(doc.edges, f.outer); // last resort
     }
 
+    // Pre-op fill queries walk only the queried fill's own boundary:
+    // one boundary-list pass here replaces a whole-document scan per
+    // face stamp (there is one query per outside-mask face).
+    var preBoundary = [null];
+    for (var pf = 1; pf <= preOp.fills.length; pf++) preBoundary.push([]);
+    for (var pei = 0; pei < preOp.edges.length; pei++) {
+      var pe2 = preOp.edges[pei];
+      if (pe2.fill0 !== pe2.fill1) {
+        if (pe2.fill0 > 0) preBoundary[pe2.fill0].push(pe2);
+        if (pe2.fill1 > 0) preBoundary[pe2.fill1].push(pe2);
+      }
+    }
+    function preOpFillAt(x, y) {
+      for (var qf = preOp.fills.length; qf >= 1; qf--) {
+        if (preBoundary[qf].length &&
+            VB.geom.fillParity(preBoundary[qf], qf, x, y)) return qf;
+      }
+      return 0;
+    }
+
     // One decision per face.
     var diag = [];
     VB._maskDiag = diag;
@@ -237,7 +257,7 @@
       var probe = faceProbe(f);
       var inMask = insideMask(probe.x, probe.y);
       var stamp = inMask ? stampFor(probe.x, probe.y)
-                         : VB.geom.fillAt(preOp, probe.x, probe.y);
+                         : preOpFillAt(probe.x, probe.y);
       diag.push({
         probe: { x: Math.round(probe.x), y: Math.round(probe.y) },
         area: Math.round(f.area), inMask: inMask, stamp: stamp,

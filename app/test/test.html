@@ -63,6 +63,8 @@
 <script src="userlog3.js"></script>
 <script src="userlog4.js"></script>
 <script src="userlog20.js"></script>
+<script src="userlog29.js"></script>
+<script src="userlog30.js"></script>
 <script>
 (async function () {
   "use strict";
@@ -862,6 +864,30 @@
     });
     check("log20 leaves no micro-fragments", micro20.length === 0,
       micro20.length + " sub-5tw records");
+  })();
+
+  // ======================= user stress logs 29/30 ================================
+  // Tripwires for the mask-perf reland class: log 29 caught bbox-shaped
+  // fill clipping from an earlier optimization batch; log 30 is the
+  // brush+eraser session behind the pixi fill-rule fix. Both must
+  // replay with clean integrity and sane structure, forever.
+  log("stress logs 29/30:");
+  await (async function () {
+    var r29 = await VB.replayJournal(window.VBUserLog29.ops);
+    check("log29 replays consistent",
+      VB.integrityReport(r29.doc).length === 0,
+      VB.integrityReport(r29.doc)[0]);
+    var r30 = await VB.replayJournal(window.VBUserLog30.ops);
+    check("log30 replays consistent",
+      VB.integrityReport(r30.doc).length === 0,
+      VB.integrityReport(r30.doc)[0]);
+    check("log30 keeps its scribble (spot probes)",
+      r30.doc.edges.length > 300 &&
+      VB.geom.fillAt(r30.doc, 150 * 20, 100 * 20) === 1 &&
+      VB.geom.fillAt(r30.doc, 420 * 20, 350 * 20) === 0,
+      r30.doc.edges.length + " edges, " +
+      VB.geom.fillAt(r30.doc, 150 * 20, 100 * 20) + "/" +
+      VB.geom.fillAt(r30.doc, 420 * 20, 350 * 20));
   })();
 
   // ======================= 2DMaterials: profiler + persistence ==================
