@@ -61,10 +61,7 @@
     for (var f = 1; f < fillPaths.length; f++) {
       var chains = fillPaths[f];
       if (!chains || chains.length === 0) continue;
-      ctx.beginPath();
-      for (var c = 0; c < chains.length; c++) tracePath(ctx, chains[c], true);
-      ctx.fillStyle = fillToCSS(doc.fills[f - 1]);
-      ctx.fill("evenodd");
+      paintFill(ctx, doc.fills[f - 1], chains);
     }
 
     for (var l = 1; l < strokePaths.length; l++) {
@@ -137,12 +134,81 @@
     if (close && chain.closed) ctx.closePath();
   }
 
+  /** Paint one fill style's chains — the Canvas2D material backends.
+   *  Gradients render EXACTLY: the context takes the style's SWF
+   *  matrix (gradient-square space), the path is traced through the
+   *  matrix INVERSE, and the paint server lives in square coords —
+   *  correct for sheared/elliptical gradients where mapping the two
+   *  endpoints would not be. gpu-class materials (matcap) render
+   *  their declared fallback here; the WebGPU backend replaces that
+   *  per-region result when available (stage 2). */
+  function paintFill(ctx, style, chains) {
+    if (style && (style.type === "linear" || style.type === "radial") &&
+        style.gradient && style.gradient.stops.length > 1) {
+      var gm = style.matrix || { sx: 1, sy: 1, r0: 0, r1: 0, tx: 0, ty: 0 };
+      // canvas transform(a,b,c,d,e,f) with SWF MATRIX fields:
+      // x' = sx·x + r1·y + tx ; y' = r0·x + sy·y + ty
+      var det = gm.sx * gm.sy - gm.r0 * gm.r1;
+      if (det && isFinite(det)) {
+        var inv = {
+          a: gm.sy / det, b: -gm.r0 / det,
+          c: -gm.r1 / det, d: gm.sx / det
+        };
+        ctx.save();
+        ctx.transform(gm.sx, gm.r0, gm.r1, gm.sy, gm.tx, gm.ty);
+        ctx.beginPath();
+        for (var c0 = 0; c0 < chains.length; c0++) {
+          traceMapped(ctx, chains[c0], gm, inv);
+        }
+        var half = VB.GRAD_HALF || 16384;
+        var grad = style.type === "linear"
+          ? ctx.createLinearGradient(-half, 0, half, 0)
+          : ctx.createRadialGradient(0, 0, 0, 0, 0, half);
+        var stops = style.gradient.stops;
+        for (var si = 0; si < stops.length; si++) {
+          grad.addColorStop(stops[si].ratio / 255,
+                            VB.colorToCSS(stops[si].color));
+        }
+        ctx.fillStyle = grad;
+        ctx.fill("evenodd");
+        ctx.restore();
+        return;
+      }
+    }
+    ctx.beginPath();
+    for (var c1 = 0; c1 < chains.length; c1++) tracePath(ctx, chains[c1], true);
+    ctx.fillStyle = fillToCSS(style);
+    ctx.fill("evenodd");
+  }
+
+  function traceMapped(ctx, chain, gm, inv) {
+    function map(x, y) {
+      var dx = x - gm.tx, dy = y - gm.ty;
+      return { x: inv.a * dx + inv.c * dy, y: inv.b * dx + inv.d * dy };
+    }
+    var s0 = map(chain.sx, chain.sy);
+    ctx.moveTo(s0.x, s0.y);
+    for (var i = 0; i < chain.pts.length; i++) {
+      var p = chain.pts[i];
+      var e = map(p.x, p.y);
+      if (p.cx === null) ctx.lineTo(e.x, e.y);
+      else {
+        var cc = map(p.cx, p.cy); // quad controls map exactly under affine
+        ctx.quadraticCurveTo(cc.x, cc.y, e.x, e.y);
+      }
+    }
+    if (chain.closed) ctx.closePath();
+  }
+
   function fillToCSS(style) {
     if (style.type === "solid") return VB.colorToCSS(style.color);
-    if ((style.type === "linear" || style.type === "radial") && style.gradient.stops.length) {
-      return VB.colorToCSS(style.gradient.stops[0].color); // degraded for now
+    // single-stop gradients, gpu-class fallbacks, legacy bitmap: the
+    // material's representative base color
+    if (VB.materialBaseColor) return VB.colorToCSS(VB.materialBaseColor(style));
+    if (style.gradient && style.gradient.stops.length) {
+      return VB.colorToCSS(style.gradient.stops[0].color);
     }
-    return "#808080"; // bitmap fills
+    return "#808080";
   }
 
   window.VB = window.VB || {};

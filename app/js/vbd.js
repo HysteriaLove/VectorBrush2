@@ -127,6 +127,77 @@
     return order;
   }
 
+  // 2DMaterial fill styles. The tag byte has been in the format since
+  // v1 (solid = 0), so extending the tag space needs no version bump:
+  // old files carry only tag 0 and decode unchanged.
+  //   0 solid  : rgba
+  //   1 linear : matrix (sx,r0,r1,sy as 16.16 + tx,ty s32 twips),
+  //              flags (spread<<6|interp<<4|stopCount), stops
+  //              (ratio u8 + rgba), focal s32 (×256, 0 for linear)
+  //   2 radial : same layout as linear
+  //   3 matcap : base rgba + bumpScale s32 tw + blurPx s32 (×100)
+  //              + resolution s32 (×100)
+  function writeFillStyle(w, f) {
+    if (f.type === "linear" || f.type === "radial") {
+      w.u8(f.type === "linear" ? 1 : 2);
+      var m = f.matrix || { sx: 1, sy: 1, r0: 0, r1: 0, tx: 0, ty: 0 };
+      s32w(w, Math.round(m.sx * 65536)); s32w(w, Math.round(m.r0 * 65536));
+      s32w(w, Math.round(m.r1 * 65536)); s32w(w, Math.round(m.sy * 65536));
+      s32w(w, Math.round(m.tx)); s32w(w, Math.round(m.ty));
+      var g = f.gradient || { spread: 0, interpolation: 0, stops: [] };
+      w.u8(((g.spread & 3) << 6) | ((g.interpolation & 3) << 4) |
+           (g.stops.length & 15));
+      for (var s = 0; s < (g.stops.length & 15); s++) {
+        w.u8(g.stops[s].ratio);
+        writeColor(w, g.stops[s].color);
+      }
+      s32w(w, Math.round((f.focal || 0) * 256));
+      return;
+    }
+    if (f.type === "matcap") {
+      w.u8(3);
+      writeColor(w, f.color);
+      s32w(w, Math.round(f.bumpScale || 0));
+      s32w(w, Math.round((f.blurPx || 0) * 100));
+      s32w(w, Math.round((f.resolution || 1) * 100));
+      return;
+    }
+    // solid — and legacy/unsupported (bitmap) baked to base color so
+    // the file stays valid everywhere
+    w.u8(0);
+    writeColor(w, f.type === "solid" ? f.color
+      : (VB.materialBaseColor ? VB.materialBaseColor(f)
+                              : { r: 128, g: 128, b: 128, a: 255 }));
+  }
+
+  function readFillStyle(r) {
+    var t = r.u8();
+    if (t === 0) return { type: "solid", color: readColor(r) };
+    if (t === 1 || t === 2) {
+      var m = { sx: s32r(r) / 65536, r0: s32r(r) / 65536,
+                r1: s32r(r) / 65536, sy: s32r(r) / 65536,
+                tx: s32r(r), ty: s32r(r) };
+      var flags = r.u8();
+      var stops = [];
+      for (var i = 0; i < (flags & 15); i++) {
+        stops.push({ ratio: r.u8(), color: readColor(r) });
+      }
+      var focal = s32r(r) / 256;
+      var st = { type: t === 1 ? "linear" : "radial", matrix: m,
+                 gradient: { spread: flags >> 6,
+                             interpolation: (flags >> 4) & 3,
+                             stops: stops } };
+      if (t === 2 && focal) st.focal = focal;
+      return st;
+    }
+    if (t === 3) {
+      return { type: "matcap", color: readColor(r),
+               bumpScale: s32r(r), blurPx: s32r(r) / 100,
+               resolution: s32r(r) / 100 };
+    }
+    throw new Error("Unknown VBD fill type " + t);
+  }
+
   // stats (optional) is filled with Flash-grammar record counts so the
   // debug panel can show exactly what the document costs on the wire.
   // The reusable cell payload: styles + shape records (+ text section).
@@ -137,10 +208,7 @@
                      (doc.fonts && doc.fonts.length));
     writeStyleCount(w, doc.fills.length);
     for (var i = 0; i < doc.fills.length; i++) {
-      var f = doc.fills[i];
-      if (f.type !== "solid") throw new Error("VBD encodes solid fills only");
-      w.u8(0);
-      writeColor(w, f.color);
+      writeFillStyle(w, doc.fills[i]);
     }
     writeStyleCount(w, doc.lines.length);
     for (var j = 0; j < doc.lines.length; j++) {
@@ -476,9 +544,7 @@
     // textMode: "none" (v1) | "implicit" (v2) | "flagged" (v3 cells)
     var fillCount = readStyleCount(r);
     for (var i = 0; i < fillCount; i++) {
-      var t = r.u8();
-      if (t !== 0) throw new Error("Unknown VBD fill type " + t);
-      doc.fills.push({ type: "solid", color: readColor(r) });
+      doc.fills.push(readFillStyle(r));
     }
     var lineCount = readStyleCount(r);
     for (var j = 0; j < lineCount; j++) {

@@ -1194,7 +1194,168 @@
       });
       list.appendChild(row);
     });
+    refreshMaterials();
   }
+
+  // ---- 2DMaterials panel --------------------------------------------------------
+  // Every fill style of the active cell, each with its deterministic
+  // cost badge (docs/2DMaterials.md). Edits land as ONE registered
+  // fillStyle op through app.exec.
+  var matSelected = -1;
+
+  function matSwatchCSS(style) {
+    if (style.type === "linear" || style.type === "radial") {
+      var st = style.gradient.stops;
+      var a = st.length ? st[0].color : { r: 128, g: 128, b: 128, a: 255 };
+      var b = st.length ? st[st.length - 1].color : a;
+      return "linear-gradient(90deg, rgba(" + a.r + "," + a.g + "," + a.b + "," +
+        (a.a / 255) + "), rgba(" + b.r + "," + b.g + "," + b.b + "," + (b.a / 255) + "))";
+    }
+    var c = VB.materialBaseColor(style);
+    return "rgba(" + c.r + "," + c.g + "," + c.b + "," + (c.a / 255) + ")";
+  }
+
+  function refreshMaterials() {
+    var list = document.getElementById("matlist");
+    list.innerHTML = "";
+    document.getElementById("mat-gpu").textContent =
+      VB.gpuMaterialsAvailable() ? "GPU ✓" : "no GPU";
+    if (matSelected >= app.doc.fills.length) matSelected = -1;
+    app.doc.fills.forEach(function (f, i) {
+      var profile = VB.materialProfile(f);
+      var row = document.createElement("div");
+      row.className = "matrow2" + (i === matSelected ? " active" : "");
+      var sw = document.createElement("span");
+      sw.className = "sw";
+      sw.style.background = matSwatchCSS(f);
+      var nm = document.createElement("span");
+      nm.className = "mname";
+      nm.textContent = (i + 1) + " · " + f.type;
+      var badge = document.createElement("span");
+      badge.className = "badge" + (profile.gpu ? " gpu" : "");
+      badge.textContent = profile.label;
+      badge.title = profile.passes.map(function (p) {
+        return p.name + ": " + p.perPx + " ops/px";
+      }).join("\n");
+      row.appendChild(sw); row.appendChild(nm); row.appendChild(badge);
+      row.addEventListener("click", function () {
+        matSelected = i === matSelected ? -1 : i;
+        refreshMaterials();
+      });
+      list.appendChild(row);
+    });
+    syncMatEditor();
+  }
+
+  function hexToColor(hex, a) {
+    return { r: parseInt(hex.slice(1, 3), 16), g: parseInt(hex.slice(3, 5), 16),
+             b: parseInt(hex.slice(5, 7), 16), a: a === undefined ? 255 : a };
+  }
+  function colorToHex(c) {
+    function h(v) { return ("0" + v.toString(16)).slice(-2); }
+    return "#" + h(c.r) + h(c.g) + h(c.b);
+  }
+
+  function syncMatEditor() {
+    var ed = document.getElementById("matedit");
+    var style = matSelected >= 0 ? app.doc.fills[matSelected] : null;
+    ed.classList.toggle("hidden", !style);
+    if (!style) return;
+    var typeSel = document.getElementById("mat-type");
+    if (!typeSel.options.length) {
+      VB.materialTypes().forEach(function (t) {
+        var o = document.createElement("option");
+        o.value = t; o.textContent = t;
+        typeSel.appendChild(o);
+      });
+    }
+    typeSel.value = VB.materialTypes().indexOf(style.type) >= 0 ? style.type : "solid";
+    document.getElementById("mat-color-row").classList.toggle(
+      "hidden", !(style.type === "solid" || style.type === "matcap"));
+    document.getElementById("mat-grad-row").classList.toggle(
+      "hidden", !(style.type === "linear" || style.type === "radial"));
+    document.getElementById("mat-matcap-row").classList.toggle(
+      "hidden", style.type !== "matcap");
+    if (style.color) document.getElementById("mat-color").value = colorToHex(style.color);
+    if (style.gradient && style.gradient.stops.length) {
+      var st = style.gradient.stops;
+      document.getElementById("mat-grad-a").value = colorToHex(st[0].color);
+      document.getElementById("mat-grad-b").value = colorToHex(st[st.length - 1].color);
+      var m = style.matrix || { sx: 1, r0: 0 };
+      document.getElementById("mat-grad-angle").value =
+        Math.round(Math.atan2(m.r0, m.sx) * 180 / Math.PI);
+    }
+    if (style.type === "matcap") {
+      document.getElementById("mat-bump").value = style.bumpScale;
+      document.getElementById("mat-blur").value = style.blurPx;
+      document.getElementById("mat-res").value = String(style.resolution);
+    }
+    var profile = VB.materialProfile(style);
+    document.getElementById("mat-profile").textContent =
+      profile.label + (profile.gpu && !VB.gpuMaterialsAvailable()
+        ? " — no WebGPU here: renders base color" : "") + "\n" +
+      profile.passes.map(function (p) {
+        return "  " + p.name + " · " + p.perPx + " ops/px";
+      }).join("\n") +
+      (profile.texBytesPerMpx
+        ? "\n  buffers · " + (profile.texBytesPerMpx / 1e6).toFixed(1) + " MB/Mpx" : "");
+  }
+
+  /** Rebuild the selected fill style from the editor state and land it
+   *  as one fillStyle op. */
+  function applyMatEdit() {
+    if (matSelected < 0 || matSelected >= app.doc.fills.length) return;
+    var old = app.doc.fills[matSelected];
+    var type = document.getElementById("mat-type").value;
+    var style;
+    if (type === old.type) style = VB.materialClone(old);
+    else {
+      style = VB.materialDefaults(type);
+      // keep the artist's color across type switches
+      var base = VB.materialBaseColor(old);
+      if (style.color) style.color = base;
+      if (style.gradient) style.gradient.stops[1].color = base;
+      if (type === "linear" || type === "radial") {
+        // default matrix: gradient square spans the stage, centered
+        var sc = Math.max(app.doc.width, app.doc.height) / (2 * VB.GRAD_HALF);
+        style.matrix = { sx: sc, sy: sc, r0: 0, r1: 0,
+                         tx: app.doc.width / 2, ty: app.doc.height / 2 };
+      }
+    }
+    if (style.type === "solid" || style.type === "matcap") {
+      style.color = hexToColor(document.getElementById("mat-color").value,
+                               (style.color || {}).a);
+    }
+    if (style.type === "linear" || style.type === "radial") {
+      var st = style.gradient.stops;
+      st[0].color = hexToColor(document.getElementById("mat-grad-a").value, st[0].color.a);
+      st[st.length - 1].color = hexToColor(document.getElementById("mat-grad-b").value,
+                                           st[st.length - 1].color.a);
+      var deg = parseFloat(document.getElementById("mat-grad-angle").value) || 0;
+      var rad = deg * Math.PI / 180;
+      var m0 = style.matrix || { sx: 1, sy: 1, r0: 0, r1: 0,
+                                 tx: app.doc.width / 2, ty: app.doc.height / 2 };
+      var s0 = Math.hypot(m0.sx, m0.r0) ||
+               Math.max(app.doc.width, app.doc.height) / (2 * VB.GRAD_HALF);
+      style.matrix = { sx: Math.cos(rad) * s0, r0: Math.sin(rad) * s0,
+                       r1: -Math.sin(rad) * s0, sy: Math.cos(rad) * s0,
+                       tx: m0.tx, ty: m0.ty };
+    }
+    if (style.type === "matcap") {
+      style.bumpScale = Math.max(0, parseFloat(document.getElementById("mat-bump").value) || 0);
+      style.blurPx = Math.max(0, parseFloat(document.getElementById("mat-blur").value) || 0);
+      style.resolution = parseFloat(document.getElementById("mat-res").value) || 1;
+    }
+    var keep = matSelected; // docChanged rebuilds the panel
+    app.exec({ op: "fillStyle", index: keep, style: style });
+    matSelected = keep;
+    refreshMaterials();
+  }
+
+  ["mat-type", "mat-color", "mat-grad-a", "mat-grad-b", "mat-grad-angle",
+   "mat-bump", "mat-blur", "mat-res"].forEach(function (id) {
+    document.getElementById(id).addEventListener("change", applyMatEdit);
+  });
 
   document.getElementById("btn-layer-add").addEventListener("click", function () {
     flushSelections();
@@ -1296,6 +1457,7 @@
     VB.brushStroke(d, [
       { x: 1200, y: 5200 }, { x: 3200, y: 4400 }, { x: 5400, y: 3600 }, { x: 7600, y: 2400 }
     ], 180, { r: 204, g: 102, b: 102, a: 255 });
+    docChanged(); // panels (layers, materials) reflect the demo doc
     toggleDebug();
     app.debugPin = Math.min(9, d.edges.length - 1);
     refreshDebugEdge();

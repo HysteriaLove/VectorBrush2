@@ -211,6 +211,18 @@
     c.history.push(c.project);
     VB.textBoxHApply(c.doc, op.index, op.height, op.dy);
   });
+  // Replace a fill-style entry with a 2DMaterial definition (the
+  // materials panel's one mutation). The op carries the full style, so
+  // replay is self-contained; geometry/claims are untouched — only
+  // what the style paints changes.
+  defineOp("fillStyle", function (c, op) {
+    if (op.index < 0 || op.index >= c.doc.fills.length) {
+      throw new Error("fillStyle: no fill style " + op.index);
+    }
+    c.history.push(c.project);
+    c.doc.fills[op.index] = VB.materialClone(op.style);
+  });
+
   // Paste a shape clip (a standalone mini planar map captured at copy
   // time — self-contained like the text ops, so replay never depends
   // on clipboard state) under a placement matrix. Merging is the same

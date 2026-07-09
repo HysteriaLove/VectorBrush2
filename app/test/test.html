@@ -27,6 +27,7 @@
 <script src="../js/render.js"></script>
 <script src="../js/vbd.js"></script>
 <script src="../js/swfwrite.js"></script>
+<script src="../js/materials.js"></script>
 <script src="../js/fit.js"></script>
 <script src="../js/merge.js"></script>
 <script src="../js/faces.js"></script>
@@ -858,6 +859,95 @@
     });
     check("log20 leaves no micro-fragments", micro20.length === 0,
       micro20.length + " sub-5tw records");
+  })();
+
+  // ======================= 2DMaterials: profiler + persistence ==================
+  // The cost profile is an ANALYTIC function of the material params —
+  // deterministic across machines. These literals pin the formulas
+  // (docs/2DMaterials.md); changing a formula must change these on
+  // purpose.
+  log("2DMaterials:");
+  await (async function () {
+    try {
+    var p = VB.materialProfile({ type: "solid", color: { r: 1, g: 2, b: 3, a: 255 } });
+    check("solid profiles flat 1 op/px",
+      p.class === "flat" && p.perPx === 1 && p.score === 1 && !p.gpu &&
+      p.texBytesPerMpx === 0, JSON.stringify(p));
+    p = VB.materialProfile(VB.materialDefaults("linear"));
+    check("linear profiles gradient 3 ops/px",
+      p.class === "gradient" && p.perPx === 3 && !p.gpu, JSON.stringify(p));
+    p = VB.materialProfile(VB.materialDefaults("radial"));
+    check("radial profiles gradient 5 ops/px",
+      p.class === "gradient" && p.perPx === 5 && !p.gpu, JSON.stringify(p));
+    p = VB.materialProfile(VB.materialDefaults("matcap")); // blur 3, res 1
+    check("matcap default profiles gpu 28 ops/px, 12MB/Mpx",
+      p.class === "gpu" && p.gpu && p.perPx === 28 &&
+      p.texBytesPerMpx === 12000000, JSON.stringify(p));
+    p = VB.materialProfile({ type: "matcap", color: { r: 0, g: 0, b: 0, a: 255 },
+                             bumpScale: 60, blurPx: 4, resolution: 2 });
+    check("matcap cost follows blur×resolution (48 ops/px, 48MB/Mpx)",
+      p.perPx === 48 && p.texBytesPerMpx === 48000000, JSON.stringify(p));
+
+    // fillStyle command: replayable, one undo step
+    var blue2 = { r: 102, g: 204, b: 255, a: 255 };
+    var mops = [
+      { op: "new", width: 11000, height: 8000 },
+      { op: "brush", points: [{ x: 3000, y: 3000 }, { x: 5000, y: 3200 }],
+        radius: 400, color: blue2 }
+    ];
+    var lin = VB.materialDefaults("linear");
+    lin.matrix = { sx: 0.3, sy: 0.3, r0: 0, r1: 0, tx: 4000, ty: 3000 };
+    var mr = await VB.replayJournal(mops.concat([
+      { op: "fillStyle", index: 0, style: lin }
+    ]));
+    check("fillStyle op replays (solid -> linear)",
+      mr.doc.fills[0].type === "linear" &&
+      mr.doc.fills[0].gradient.stops.length === 2 &&
+      VB.integrityReport(mr.doc).length === 0,
+      mr.doc.fills[0].type);
+    var mu = await VB.replayJournal(mops.concat([
+      { op: "fillStyle", index: 0, style: lin }, { op: "undo" }
+    ]));
+    check("fillStyle is one undo step", mu.doc.fills[0].type === "solid",
+      mu.doc.fills[0].type);
+
+    // vbd round trip: gradient + matcap fills survive save/load
+    var vdoc = mr.doc;
+    vdoc.fills.push({ type: "matcap", color: { r: 10, g: 20, b: 30, a: 255 },
+                      bumpScale: 80, blurPx: 2.5, resolution: 0.5 });
+    var bytes = await VB.encodeVBD(vdoc);
+    var decoded = await VB.decodeVBD(bytes);
+    var back = decoded.doc || decoded.project.activeCell();
+    check("vbd round-trips linear fill",
+      back.fills[0].type === "linear" &&
+      Math.abs(back.fills[0].matrix.sx - 0.3) < 1e-4 &&
+      back.fills[0].gradient.stops.length === 2 &&
+      back.fills[0].gradient.stops[1].color.r === lin.gradient.stops[1].color.r,
+      JSON.stringify(back.fills[0]).slice(0, 120));
+    check("vbd round-trips matcap fill",
+      back.fills[1] && back.fills[1].type === "matcap" &&
+      back.fills[1].bumpScale === 80 &&
+      Math.abs(back.fills[1].blurPx - 2.5) < 1e-9 &&
+      Math.abs(back.fills[1].resolution - 0.5) < 1e-9,
+      JSON.stringify(back.fills[1]));
+
+    // gradient rendering: a linear black->white fill actually shades
+    var gdoc = mr.doc; // fill 0 is the linear style over the brush blob
+    gdoc.fills[0].gradient.stops[0].color = { r: 0, g: 0, b: 0, a: 255 };
+    gdoc.fills[0].gradient.stops[1].color = { r: 255, g: 255, b: 255, a: 255 };
+    var gcv = document.createElement("canvas");
+    gcv.width = 550; gcv.height = 400;
+    VB.render(gcv.getContext("2d"), gdoc, { zoom: 1, panX: 0, panY: 0 });
+    var gd = gcv.getContext("2d").getImageData(0, 0, 550, 400).data;
+    function lum(x, y) { var o = (y * 550 + x) * 4; return gd[o] + gd[o + 1] + gd[o + 2]; }
+    // blob spans ~x 130..270px at y≈155: left end should be darker
+    var left = lum(140, 155), right = lum(245, 158);
+    check("linear gradient shades across the fill (" + left + " -> " + right + ")",
+      right - left > 150, left + " vs " + right);
+    } catch (merr) {
+      check("2DMaterials section threw: " + merr.message, false,
+        (merr.stack || "").split("\n").slice(0, 3).join(" | "));
+    }
   })();
 
   // ======================= clipboard: copy / paste commands =====================

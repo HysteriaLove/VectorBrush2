@@ -71,7 +71,6 @@
         var g = { type: t === 0x10 ? "linear" : "radial", matrix: readMatrix(r), gradient: readGradient(r, hasAlpha) };
         if (t === 0x13) g.focal = r.u16() / 256;
         styles.push(g);
-        warnings.push("gradient fill imported (rendered as first stop color)");
       } else if (t >= 0x40 && t <= 0x43) {
         styles.push({ type: "bitmap", bitmapId: r.u16(), matrix: readMatrix(r) });
         warnings.push("bitmap fill imported (rendered as gray)");

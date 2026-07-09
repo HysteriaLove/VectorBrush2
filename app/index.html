@@ -132,6 +132,46 @@
     flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
 
+  /* 2DMaterials panel — fill styles with their deterministic cost badge */
+  #mathead {
+    display: flex; align-items: center; gap: 2px;
+    padding: 4px 6px;
+    border-top: 1px solid var(--panel-edge);
+    border-bottom: 1px solid var(--panel-edge);
+    color: var(--text-dim);
+  }
+  #mat-gpu { font-size: 10px; }
+  #matlist { max-height: 150px; overflow-y: auto; }
+  .matrow2 {
+    display: flex; align-items: center; gap: 6px;
+    padding: 3px 6px; cursor: pointer;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    color: var(--text);
+  }
+  .matrow2.active { background: #3d5a80; }
+  .matrow2 .sw {
+    width: 14px; height: 14px; border-radius: 2px;
+    border: 1px solid var(--panel-edge); flex: none;
+  }
+  .matrow2 .mname { flex: 1; overflow: hidden; white-space: nowrap; }
+  .matrow2 .badge {
+    font-size: 10px; color: var(--text-dim); white-space: nowrap;
+  }
+  .matrow2 .badge.gpu { color: #e6a23c; }
+  #matedit { padding: 6px; border-top: 1px solid var(--panel-edge); }
+  #matedit.hidden { display: none; }
+  #matedit label { display: inline-flex; align-items: center; gap: 4px; margin: 2px 4px 2px 0; }
+  #matedit select, #matedit input[type="number"] {
+    background: #2b2d31; color: var(--text);
+    border: 1px solid var(--panel-edge); border-radius: 3px;
+  }
+  #matedit input[type="color"] { width: 26px; height: 18px; padding: 0; border: none; background: none; }
+  .matrow.hidden { display: none; }
+  #mat-profile {
+    margin-top: 4px; font-size: 10px; line-height: 1.5;
+    color: var(--text-dim); white-space: pre-wrap;
+  }
+
   #debugpanel {
     width: 280px;
     background: var(--panel);
@@ -328,6 +368,37 @@
         <button id="btn-layer-down" title="Move layer down">▼</button>
       </div>
       <div id="layerlist"></div>
+      <div id="mathead">
+        <span>Materials</span>
+        <span class="spacer"></span>
+        <span id="mat-gpu" title="WebGPU availability for gpu-class materials"></span>
+      </div>
+      <div id="matlist"></div>
+      <div id="matedit" class="hidden">
+        <label>Type
+          <select id="mat-type"></select>
+        </label>
+        <div class="matrow" id="mat-color-row">
+          <label>Color <input type="color" id="mat-color"></label>
+        </div>
+        <div class="matrow hidden" id="mat-grad-row">
+          <label>A <input type="color" id="mat-grad-a"></label>
+          <label>B <input type="color" id="mat-grad-b"></label>
+          <label>∠ <input type="number" id="mat-grad-angle" step="15" style="width:44px"></label>
+        </div>
+        <div class="matrow hidden" id="mat-matcap-row">
+          <label>Bump <input type="number" id="mat-bump" min="0" max="400" step="10" style="width:48px"></label>
+          <label>Blur <input type="number" id="mat-blur" min="0" max="16" step="1" style="width:40px"></label>
+          <label>Res
+            <select id="mat-res">
+              <option value="0.5">0.5×</option>
+              <option value="1" selected>1×</option>
+              <option value="2">2×</option>
+            </select>
+          </label>
+        </div>
+        <div id="mat-profile"></div>
+      </div>
     </div>
     <div id="debugpanel" class="hidden">
       <div id="dbg-edge"></div>
@@ -349,6 +420,7 @@
   <script src="js/bitio.js"></script>
   <script src="js/doc.js"></script>
   <script src="js/geom.js"></script>
+  <script src="js/materials.js"></script>
   <script src="js/swf.js"></script>
   <script src="js/trace.js"></script>
   <script src="js/render.js"></script>
