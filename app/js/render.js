@@ -61,7 +61,7 @@
     for (var f = 1; f < fillPaths.length; f++) {
       var chains = fillPaths[f];
       if (!chains || chains.length === 0) continue;
-      paintFill(ctx, doc.fills[f - 1], chains);
+      paintFill(ctx, doc, f, doc.fills[f - 1], chains);
     }
 
     for (var l = 1; l < strokePaths.length; l++) {
@@ -142,7 +142,13 @@
    *  endpoints would not be. gpu-class materials (matcap) render
    *  their declared fallback here; the WebGPU backend replaces that
    *  per-region result when available (stage 2). */
-  function paintFill(ctx, style, chains) {
+  function paintFill(ctx, doc, fillIdx, style, chains) {
+    if (style && style.type === "matcap" && VB.matcapPaint) {
+      // CPU-reference matcap pipeline (matcap.js), cached per region;
+      // falls through to the base color while an embedded texture is
+      // still decoding or when the module is absent (diag harnesses).
+      if (VB.matcapPaint(ctx, doc, fillIdx, style, chains, tracePath)) return;
+    }
     if (style && (style.type === "linear" || style.type === "radial") &&
         style.gradient && style.gradient.stops.length > 1) {
       var gm = style.matrix || { sx: 1, sy: 1, r0: 0, r1: 0, tx: 0, ty: 0 };

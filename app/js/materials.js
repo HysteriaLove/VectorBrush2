@@ -69,7 +69,8 @@
       swfNative: false,
       defaults: function () {
         return { type: "matcap",
-                 color: { r: 160, g: 168, b: 180, a: 255 },
+                 color: { r: 160, g: 168, b: 180, a: 255 }, // no-GPU fallback
+                 matcap: "studio", // builtin texture id or {b64: png}
                  bumpScale: 60,    // twips of simulated relief
                  blurPx: 3,        // height-field smoothing sigma, px
                  resolution: 1 };  // working-buffer scale (0.5 / 1 / 2)

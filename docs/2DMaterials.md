@@ -75,10 +75,17 @@ pixels only, never the planar map, so journals/replays are unaffected.
 `VB.gpuMaterialsAvailable()` reports `navigator.gpu` presence; without
 it every gpu material renders its declared fallback.
 
-Rollout: stage 1 (this commit) ships the model, profiler, real gradient
-rendering, the panel, persistence and journal op. Stage 2 ships the
-WebGPU matcap pipeline behind the availability check, off the render
-hot path (results cached per (style, geometry-hash, zoom bucket)).
+Rollout: stage 1 shipped the model, profiler, real gradient rendering,
+the panel, persistence and journal op. Stage 2a (shipped) implements
+the FULL matcap pipeline as a deterministic CPU reference (matcap.js):
+exact typed-array stages the suite pins, per-region result caching
+keyed by a (style, boundary-geometry) hash, procedural builtin matcap
+textures (studio/chrome/clay/toon — no binary assets) plus user-loaded
+images embedded as PNG bytes in the style, and debug views of the
+bump map, normal map and shaded result in the materials panel. Stage
+2b moves the same stages to WebGPU behind the availability check,
+validated against the CPU reference pixel-for-pixel — the same
+oracle discipline Canvas2D provides for rendering.
 
 ## Persistence and journaling
 

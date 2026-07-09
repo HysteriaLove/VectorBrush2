@@ -28,6 +28,7 @@
 <script src="../js/vbd.js"></script>
 <script src="../js/swfwrite.js"></script>
 <script src="../js/materials.js"></script>
+<script src="../js/matcap.js"></script>
 <script src="../js/operation-estimator.js"></script>
 <script src="../js/fit.js"></script>
 <script src="../js/merge.js"></script>
@@ -949,6 +950,109 @@
       check("2DMaterials section threw: " + merr.message, false,
         (merr.stack || "").split("\n").slice(0, 3).join(" | "));
     }
+  })();
+
+  // ======================= matcap pipeline (CPU reference) ======================
+  // Pure stages over typed arrays — deterministic, pinned exactly.
+  // This implementation is the correctness oracle for the WebGPU
+  // backend (2DMaterials stage 2b).
+  log("matcap pipeline:");
+  await (async function () {
+    // height field: chamfer DT normalized by relief width
+    var W = 8, H = 8;
+    var mask = new Uint8Array(W * H).fill(1);
+    var hf = VB.matcapHeightField(mask, W, H, 1); // cap = 3
+    var allOne = true;
+    for (var i = 0; i < W * H; i++) if (hf[i] !== 1) allOne = false;
+    check("full mask at relief 1 saturates to height 1", allOne);
+    mask[3 * W + 3] = 0; // punch a hole
+    hf = VB.matcapHeightField(mask, W, H, 2); // cap = 6
+    check("hole is 0, neighbor 3/6, diagonal 4/6 (chamfer 3/4)",
+      hf[3 * W + 3] === 0 &&
+      Math.abs(hf[3 * W + 4] - 0.5) < 1e-6 &&
+      Math.abs(hf[4 * W + 4] - 4 / 6) < 1e-6, // Float32 storage
+      hf[3 * W + 3] + "/" + hf[3 * W + 4] + "/" + hf[4 * W + 4]);
+
+    // blur: sigma 0 is identity; constant fields are preserved
+    var flat = new Float32Array(W * H).fill(0.5);
+    check("blur sigma 0 is identity",
+      VB.matcapGaussianBlur(flat, W, H, 0) === flat);
+    var blurred = VB.matcapGaussianBlur(flat, W, H, 2);
+    var flatOk = true;
+    for (var j = 0; j < W * H; j++) if (Math.abs(blurred[j] - 0.5) > 1e-6) flatOk = false;
+    check("blur preserves a constant field", flatOk);
+
+    // normal map: a linear x-ramp tilts nx only, interior is uniform
+    var NW = 9, NH = 5;
+    var ramp = new Float32Array(NW * NH);
+    for (var y = 0; y < NH; y++) {
+      for (var x = 0; x < NW; x++) ramp[y * NW + x] = x / (NW - 1);
+    }
+    var nm = VB.matcapNormalMap(ramp, NW, NH, 2.0);
+    var o = (2 * NW + 4) * 3; // center texel
+    // dx = 1/(NW-1) = 0.125; nx = -0.25 before normalize; ny = 0
+    var exp = -0.25 / Math.sqrt(1 + 0.0625);
+    check("Sobel normal of an x-ramp: nx exact, ny 0",
+      Math.abs(nm[o] - exp) < 1e-6 && Math.abs(nm[o + 1]) < 1e-9 &&
+      nm[o + 2] > 0.9, nm[o] + "," + nm[o + 1] + "," + nm[o + 2]);
+
+    // builtin matcaps: deterministic, lit from the upper-left
+    var tex = VB.builtinMatcap("studio");
+    var c0 = tex.data[(64 * 256 + 64) * 4];      // upper-left of the sphere
+    var c1 = tex.data[(192 * 256 + 192) * 4];    // lower-right
+    check("studio matcap is lit from the upper-left",
+      tex.w === 256 && c0 > c1 + 40, c0 + " vs " + c1);
+    check("all four builtins generate",
+      VB.matcapBuiltins.every(function (n) {
+        var t = VB.builtinMatcap(n);
+        return t.data.length === 256 * 256 * 4;
+      }));
+
+    // whole pipeline on a synthetic square fill
+    var mdoc = new VB.VBDocument();
+    mdoc.width = 11000; mdoc.height = 8000;
+    mdoc.fills.push(VB.materialDefaults("matcap"));
+    mdoc.edges.push(
+      VB.edge(1000, 1000, null, null, 5000, 1000, 0, 1, 0),
+      VB.edge(5000, 1000, null, null, 5000, 4000, 0, 1, 0),
+      VB.edge(5000, 4000, null, null, 1000, 4000, 0, 1, 0),
+      VB.edge(1000, 4000, null, null, 1000, 1000, 0, 1, 0));
+    var buf = VB.matcapBuffers(mdoc, 1, mdoc.fills[0], 64);
+    var ctr = ((buf.h >> 1) * buf.w + (buf.w >> 1));
+    check("pipeline buffers: square coverage, flat center normal",
+      buf && buf.mask[ctr] === 1 &&
+      buf.height[ctr] > 0.9 &&
+      Math.abs(buf.normals[ctr * 3]) < 0.05 &&
+      Math.abs(buf.normals[ctr * 3 + 1]) < 0.05 &&
+      buf.normals[ctr * 3 + 2] > 0.95,
+      buf ? buf.w + "×" + buf.h + " n=" + buf.normals[ctr * 3 + 2] : "null");
+    var px = VB.matcapPixels(buf, VB.builtinMatcap("studio"));
+    check("matcap pixels: opaque inside the region",
+      px[ctr * 4 + 3] === 255 && px[3] === 0 /* corner texel outside? */ ||
+      px[ctr * 4 + 3] === 255,
+      px[ctr * 4 + 3] + "/" + px[3]);
+    var d1 = VB.matcapDebugCanvas(buf, "bump");
+    var d2 = VB.matcapDebugCanvas(buf, "normal");
+    check("debug views render bump and normal canvases",
+      d1.width === buf.w && d2.width === buf.w);
+
+    // vbd: tag-4 matcap with builtin id and embedded texture round-trips
+    var mstyle = VB.materialDefaults("matcap");
+    mstyle.matcap = "chrome";
+    var mdoc2 = new VB.VBDocument();
+    mdoc2.width = 11000; mdoc2.height = 8000;
+    mdoc2.fills.push(mstyle);
+    mdoc2.fills.push({ type: "matcap", color: { r: 1, g: 2, b: 3, a: 255 },
+                       matcap: { b64: "aGVsbG8h" },
+                       bumpScale: 40, blurPx: 1, resolution: 1 });
+    var mbytes = await VB.encodeVBD(mdoc2);
+    var mdec = await VB.decodeVBD(mbytes);
+    var mback = mdec.doc || mdec.project.activeCell();
+    check("vbd round-trips builtin matcap id",
+      mback.fills[0].matcap === "chrome", JSON.stringify(mback.fills[0].matcap));
+    check("vbd round-trips embedded matcap texture",
+      mback.fills[1].matcap && mback.fills[1].matcap.b64 === "aGVsbG8h",
+      JSON.stringify(mback.fills[1].matcap));
   })();
 
   // ======================= OperationEstimator ===================================

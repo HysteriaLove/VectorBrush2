@@ -167,6 +167,16 @@
   }
   #matedit input[type="color"] { width: 26px; height: 18px; padding: 0; border: none; background: none; }
   .matrow.hidden { display: none; }
+  /* matcap pipeline debug views: bump map, normal map, shaded result */
+  #mat-debug-row { display: flex; gap: 6px; margin-top: 4px; }
+  .matdbg { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+  .matdbg canvas {
+    background:
+      repeating-conic-gradient(#2b2d31 0 25%, #34373c 0 50%) 0 0 / 12px 12px;
+    border: 1px solid var(--panel-edge); border-radius: 2px;
+    image-rendering: pixelated;
+  }
+  .matdbg span { font-size: 9px; color: var(--text-dim); }
   #mat-profile {
     margin-top: 4px; font-size: 10px; line-height: 1.5;
     color: var(--text-dim); white-space: pre-wrap;
@@ -402,6 +412,16 @@
             </select>
           </label>
         </div>
+        <div class="matrow hidden" id="mat-matcap-tex-row">
+          <label>Matcap <select id="mat-matcap-sel"></select></label>
+          <button id="mat-matcap-load" title="Load a matcap image (embedded in the document)">Load…</button>
+          <input type="file" id="mat-matcap-file" accept="image/*" style="display:none">
+        </div>
+        <div class="matrow hidden" id="mat-debug-row">
+          <div class="matdbg"><canvas id="mat-dbg-bump" width="84" height="64"></canvas><span>bump</span></div>
+          <div class="matdbg"><canvas id="mat-dbg-normal" width="84" height="64"></canvas><span>normal</span></div>
+          <div class="matdbg"><canvas id="mat-dbg-result" width="84" height="64"></canvas><span>result</span></div>
+        </div>
         <div id="mat-profile"></div>
       </div>
     </div>
@@ -428,6 +448,7 @@
   <script src="js/doc.js"></script>
   <script src="js/geom.js"></script>
   <script src="js/materials.js"></script>
+  <script src="js/matcap.js"></script>
   <script src="js/operation-estimator.js"></script>
   <script src="js/swf.js"></script>
   <script src="js/trace.js"></script>

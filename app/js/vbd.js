@@ -155,11 +155,24 @@
       return;
     }
     if (f.type === "matcap") {
-      w.u8(3);
+      // tag 4 = matcap with a texture source; tag 3 (no texture,
+      // implies "studio") is still decoded for files saved before
+      // textures existed.
+      w.u8(4);
       writeColor(w, f.color);
       s32w(w, Math.round(f.bumpScale || 0));
       s32w(w, Math.round((f.blurPx || 0) * 100));
       s32w(w, Math.round((f.resolution || 1) * 100));
+      var src = f.matcap || "studio";
+      if (typeof src === "string") {
+        w.u8(0);
+        writeStr(w, src);
+      } else {
+        w.u8(1);
+        var mb = VB.b64ToBytes(src.b64 || "");
+        w.u32(mb.length);
+        for (var mi = 0; mi < mb.length; mi++) w.u8(mb[mi]);
+      }
       return;
     }
     // solid — and legacy/unsupported (bitmap) baked to base color so
@@ -191,9 +204,23 @@
       return st;
     }
     if (t === 3) {
-      return { type: "matcap", color: readColor(r),
+      return { type: "matcap", color: readColor(r), matcap: "studio",
                bumpScale: s32r(r), blurPx: s32r(r) / 100,
                resolution: s32r(r) / 100 };
+    }
+    if (t === 4) {
+      var mc = { type: "matcap", color: readColor(r),
+                 bumpScale: s32r(r), blurPx: s32r(r) / 100,
+                 resolution: s32r(r) / 100 };
+      if (r.u8() === 0) {
+        mc.matcap = readStr(r);
+      } else {
+        var mlen = r.u32();
+        var mbytes = new Uint8Array(mlen);
+        for (var mj = 0; mj < mlen; mj++) mbytes[mj] = r.u8();
+        mc.matcap = { b64: VB.bytesToB64(mbytes) };
+      }
+      return mc;
     }
     throw new Error("Unknown VBD fill type " + t);
   }

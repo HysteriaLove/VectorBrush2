@@ -1346,6 +1346,10 @@
       "hidden", !(style.type === "linear" || style.type === "radial"));
     document.getElementById("mat-matcap-row").classList.toggle(
       "hidden", style.type !== "matcap");
+    document.getElementById("mat-matcap-tex-row").classList.toggle(
+      "hidden", style.type !== "matcap");
+    document.getElementById("mat-debug-row").classList.toggle(
+      "hidden", style.type !== "matcap");
     if (style.color) document.getElementById("mat-color").value = colorToHex(style.color);
     if (style.gradient && style.gradient.stops.length) {
       var st = style.gradient.stops;
@@ -1359,6 +1363,19 @@
       document.getElementById("mat-bump").value = style.bumpScale;
       document.getElementById("mat-blur").value = style.blurPx;
       document.getElementById("mat-res").value = String(style.resolution);
+      var msel = document.getElementById("mat-matcap-sel");
+      if (!msel.options.length) {
+        VB.matcapBuiltins.forEach(function (n) {
+          var o = document.createElement("option");
+          o.value = n; o.textContent = n;
+          msel.appendChild(o);
+        });
+        var oc = document.createElement("option");
+        oc.value = "__custom"; oc.textContent = "custom image";
+        msel.appendChild(oc);
+      }
+      msel.value = typeof style.matcap === "string" ? style.matcap : "__custom";
+      renderMatcapDebugViews(style);
     }
     var profile = VB.materialProfile(style);
     document.getElementById("mat-profile").textContent =
@@ -1415,6 +1432,10 @@
       style.bumpScale = Math.max(0, parseFloat(document.getElementById("mat-bump").value) || 0);
       style.blurPx = Math.max(0, parseFloat(document.getElementById("mat-blur").value) || 0);
       style.resolution = parseFloat(document.getElementById("mat-res").value) || 1;
+      var pick = document.getElementById("mat-matcap-sel").value;
+      if (pick && pick !== "__custom") style.matcap = pick;
+      else if (typeof style.matcap !== "object") style.matcap = old.matcap || "studio";
+      if (!style.matcap) style.matcap = "studio";
     }
     var keep = matSelected; // docChanged rebuilds the panel
     app.exec({ op: "fillStyle", index: keep, style: style });
@@ -1423,9 +1444,62 @@
   }
 
   ["mat-type", "mat-color", "mat-grad-a", "mat-grad-b", "mat-grad-angle",
-   "mat-bump", "mat-blur", "mat-res"].forEach(function (id) {
+   "mat-bump", "mat-blur", "mat-res", "mat-matcap-sel"].forEach(function (id) {
     document.getElementById(id).addEventListener("change", applyMatEdit);
   });
+
+  // custom matcap image: embedded as PNG bytes in the style, so
+  // documents and journals stay self-contained
+  document.getElementById("mat-matcap-load").addEventListener("click", function () {
+    document.getElementById("mat-matcap-file").click();
+  });
+  document.getElementById("mat-matcap-file").addEventListener("change", function (ev) {
+    var file = ev.target.files && ev.target.files[0];
+    ev.target.value = "";
+    if (!file || matSelected < 0) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      var b64 = String(reader.result).split(",")[1] || "";
+      var style = VB.materialClone(app.doc.fills[matSelected]);
+      if (style.type !== "matcap") return;
+      style.matcap = { b64: b64 };
+      var keep = matSelected;
+      app.exec({ op: "fillStyle", index: keep, style: style });
+      matSelected = keep;
+      refreshMaterials();
+    };
+    reader.readAsDataURL(file);
+  });
+
+  /** The matcap pipeline debug views: the region's BUMP MAP (height
+   *  field), the derived NORMAL MAP, and the shaded result, computed
+   *  by the same CPU pipeline the renderer uses (thumbnail-capped). */
+  function renderMatcapDebugViews(style) {
+    var ids = ["mat-dbg-bump", "mat-dbg-normal", "mat-dbg-result"];
+    var kinds = ["bump", "normal", "result"];
+    var buffers = null;
+    try {
+      buffers = VB.matcapBuffers(app.doc, matSelected + 1, style, 84);
+    } catch (err) { /* corrupt region: leave the views blank */ }
+    for (var i = 0; i < 3; i++) {
+      var cv = document.getElementById(ids[i]);
+      var cx = cv.getContext("2d");
+      cx.clearRect(0, 0, cv.width, cv.height);
+      if (!buffers) continue;
+      var dbg = VB.matcapDebugCanvas(buffers, kinds[i], style);
+      var s = Math.min(cv.width / dbg.width, cv.height / dbg.height);
+      cx.imageSmoothingEnabled = false;
+      cx.drawImage(dbg, (cv.width - dbg.width * s) / 2,
+                   (cv.height - dbg.height * s) / 2,
+                   dbg.width * s, dbg.height * s);
+    }
+  }
+
+  // embedded matcap textures decode async: repaint when pixels arrive
+  VB.onMatcapReady = function () {
+    requestRender();
+    refreshMaterials();
+  };
 
   document.getElementById("btn-layer-add").addEventListener("click", function () {
     flushSelections();
