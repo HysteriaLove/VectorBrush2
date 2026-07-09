@@ -32,8 +32,197 @@
     return bytes;
   }
 
+  // ---- the command registry --------------------------------------------------
+  // Every journal op is a COMMAND: one named apply function, defined
+  // once, dispatched identically by replay and by the live app
+  // (app.exec). Live-vs-replay divergence — the whole journal-desync
+  // bug class — is impossible for anything routed through here.
+  //
+  // A command receives (ctx, op) where ctx is
+  //   { doc, project, history, sync() }
+  // doc is the active layer's cell; commands that change which cell is
+  // active (layer/scene/undo ops) mutate ctx.project and call
+  // ctx.sync(). Commands manage their own history snapshots (most push
+  // one; no-op commands pop it again — the bucket/eraser convention).
+  var OPS = new Map();
+  function defineOp(name, apply) { OPS.set(name, apply); }
+
+  /** Dispatch one op against a context. May return a promise ("load"). */
+  function applyOp(ctx, op) {
+    var fn = OPS.get(op.op);
+    if (!fn) throw new Error("unknown journal op: " + op.op);
+    return fn(ctx, op);
+  }
+
+  defineOp("new", function (c, op) {
+    c.project = new VB.Project(op.width, op.height);
+    c.history.clear();
+    c.sync();
+  });
+  defineOp("load", async function (c, op) {
+    var bytes = b64ToBytes(op.b64);
+    var result = VB.isVBD(bytes)
+      ? await VB.decodeVBD(bytes)
+      : await VB.parseSWF(bytes.buffer);
+    c.project = result.project || VB.wrapDoc(result.doc);
+    c.history.clear();
+    c.sync();
+  });
+  defineOp("layerAdd", function (c, op) {
+    c.history.push(c.project);
+    c.project.addLayer(op.name);
+    c.sync();
+  });
+  defineOp("layerDelete", function (c, op) {
+    c.history.push(c.project);
+    c.project.deleteLayer(op.index);
+    c.sync();
+  });
+  defineOp("layerMove", function (c, op) {
+    c.history.push(c.project);
+    c.project.moveLayer(op.from, op.to);
+    c.sync();
+  });
+  defineOp("layerRename", function (c, op) {
+    c.history.push(c.project);
+    c.project.scene().layers[op.index].name = op.name;
+  });
+  defineOp("layerSelect", function (c, op) {
+    c.project.selectLayer(op.index);
+    c.sync();
+  });
+  defineOp("layerVisible", function (c, op) {
+    c.project.scene().layers[op.index].visible = !!op.on;
+  });
+  defineOp("layerLock", function (c, op) {
+    c.project.scene().layers[op.index].locked = !!op.on;
+  });
+  defineOp("sceneAdd", function (c, op) {
+    c.history.push(c.project);
+    c.project.addScene(op.name);
+    c.sync();
+  });
+  defineOp("sceneSelect", function (c, op) {
+    c.project.selectScene(op.index);
+    c.sync();
+  });
+  defineOp("pencil", function (c, op) {
+    c.history.push(c.project);
+    VB.pencilCommit(c.doc, op.points, op.style,
+      op.tolerance === null ? undefined : op.tolerance,
+      op.snapTol);
+  });
+  defineOp("bucket", function (c, op) {
+    c.history.push(c.project);
+    var r = VB.bucketFill(c.doc, op.x, op.y, { color: op.color });
+    if (r.stamped === 0) c.history.undoStack.pop(); // nothing happened
+  });
+  defineOp("erase", function (c, op) {
+    c.history.push(c.project);
+    var re = VB.eraseStroke(c.doc, op.points, op.radius);
+    if (re.removed === 0 && re.boundary === 0) c.history.undoStack.pop();
+  });
+  defineOp("brush", function (c, op) {
+    c.history.push(c.project);
+    VB.brushStroke(c.doc, op.points, op.radius, op.color);
+  });
+  defineOp("line", function (c, op) {
+    c.history.push(c.project);
+    VB.lineCommit(c.doc, op.a, op.b, op.style, op.snapTol);
+  });
+  defineOp("oval", function (c, op) {
+    c.history.push(c.project);
+    VB.shapeCommit(c.doc, VB.ellipseLoop(
+      (op.x0 + op.x1) / 2, (op.y0 + op.y1) / 2,
+      (op.x1 - op.x0) / 2, (op.y1 - op.y0) / 2), op.fill, op.line);
+  });
+  defineOp("rect", function (c, op) {
+    c.history.push(c.project);
+    VB.shapeCommit(c.doc, VB.rectLoop(op.x0, op.y0, op.x1, op.y1),
+      op.fill, op.line);
+  });
+  defineOp("reshape", function (c, op) {
+    c.history.push(c.project);
+    VB.arrowReshape(c.doc, op.key, op.t, op.x, op.y);
+  });
+  defineOp("moveNode", function (c, op) {
+    c.history.push(c.project);
+    VB.arrowMoveNode(c.doc, op.x, op.y, op.nx, op.ny);
+  });
+  defineOp("moveFill", function (c, op) {
+    c.history.push(c.project);
+    VB.arrowMoveFill(c.doc, op.x, op.y, op.dx, op.dy);
+  });
+  defineOp("deleteFill", function (c, op) {
+    c.history.push(c.project);
+    VB.arrowDeleteFill(c.doc, op.x, op.y);
+  });
+  defineOp("deleteEdge", function (c, op) {
+    c.history.push(c.project);
+    VB.arrowDeleteEdge(c.doc, op.key);
+  });
+  defineOp("transformSel", function (c, op) {
+    c.history.push(c.project);
+    VB.arrowTransformSel(c.doc, op.fills, op.edgeKeys, op.m);
+  });
+  defineOp("deleteSel", function (c, op) {
+    c.history.push(c.project);
+    VB.arrowDeleteSel(c.doc, op.fills, op.edgeKeys);
+  });
+  defineOp("regionTransform", function (c, op) {
+    c.history.push(c.project);
+    VB.regionTransform(c.doc, op.points, op.m);
+  });
+  defineOp("regionDelete", function (c, op) {
+    c.history.push(c.project);
+    VB.regionDelete(c.doc, op.points);
+  });
+  // text ops are self-contained: they carry font subsets + baked
+  // advances, so replay never depends on installed fonts
+  defineOp("textCreate", function (c, op) {
+    c.history.push(c.project);
+    VB.textApplyOp(c.doc, op);
+  });
+  defineOp("textEdit", function (c, op) {
+    c.history.push(c.project);
+    VB.textEditApply(c.doc, op);
+  });
+  defineOp("textTransform", function (c, op) {
+    c.history.push(c.project);
+    VB.textTransformApply(c.doc, op.index, op.m);
+  });
+  defineOp("textDelete", function (c, op) {
+    c.history.push(c.project);
+    VB.textDeleteApply(c.doc, op.index);
+  });
+  defineOp("textBreak", function (c, op) {
+    c.history.push(c.project);
+    VB.textBreakApply(c.doc, op.index);
+  });
+  defineOp("textWrap", function (c, op) {
+    c.history.push(c.project);
+    VB.textWrapApply(c.doc, op.index, op.width, op.dx);
+  });
+  defineOp("textSize", function (c, op) {
+    c.history.push(c.project);
+    VB.textSizeApply(c.doc, op.index, op.height, op.dy);
+  });
+  defineOp("textBoxH", function (c, op) {
+    c.history.push(c.project);
+    VB.textBoxHApply(c.doc, op.index, op.height, op.dy);
+  });
+  defineOp("undo", function (c) {
+    c.history.undo(c.project);
+    c.sync();
+  });
+  defineOp("redo", function (c) {
+    c.history.redo(c.project);
+    c.sync();
+  });
+
   /**
-   * Replays a journal through the real tool code paths.
+   * Replays a journal through the real tool code paths — the SAME
+   * command functions the live app dispatches through app.exec.
    *  ops:   the journal array
    *  hooks: optional { onOp(index, op, doc) } called AFTER each op —
    *         throw from it to abort (used by the replay harness to run
@@ -46,189 +235,20 @@
    * single-layer project — identical behavior.
    */
   async function replayJournal(ops, hooks) {
-    var project = new VB.Project();
-    var history = new VB.History();
-    var doc = project.activeCell();
-
-    function sync() { doc = project.activeCell(); }
+    var ctx = {
+      project: new VB.Project(),
+      history: new VB.History(),
+      doc: null,
+      sync: function () { ctx.doc = ctx.project.activeCell(); }
+    };
+    ctx.sync();
 
     for (var i = 0; i < ops.length; i++) {
-      var op = ops[i];
-      switch (op.op) {
-        case "new":
-          project = new VB.Project(op.width, op.height);
-          history.clear();
-          sync();
-          break;
-        case "load": {
-          var bytes = b64ToBytes(op.b64);
-          var result = VB.isVBD(bytes)
-            ? await VB.decodeVBD(bytes)
-            : await VB.parseSWF(bytes.buffer);
-          project = result.project || VB.wrapDoc(result.doc);
-          history.clear();
-          sync();
-          break;
-        }
-        case "layerAdd":
-          history.push(project);
-          project.addLayer(op.name);
-          sync();
-          break;
-        case "layerDelete":
-          history.push(project);
-          project.deleteLayer(op.index);
-          sync();
-          break;
-        case "layerMove":
-          history.push(project);
-          project.moveLayer(op.from, op.to);
-          sync();
-          break;
-        case "layerRename":
-          history.push(project);
-          project.scene().layers[op.index].name = op.name;
-          break;
-        case "layerSelect":
-          project.selectLayer(op.index);
-          sync();
-          break;
-        case "layerVisible":
-          project.scene().layers[op.index].visible = !!op.on;
-          break;
-        case "layerLock":
-          project.scene().layers[op.index].locked = !!op.on;
-          break;
-        case "sceneAdd":
-          history.push(project);
-          project.addScene(op.name);
-          sync();
-          break;
-        case "sceneSelect":
-          project.selectScene(op.index);
-          sync();
-          break;
-        case "pencil":
-          history.push(project);
-          VB.pencilCommit(doc, op.points, op.style,
-            op.tolerance === null ? undefined : op.tolerance,
-            op.snapTol);
-          break;
-        case "bucket": {
-          history.push(project);
-          var r = VB.bucketFill(doc, op.x, op.y, { color: op.color });
-          if (r.stamped === 0) history.undoStack.pop(); // mirror the tool
-          break;
-        }
-        case "erase": {
-          history.push(project);
-          var re = VB.eraseStroke(doc, op.points, op.radius);
-          if (re.removed === 0 && re.boundary === 0) history.undoStack.pop();
-          break;
-        }
-        case "brush":
-          history.push(project);
-          VB.brushStroke(doc, op.points, op.radius, op.color);
-          break;
-        case "line":
-          history.push(project);
-          VB.lineCommit(doc, op.a, op.b, op.style, op.snapTol);
-          break;
-        case "oval":
-          history.push(project);
-          VB.shapeCommit(doc, VB.ellipseLoop(
-            (op.x0 + op.x1) / 2, (op.y0 + op.y1) / 2,
-            (op.x1 - op.x0) / 2, (op.y1 - op.y0) / 2), op.fill, op.line);
-          break;
-        case "rect":
-          history.push(project);
-          VB.shapeCommit(doc, VB.rectLoop(op.x0, op.y0, op.x1, op.y1),
-            op.fill, op.line);
-          break;
-        case "reshape":
-          history.push(project);
-          VB.arrowReshape(doc, op.key, op.t, op.x, op.y);
-          break;
-        case "moveNode":
-          history.push(project);
-          VB.arrowMoveNode(doc, op.x, op.y, op.nx, op.ny);
-          break;
-        case "moveFill":
-          history.push(project);
-          VB.arrowMoveFill(doc, op.x, op.y, op.dx, op.dy);
-          break;
-        case "deleteFill":
-          history.push(project);
-          VB.arrowDeleteFill(doc, op.x, op.y);
-          break;
-        case "deleteEdge":
-          history.push(project);
-          VB.arrowDeleteEdge(doc, op.key);
-          break;
-        case "transformSel":
-          history.push(project);
-          VB.arrowTransformSel(doc, op.fills, op.edgeKeys, op.m);
-          break;
-        case "deleteSel":
-          history.push(project);
-          VB.arrowDeleteSel(doc, op.fills, op.edgeKeys);
-          break;
-        case "regionTransform":
-          history.push(project);
-          VB.regionTransform(doc, op.points, op.m);
-          break;
-        case "regionDelete":
-          history.push(project);
-          VB.regionDelete(doc, op.points);
-          break;
-        case "textCreate":
-          // self-contained: the op carries its font subset + baked
-          // advances, so replay never depends on installed fonts
-          history.push(project);
-          VB.textApplyOp(doc, op);
-          break;
-        case "textEdit":
-          history.push(project);
-          VB.textEditApply(doc, op);
-          break;
-        case "textTransform":
-          history.push(project);
-          VB.textTransformApply(doc, op.index, op.m);
-          break;
-        case "textDelete":
-          history.push(project);
-          VB.textDeleteApply(doc, op.index);
-          break;
-        case "textBreak":
-          history.push(project);
-          VB.textBreakApply(doc, op.index);
-          break;
-        case "textWrap":
-          history.push(project);
-          VB.textWrapApply(doc, op.index, op.width, op.dx);
-          break;
-        case "textSize":
-          history.push(project);
-          VB.textSizeApply(doc, op.index, op.height, op.dy);
-          break;
-        case "textBoxH":
-          history.push(project);
-          VB.textBoxHApply(doc, op.index, op.height, op.dy);
-          break;
-        case "undo":
-          history.undo(project);
-          sync();
-          break;
-        case "redo":
-          history.redo(project);
-          sync();
-          break;
-        default:
-          throw new Error("unknown journal op: " + op.op);
-      }
-      if (hooks && hooks.onOp) hooks.onOp(i, op, doc);
+      await applyOp(ctx, ops[i]);
+      if (hooks && hooks.onOp) hooks.onOp(i, ops[i], ctx.doc);
     }
-    return { doc: project.activeCell(), project: project, history: history };
+    return { doc: ctx.project.activeCell(), project: ctx.project,
+             history: ctx.history };
   }
 
   // Standard integrity sweep used by the replay harness and tests.
@@ -270,4 +290,6 @@
   VB.integrityReport = integrityReport;
   VB.bytesToB64 = bytesToB64;
   VB.b64ToBytes = b64ToBytes;
+  VB.defineOp = defineOp;
+  VB.applyOp = applyOp;
 })();

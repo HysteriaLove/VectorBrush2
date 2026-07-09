@@ -50,6 +50,24 @@
     set: function (d) { app.project = VB.wrapDoc(d); }
   });
 
+  // Command-pattern workflow: journal + apply in ONE call, dispatched
+  // through the same registered command the replay uses (journal.js
+  // VB.defineOp/applyOp) — live and replay cannot diverge for anything
+  // routed through here. The command manages its own history snapshot.
+  var execCtx = {
+    get doc() { return app.doc; },
+    get project() { return app.project; },
+    set project(p) { app.project = p; },
+    get history() { return app.history; },
+    sync: function () {} // live doc/project are getters — always current
+  };
+  app.exec = function (op) {
+    app.record(op);
+    var r = VB.applyOp(execCtx, op);
+    app.docChanged();
+    return r;
+  };
+
   // Undo snapshots capture the WHOLE project, so layer add/delete/move
   // are single undo steps. Tools call app.history.push(app.doc) — the
   // wrapper ignores the argument and snapshots the project.
