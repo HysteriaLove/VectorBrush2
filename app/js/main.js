@@ -1411,6 +1411,91 @@
       });
       list.appendChild(row);
     });
+
+    // De-facto materials (user directive): every color with an
+    // APPEARANCE on this canvas is a material — each fill style an edge
+    // claims (bucket) and each line style an edge carries (line) lists
+    // here whether or not it was crafted into the library. Clicking one
+    // adopts it as the current bucket/pencil style.
+    var doc = app.doc;
+    var usedFills = [], usedLines = [];
+    doc.edges.forEach(function (e) {
+      if (e.fill0 > 0 && usedFills.indexOf(e.fill0) < 0) usedFills.push(e.fill0);
+      if (e.fill1 > 0 && usedFills.indexOf(e.fill1) < 0) usedFills.push(e.fill1);
+      if (e.line > 0 && usedLines.indexOf(e.line) < 0) usedLines.push(e.line);
+    });
+    usedFills.sort(function (a, b) { return a - b; });
+    usedLines.sort(function (a, b) { return a - b; });
+    function inLibrary(style) {
+      var j = JSON.stringify(style);
+      return mats.some(function (m) { return JSON.stringify(m) === j; });
+    }
+    function colorEq(a, b) {
+      return a.r === b.r && a.g === b.g && a.b === b.b && a.a === b.a;
+    }
+    var derivedRows = [];
+    usedFills.forEach(function (fi) {
+      var style = doc.fills[fi - 1];
+      if (style && !inLibrary(style)) derivedRows.push({ kind: "bucket", style: style });
+    });
+    usedLines.forEach(function (li) {
+      var ls = doc.lines[li - 1];
+      if (ls) derivedRows.push({ kind: "line", style: ls });
+    });
+    if (derivedRows.length) {
+      var divider = document.createElement("div");
+      divider.className = "matdivider";
+      divider.textContent = "on canvas";
+      list.appendChild(divider);
+    }
+    derivedRows.forEach(function (d) {
+      var row = document.createElement("div");
+      var active;
+      if (d.kind === "line") {
+        active = colorEq(app.strokeColor, d.style.color) &&
+                 app.strokeWidth === d.style.width;
+      } else if (d.style.type === "solid") {
+        active = !app.fillMaterial && colorEq(app.fillColor, d.style.color);
+      } else {
+        active = !!app.fillMaterial &&
+          JSON.stringify(app.fillMaterial) === JSON.stringify(d.style);
+      }
+      row.className = "matrow2" + (active ? " active" : "");
+      var sw = document.createElement("span");
+      sw.className = "sw";
+      sw.style.background = d.kind === "line"
+        ? VB.colorToCSS(d.style.color) : matSwatchCSS(d.style);
+      var nm = document.createElement("span");
+      nm.className = "mname";
+      nm.textContent = d.kind === "line"
+        ? colorToHex(d.style.color) + " · " + (d.style.width / VB.TWIPS) + "px"
+        : (d.style.type === "solid" ? colorToHex(d.style.color) : d.style.type);
+      var badge = document.createElement("span");
+      badge.className = "badge";
+      badge.textContent = d.kind;
+      row.appendChild(sw); row.appendChild(nm); row.appendChild(badge);
+      row.addEventListener("click", function () {
+        if (d.kind === "line") {
+          app.strokeColor = JSON.parse(JSON.stringify(d.style.color));
+          app.strokeWidth = d.style.width;
+          colorInput.value = colorToHex(d.style.color);
+          widthInput.value = String(d.style.width / VB.TWIPS);
+          setMsg("line material is now the pencil style");
+        } else if (d.style.type === "solid") {
+          matSelected = -1;
+          app.fillMaterial = null;
+          app.fillColor = JSON.parse(JSON.stringify(d.style.color));
+          fillInput.value = colorToHex(d.style.color);
+          setMsg("bucket material is now the fill color");
+        } else {
+          matSelected = -1;
+          app.fillMaterial = VB.materialClone(d.style);
+          setMsg("material is now the drawing color");
+        }
+        refreshMaterials();
+      });
+      list.appendChild(row);
+    });
     syncMatEditor();
   }
 
