@@ -283,6 +283,51 @@
   }
   #text-opts .txtstyle.active { background: var(--accent); border-color: var(--accent); color: #fff; }
   #text-opts input[type=number] { width: 52px; }
+  /* workspace bar — the project sections as tabs (Architecture §2) */
+  #workspacebar {
+    flex: none; height: 32px;
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 8px;
+    background: #1b1d20;
+    border-bottom: 1px solid var(--panel-edge);
+    font-size: 12px; color: var(--text);
+    user-select: none;
+  }
+  #workspacebar button {
+    background: #2b2d31; color: var(--text);
+    border: 1px solid var(--panel-edge); border-radius: 3px;
+    height: 24px; padding: 0 10px; cursor: pointer;
+  }
+  #workspacebar button:hover { background: #3a3d42; }
+  #ws-name {
+    color: var(--text-dim); max-width: 160px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #ws-tabs { flex: 1; display: flex; gap: 2px; overflow-x: auto; }
+  .wstab {
+    flex: none; padding: 4px 12px; cursor: pointer;
+    color: var(--text-dim); border-radius: 4px 4px 0 0;
+    border: 1px solid transparent; border-bottom: none;
+  }
+  .wstab:hover { color: var(--text); background: #26282c; }
+  .wstab.active {
+    color: #6cf; background: var(--panel);
+    border-color: var(--panel-edge);
+  }
+  /* stub workspaces: future sections mount here; the editor hides */
+  #workspace-stub { display: none; }
+  body.ws-stub-mode #propbar,
+  body.ws-stub-mode #timebar,
+  body.ws-stub-mode #middle { display: none; }
+  body.ws-stub-mode #workspace-stub {
+    display: flex; flex: 1;
+    align-items: center; justify-content: center;
+    background: #26282c; color: var(--text);
+    text-align: center;
+  }
+  #ws-stub-title { color: #6cf; margin-bottom: 8px; }
+  #ws-stub-note { color: var(--text-dim); max-width: 480px; line-height: 1.6; }
+
   /* timeline rail (Sequence/Roughs) — frame columns of the active layer */
   #timebar {
     flex: none; height: 30px;
@@ -412,6 +457,12 @@
 </style>
 </head>
 <body>
+  <div id="workspacebar">
+    <button id="ws-home" title="Save and return to the projects menu">◀ Projects</button>
+    <span id="ws-name">scratch</span>
+    <div id="ws-tabs"></div>
+    <button id="ws-save" title="Save the project package now">Save</button>
+  </div>
   <div id="home-screen">
     <div id="home-panel">
       <div id="home-brand">Vector<span>Brush</span> <em>· projects</em></div>
@@ -503,6 +554,13 @@
     </label>
     <span id="tl-counter">1 / 1</span>
     <div id="tl-frames"></div>
+  </div>
+
+  <div id="workspace-stub">
+    <div>
+      <h2 id="ws-stub-title"></h2>
+      <p id="ws-stub-note"></p>
+    </div>
   </div>
 
   <div id="middle">

@@ -23,6 +23,84 @@
   var sessions = new Map(); // project id -> Session (this page load)
   var bootSession = app.session; // #demo/#sketch keep the boot session
 
+  // ---- workspaces (Architecture §2: the nine sections as tabs) -----------------
+  // Sections marked editor:true show the current editor (the
+  // DrawingSurface hosts — Roughs and Actors per the architecture);
+  // the rest are stub workspaces their build-order steps mount into.
+  var SECTIONS = [
+    { id: "brainstorm", label: "Brainstorm",
+      note: "Infinite canvas for references and NoteObjects — build-order step 7 (Architecture §6.1)." },
+    { id: "writing", label: "Writing",
+      note: "Documents and dialogue Lines, the app-wide language backbone — step 5 (Architecture §6.2)." },
+    { id: "storyboards", label: "Storyboards",
+      note: "Panels and beats, playable as an animatic — step 5 (Architecture §6.3)." },
+    { id: "audio", label: "Audio",
+      note: "Stems → edits → the baked master track — step 4 (Architecture §6.4)." },
+    { id: "roughs", label: "Roughs", editor: true,
+      note: "" },
+    { id: "actors", label: "Actors", editor: true,
+      note: "" },
+    { id: "compositing", label: "Compositing",
+      note: "Placements, camera, and per-scene tracks — step 6 (Architecture §6.7)." },
+    { id: "post", label: "Post",
+      note: "Effect stacks over the composited frame — step 8 (Architecture §6.8)." },
+    { id: "export", label: "Export",
+      note: "Every render, reproducible from its journal revision — step 8 (Architecture §6.9)." }
+  ];
+  var activeSection = "roughs";
+
+  function sectionById(id) {
+    if (id === "sketch") id = "roughs"; // legacy route alias
+    for (var i = 0; i < SECTIONS.length; i++) {
+      if (SECTIONS[i].id === id) return SECTIONS[i];
+    }
+    return null;
+  }
+
+  function setSection(id) {
+    var sec = sectionById(id) || sectionById("roughs");
+    activeSection = sec.id;
+    var tabs = document.getElementById("ws-tabs").children;
+    for (var i = 0; i < tabs.length; i++) {
+      tabs[i].classList.toggle("active", tabs[i].dataset.sec === sec.id);
+    }
+    document.body.classList.toggle("ws-stub-mode", !sec.editor);
+    if (!sec.editor) {
+      document.getElementById("ws-stub-title").textContent = sec.label;
+      document.getElementById("ws-stub-note").textContent = sec.note;
+    }
+    // editor input (keyboard/tools) only while an editor section shows
+    app.uiActive = !!sec.editor && overlay.style.display !== "flex";
+    if (sec.editor) app.requestRender();
+  }
+
+  (function renderTabs() {
+    var wrap = document.getElementById("ws-tabs");
+    SECTIONS.forEach(function (sec) {
+      var tab = document.createElement("div");
+      tab.className = "wstab";
+      tab.dataset.sec = sec.id;
+      tab.textContent = sec.label;
+      tab.addEventListener("click", function () {
+        if (activeProjectId) {
+          location.hash = "#project/" + activeProjectId + "/" + sec.id;
+        } else {
+          setSection(sec.id); // scratch/demo: no package behind the route
+        }
+      });
+      wrap.appendChild(tab);
+    });
+  })();
+
+  document.getElementById("ws-home").addEventListener("click", function () {
+    location.hash = "#home"; // route-away flush persists the project
+  });
+  document.getElementById("ws-save").addEventListener("click", async function () {
+    if (!activeProjectId) { app.setMsg("scratch sketches have no package — create a project"); return; }
+    await flushProject(activeProjectId);
+    app.setMsg("project saved");
+  });
+
   var store = null;
   var storeReady = VB.PackageStore
     ? VB.PackageStore.open().then(
@@ -238,10 +316,12 @@
     renderHome();
   }
 
-  function showEditor() {
+  /** Leaves the homescreen and shows a workspace: editor sections mount
+   *  the renderer; stub sections cover the editor until their step. */
+  function showWorkspace(sectionId) {
     overlay.style.display = "none";
-    app.uiActive = true;
     app.mountRenderer();
+    setSection(sectionId);
   }
 
   async function doApplyRoute() {
@@ -257,11 +337,14 @@
       // the boot session: demo fixture (built by main.js) or a scratch
       // sketch with no package behind it
       app.bindSession(bootSession);
-      showEditor();
+      document.getElementById("ws-name").textContent = "scratch";
+      showWorkspace("roughs");
       return;
     }
     if (h.indexOf("#project/") === 0) {
-      var id = h.split("/")[1];
+      var parts = h.slice(1).split("/");
+      var id = parts[1];
+      var section = sectionById(parts[2] || "roughs") ? (parts[2] || "roughs") : "roughs";
       await storeReady;
       var rec = null;
       if (store) {
@@ -286,7 +369,8 @@
       app.bindSession(sess);
       app.fileName = rec.name;
       activeProjectId = id;
-      showEditor();
+      document.getElementById("ws-name").textContent = rec.name;
+      showWorkspace(section);
       return;
     }
     showHome();
@@ -312,6 +396,7 @@
       return applyRoute();
     },
     flush: flushProject,
+    section: function () { return activeSection; },
     storeReady: function () { return storeReady; },
     store: function () { return store; }
   };
