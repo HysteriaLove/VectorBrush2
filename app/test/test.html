@@ -56,6 +56,7 @@
 <script src="../js/ttf.js"></script>
 <script src="../js/fonts-builtin.js"></script>
 <script src="../js/session.js"></script>
+<script src="../js/packagestore.js"></script>
 <script src="fixtures.js"></script>
 <script src="ttffixture.js"></script>
 <script src="fontswf.js"></script>
@@ -2956,6 +2957,106 @@
     fail++;
     log("  VISUAL EXCEPTION: " + (err && err.stack || err), "fail");
   }
+
+  // ============================ package store ================================
+  // The .y2kproj package (packagestore.js): many small addressable units
+  // in IndexedDB, honest range reads, zip interchange, segmented journal
+  // (Implementation.md phase 3). Isolated db per run, deleted at the end.
+  log("");
+  log("package store:");
+  var pdbName = "vbtest-pkg-" + Date.now();
+  // Keepalive for headless gates: under --virtual-time-budget, IndexedDB
+  // completions arrive from a real IO thread while virtual time races
+  // past and the budget expires with the work still pending. A
+  // setTimeout(0) chain keeps macrotasks turning (real time keeps
+  // passing) so every IDB event gets a turn to dispatch. Test-page
+  // concern only — headed browsers never run under virtual time.
+  var pkgTicking = true;
+  (function pkgTick() { if (pkgTicking) setTimeout(pkgTick, 0); })();
+  try {
+    var pstore = await VB.PackageStore.open(pdbName);
+    var prec = await pstore.create({ name: "Suite Project" });
+    var plist = await pstore.list();
+    check("project appears in the index",
+      plist.some(function (r) { return r.id === prec.id && r.name === "Suite Project"; }),
+      plist.length + " projects");
+
+    var ph = pstore.open(prec.id);
+    var pdoc = new VB.Y2KVectorDocument();
+    pdoc.width = 11000; pdoc.height = 8000;
+    VB.pencilCommit(pdoc, [{ x: 1000, y: 1000 }, { x: 9000, y: 2000 }],
+                    { width: 20, color: { r: 0, g: 0, b: 0, a: 255 } });
+    var pbytes = await VB.encodeY2KVector(pdoc, { compress: true });
+    await ph.writeUnit("scenes/scene-1/roughs/frame-1.y2kvector", pbytes);
+    await ph.writeUnit("notes/hello.txt", "infinite canvas");
+    await ph.flushManifest({ format: "y2kproj", version: 1, name: "Suite Project" });
+
+    function sameBytes(a, b) {
+      if (!a || !b || a.length !== b.length) return false;
+      for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+      return true;
+    }
+    var backBytes = await pstore.open(prec.id)
+      .readUnit("scenes/scene-1/roughs/frame-1.y2kvector");
+    var backDoc = await VB.decodeY2KVector(backBytes);
+    check("units round-trip byte-identical and decode",
+      sameBytes(backBytes, pbytes) &&
+      JSON.stringify(backDoc.doc.edges) === JSON.stringify(pdoc.edges),
+      (backBytes ? backBytes.length : "null") + " vs " + pbytes.length + " bytes");
+
+    var range = await ph.readRange("scenes/scene-1/roughs/frame-1.y2kvector", 5, 16);
+    check("range read equals the whole-read slice",
+      sameBytes(range, pbytes.subarray(5, 21)) &&
+      (await ph.unitSize("scenes/scene-1/roughs/frame-1.y2kvector")) === pbytes.length,
+      range && range.length + " bytes at 5..21");
+
+    var scoped = await ph.listUnits("scenes/");
+    check("listUnits filters by prefix",
+      scoped.length === 1 && (await ph.listUnits()).length === 3,
+      scoped.join(", "));
+
+    var zblob = await ph.exportZip();
+    var imported = await pstore.importZip(zblob, { name: "Imported Copy" });
+    var ih = pstore.open(imported.id);
+    var iPaths = await ih.listUnits();
+    var iManifest = await ih.manifest();
+    check("zip export → import reproduces the unit tree",
+      iPaths.join("|") === (await ph.listUnits()).join("|") &&
+      sameBytes(await ih.readUnit("scenes/scene-1/roughs/frame-1.y2kvector"), pbytes) &&
+      iManifest && iManifest.format === "y2kproj",
+      iPaths.length + " units");
+
+    // segmented journal replay ≡ monolithic replay
+    var segOps = [{ op: "new", width: 11000, height: 8000 },
+      { op: "pencil", points: [{ x: 1000, y: 1000 }, { x: 5000, y: 1500 }],
+        style: { width: 20, color: { r: 0, g: 0, b: 0, a: 255 } } },
+      { op: "brush", points: [{ x: 2000, y: 4000 }, { x: 6000, y: 4200 }],
+        radius: 300, color: { r: 220, g: 40, b: 40, a: 255 } },
+      { op: "erase", points: [{ x: 3000, y: 3800 }, { x: 4500, y: 4300 }],
+        radius: 250 }];
+    var segs = VB.segmentJournal(segOps, 2);
+    check("journal segments split at the requested size",
+      segs.length === 2 && segs[0].path === "journal/seg-00001.json");
+    var joined = VB.joinJournalSegments(
+      [segs[1].json, segs[0].json]); // out of order on purpose
+    var repMono = await VB.replayJournal(JSON.parse(JSON.stringify(segOps)));
+    var repSeg = await VB.replayJournal(JSON.parse(JSON.stringify(joined)));
+    check("segmented journal replays byte-exact",
+      JSON.stringify(repSeg.doc.edges) === JSON.stringify(repMono.doc.edges),
+      repSeg.doc.edges.length + " vs " + repMono.doc.edges.length + " edges");
+
+    await pstore.remove(prec.id);
+    var afterRemove = await pstore.list();
+    check("remove deletes the project and its units",
+      !afterRemove.some(function (r) { return r.id === prec.id; }) &&
+      (await pstore.open(prec.id).listUnits()).length === 0,
+      afterRemove.length + " projects left");
+  } catch (err) {
+    fail++;
+    log("  PACKAGE EXCEPTION: " + (err && err.stack || err), "fail");
+  }
+  pkgTicking = false;
+  try { indexedDB.deleteDatabase(pdbName); } catch (e) {}
 
   // ============================ Session seam ================================
   // The ProjectSession (session.js) is what the coming shell mounts
