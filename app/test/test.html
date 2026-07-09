@@ -1157,6 +1157,34 @@
     check("scanline coverage matches per-pixel parity exactly",
       mism === 0, mism + " mismatched texels of " + (cbuf.w * cbuf.h));
 
+    // embedded matcap textures decode: a real PNG b64 goes from
+    // "loading" (null) to a 256² texture, with onMatcapReady fired —
+    // the custom "Load…" pipeline end to end
+    var tinyCv = document.createElement("canvas");
+    tinyCv.width = 8; tinyCv.height = 8;
+    var tinyCtx = tinyCv.getContext("2d");
+    tinyCtx.fillStyle = "rgb(200,50,25)";
+    tinyCtx.fillRect(0, 0, 8, 8);
+    var tinyB64 = tinyCv.toDataURL("image/png").split(",")[1];
+    var embStyle = VB.materialDefaults("matcap");
+    embStyle.matcap = { b64: tinyB64 };
+    var ready = new Promise(function (resolve) {
+      var prevReady = VB.onMatcapReady;
+      VB.onMatcapReady = function () {
+        VB.onMatcapReady = prevReady;
+        resolve();
+      };
+      setTimeout(resolve, 3000); // decode watchdog
+    });
+    var first = VB.matcapTexture(embStyle);
+    await ready;
+    var texEmb = VB.matcapTexture(embStyle);
+    check("embedded matcap decodes to a usable texture",
+      first === null && texEmb && texEmb.w === 256 &&
+      texEmb.data[0] > 150 && texEmb.data[1] < 120,
+      (first === null) + "/" + (texEmb && texEmb.w) + "/" +
+      (texEmb && texEmb.data[0] + "," + texEmb.data[1]));
+
     // vbd: tag-4 matcap with builtin id and embedded texture round-trips
     var mstyle = VB.materialDefaults("matcap");
     mstyle.matcap = "chrome";

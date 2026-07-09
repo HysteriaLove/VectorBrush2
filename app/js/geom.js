@@ -213,8 +213,10 @@
   }
 
   // All transversal intersections between two edges: [{t, u, point}].
-  function edgeIntersections(ea, eb) {
-    if (!bboxOverlap(edgeBBox(ea), edgeBBox(eb))) return [];
+  // preChecked: caller already did a bbox rejection with its own cached
+  // boxes — skip re-allocating two boxes per tested pair here.
+  function edgeIntersections(ea, eb, preChecked) {
+    if (!preChecked && !bboxOverlap(edgeBBox(ea), edgeBBox(eb))) return [];
     var hits;
     if (ea.cx === null && eb.cx === null) {
       var ll = lineLine(ea.ax, ea.ay, ea.bx, ea.by, eb.ax, eb.ay, eb.bx, eb.by);

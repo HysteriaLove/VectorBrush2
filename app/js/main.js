@@ -1531,17 +1531,21 @@
   document.getElementById("mat-matcap-file").addEventListener("change", function (ev) {
     var file = ev.target.files && ev.target.files[0];
     ev.target.value = "";
-    if (!file || matSelected < 0) return;
+    var mats = app.project.materials || [];
+    if (!file || matSelected < 0 || matSelected >= mats.length) return;
     var reader = new FileReader();
     reader.onload = function () {
       var b64 = String(reader.result).split(",")[1] || "";
-      var style = VB.materialClone(app.doc.fills[matSelected]);
+      // the GLOBAL library entry (this handler predated the library
+      // rework and read the cell fill table — the silent no-op bug)
+      var style = VB.materialClone(mats[matSelected]);
       if (style.type !== "matcap") return;
       style.matcap = { b64: b64 };
       var keep = matSelected;
-      app.exec({ op: "fillStyle", index: keep, style: style });
+      app.exec({ op: "materialEdit", index: keep, style: style });
       matSelected = keep;
       refreshMaterials();
+      setMsg("matcap image embedded in the material");
     };
     reader.readAsDataURL(file);
   });

@@ -32,38 +32,38 @@
     var edges = doc.edges;
     var violations = [];
 
-    // Coarse uniform grid over edge bboxes to avoid O(E²).
+    // Coarse uniform grid over edge bboxes to avoid O(E²). NUMERIC
+    // keys throughout — the string keys and per-pair re-boxing used to
+    // dominate this function's cost on every commit.
     var CELL = 512; // twips
+    var OFF = 32768; // grid coords are small; offset keeps keys positive
     var grid = new Map();
-    function cellsOf(bb) {
-      var cells = [];
-      for (var gx = Math.floor(bb.xmin / CELL); gx <= Math.floor(bb.xmax / CELL); gx++) {
-        for (var gy = Math.floor(bb.ymin / CELL); gy <= Math.floor(bb.ymax / CELL); gy++) {
-          cells.push(gx + "," + gy);
-        }
-      }
-      return cells;
-    }
     var bboxes = edges.map(VB.geom.edgeBBox);
     for (var i = 0; i < edges.length; i++) {
-      var cells = cellsOf(bboxes[i]);
-      for (var c = 0; c < cells.length; c++) {
-        var list = grid.get(cells[c]);
-        if (!list) { list = []; grid.set(cells[c], list); }
-        list.push(i);
+      var bb = bboxes[i];
+      var gx0 = Math.floor(bb.xmin / CELL), gx1 = Math.floor(bb.xmax / CELL);
+      var gy0 = Math.floor(bb.ymin / CELL), gy1 = Math.floor(bb.ymax / CELL);
+      for (var gx = gx0; gx <= gx1; gx++) {
+        for (var gy = gy0; gy <= gy1; gy++) {
+          var key = (gx + OFF) * 65536 + (gy + OFF);
+          var list = grid.get(key);
+          if (!list) { list = []; grid.set(key, list); }
+          list.push(i);
+        }
       }
     }
 
+    var E = edges.length;
     var tested = new Set();
     grid.forEach(function (list) {
       for (var a = 0; a < list.length && violations.length < cap; a++) {
         for (var b = a + 1; b < list.length; b++) {
           var i2 = list[a], j2 = list[b];
-          var pairKey = i2 < j2 ? i2 + ":" + j2 : j2 + ":" + i2;
+          var pairKey = i2 < j2 ? i2 * E + j2 : j2 * E + i2;
           if (tested.has(pairKey)) continue;
           tested.add(pairKey);
           if (!VB.geom.bboxOverlap(bboxes[i2], bboxes[j2])) continue;
-          var hits = VB.geom.edgeIntersections(edges[i2], edges[j2]);
+          var hits = VB.geom.edgeIntersections(edges[i2], edges[j2], true);
           for (var h = 0; h < hits.length; h++) {
             var p = hits[h].point;
             if (nearAnchor(edges[i2], p.x, p.y) || nearAnchor(edges[j2], p.x, p.y)) continue;
