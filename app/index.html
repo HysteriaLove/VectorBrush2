@@ -288,9 +288,45 @@
     max-width: 70%;
   }
   #toast.show { opacity: 1; }
+
+  /* homescreen shell (shell.js) — covers the editor on #home */
+  #home-screen {
+    position: fixed; inset: 0;
+    background: #26282c;
+    z-index: 60;
+    display: none;
+    justify-content: center;
+    align-items: flex-start;
+    overflow: auto;
+  }
+  #home-panel { margin-top: 60px; width: 560px; max-width: 92vw; }
+  #home-brand { font-size: 22px; color: #eee; margin-bottom: 14px; }
+  #home-brand span { color: #6cf; }
+  #home-brand em { color: #888; font-style: normal; font-size: 13px; }
+  #home-new { margin-bottom: 12px; }
+  .home-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px; margin-bottom: 6px;
+    background: #2e3136; border: 1px solid #3a3d42; border-radius: 4px;
+  }
+  .home-row .nm { flex: 1; color: #ddd; cursor: pointer; }
+  .home-row .nm:hover { color: #6cf; }
+  .home-row .when { color: #777; font-size: 11px; }
+  #home-empty { color: #888; padding: 18px 4px; }
+  #home-hint { color: #666; font-size: 11px; margin-top: 14px; }
 </style>
 </head>
 <body>
+  <div id="home-screen">
+    <div id="home-panel">
+      <div id="home-brand">Vector<span>Brush</span> <em>· projects</em></div>
+      <button id="home-new">＋ New Project</button>
+      <div id="home-projects"></div>
+      <div id="home-hint">Rung-0 prototype shell — projects live in this
+        browser's package store; drawing persistence lands with
+        Implementation.md phase 6.</div>
+    </div>
+  </div>
   <div id="topbar">
     <div class="brand">Vector<span>Brush</span></div>
     <button id="btn-open" title="Open .swf or .y2kvector (legacy .vbd) (Ctrl+O)">Open…</button>
@@ -495,5 +531,6 @@
   <script src="lib/pixi.min.js"></script>
   <script src="js/pixi-render.js"></script>
   <script src="js/main.js"></script>
+  <script src="js/shell.js"></script>
 </body>
 </html>

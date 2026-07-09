@@ -77,6 +77,17 @@
     return rec;
   };
 
+  PackageStore.prototype.rename = async function (id, name) {
+    var tx = this.db.transaction("projects", "readwrite");
+    var projects = tx.objectStore("projects");
+    var rec = await preq(projects.get(id));
+    if (!rec) return null;
+    rec.name = name;
+    rec.modified = Date.now();
+    await preq(projects.put(rec));
+    return rec;
+  };
+
   PackageStore.prototype.remove = async function (id) {
     var tx = this.db.transaction(["projects", "units"], "readwrite");
     tx.objectStore("projects").delete(id);

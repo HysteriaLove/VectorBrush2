@@ -12,14 +12,14 @@
   var ctx = canvas.getContext("2d");
 
   // The session owns the open project's live state (session.js): store,
-  // journal, undo history, op dispatch. `app` is the GUI facade over it —
-  // tools keep their `app.*` surface, the coming shell (phase 5) mounts
-  // and disposes sessions.
-  var session = new VB.Session({ width: 550 * VB.TWIPS, height: 400 * VB.TWIPS });
-
+  // journal, undo history, op dispatch. `app` is the GUI facade over
+  // whichever session is BOUND — tools keep their `app.*` surface, the
+  // shell (shell.js) binds a session per project and mounts/unmounts
+  // the renderer around it.
   var app = {
     fileName: null,
     sourceBytes: 0,
+    uiActive: true,           // false while the homescreen covers the editor
     tool: "select",
     view: { zoom: 1, panX: 40, panY: 40, dpr: window.devicePixelRatio || 1 },
     strokeColor: { r: 0, g: 0, b: 0, a: 255 },
@@ -31,10 +31,8 @@
     debug: false,
     debugHover: -1,
     debugPin: -1,
-    session: session,
-    history: session.history,
-    record: function (op) { session.record(op); },
-    exec: function (op) { return session.exec(op); },
+    record: function (op) { app.session.record(op); },
+    exec: function (op) { return app.session.exec(op); },
     requestRender: requestRender,
     setMsg: setMsg,
     setCursor: function (c) { canvas.style.cursor = c || ""; },
@@ -49,30 +47,29 @@
     },
     docChanged: docChanged
   };
+  app.session = new VB.Session({ width: 550 * VB.TWIPS, height: 400 * VB.TWIPS });
 
+  Object.defineProperty(app, "history", {
+    get: function () { return app.session.history; }
+  });
   Object.defineProperty(app, "project", {
-    get: function () { return session.project; },
-    set: function (p) { session.project = p; }
+    get: function () { return app.session.project; },
+    set: function (p) { app.session.project = p; }
   });
   Object.defineProperty(app, "journal", {
-    get: function () { return session.journal; }
+    get: function () { return app.session.journal; }
   });
   Object.defineProperty(app, "errors", {
-    get: function () { return session.errors; }
+    get: function () { return app.session.errors; }
   });
 
   // Every tool and the boolean core edit ONE planar map: the active
   // layer's frame cell. Assigning a bare document (file loads) wraps it
   // as a single-layer project.
   Object.defineProperty(app, "doc", {
-    get: function () { return session.project.activeCell(); },
-    set: function (d) { session.project = VB.wrapDoc(d); }
+    get: function () { return app.session.project.activeCell(); },
+    set: function (d) { app.session.project = VB.wrapDoc(d); }
   });
-
-  // exec applies ops through the session's registered-command dispatch
-  // (live and replay share one code path); docChanged refresh rides the
-  // session's changed hook so future sections trigger it too.
-  session.onChanged = function () { app.docChanged(); };
 
   var tools = {
     select: VB.ArrowTool(app),
@@ -99,16 +96,38 @@
   // fallback when WebGL is unavailable; ?canvas2d (or
   // localStorage.vbRenderer = "canvas2d") forces it.
   var pixiSurface = null;
+  var pixiGen = 0; // guards against a create resolving after an unmount
   var canvas2dForced =
     /(^|[?&#])canvas2d(\b|=|$)/.test(location.search + location.hash) ||
     localStorage.getItem("vbRenderer") === "canvas2d";
-  if (!canvas2dForced && VB.createPixiSurface) {
+
+  // The shell mounts the renderer when an editor route shows and
+  // unmounts it on the homescreen — GPU surface and its AssetCache
+  // claims live only while the Sketch section is visible.
+  app.mountRenderer = function () {
+    var gen = ++pixiGen;
+    if (pixiSurface || canvas2dForced || !VB.createPixiSurface) {
+      requestRender();
+      return;
+    }
     VB.createPixiSurface(canvas.parentElement, canvas).then(function (s) {
+      if (!s) {
+        setMsg("WebGL unavailable — Canvas2D renderer");
+        requestRender();
+        return;
+      }
+      if (gen !== pixiGen || pixiSurface) { s.destroy(); return; }
       pixiSurface = s;
-      if (!s) setMsg("WebGL unavailable — Canvas2D renderer");
       requestRender();
     });
-  }
+  };
+  app.unmountRenderer = function () {
+    pixiGen++;
+    if (pixiSurface) {
+      pixiSurface.destroy(); // releases the surface's AssetCache claims
+      pixiSurface = null;
+    }
+  };
 
   var renderQueued = false;
   function requestRender() {
@@ -181,7 +200,7 @@
   // before the journal push on every path (tools record, then apply), so
   // the profile describes the document the op is about to act on.
   // Debug-only and side-effect free — replay never depends on it.
-  session.onRecord = function (op) {
+  function estimatorPreflight(op) {
     if (app.debug && VB.operationEstimate) {
       try {
         app.lastEstimate = VB.operationEstimate(
@@ -192,6 +211,32 @@
         trapError("estimator: " + err.message, err.stack);
       }
     }
+  }
+
+  // Wires a session's hooks to this GUI. exec-applied ops refresh through
+  // the session's changed hook, so future sections trigger it too.
+  function wireSession(sess) {
+    sess.onRecord = estimatorPreflight;
+    sess.onChanged = function () { app.docChanged(); };
+  }
+  wireSession(app.session);
+
+  /** The shell binds a different project's session; the editor rebinds
+   *  every view of it (selections dropped, layers/debug refreshed). */
+  app.bindSession = function (sess) {
+    if (sess === app.session) return;
+    app.session.onRecord = null;
+    app.session.onChanged = null;
+    app.session = sess;
+    wireSession(sess);
+    app.fileName = null;
+    app.sourceBytes = 0;
+    app.fillMaterial = null;
+    matSelected = -1;   // material library is per-project
+    refreshMaterials();
+    docChanged();       // drops selections, refreshes layers/debug
+    fitView();
+    updateStatus();
   };
 
   function fmtScore(n) {
@@ -605,6 +650,7 @@
   // ---- keyboard ---------------------------------------------------------------
 
   window.addEventListener("keydown", function (ev) {
+    if (!app.uiActive) return; // homescreen showing — editor keys off
     // typing in a form field (the text tool's hidden textarea, layer
     // rename, size inputs) must never trigger tool shortcuts
     var tag = ev.target && ev.target.tagName;

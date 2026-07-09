@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>SHELL RUNNING</title>
+<style>
+  body { background: #202225; color: #ddd; font: 12px Consolas, monospace; }
+  .fail { color: #ff7a7a; font-weight: bold; }
+  iframe { width: 1000px; height: 700px; border: 1px solid #444; }
+</style>
+</head><body>
+<pre id="out"></pre>
+<iframe id="fr" src="../index.html#home"></iframe>
+<script>
+/* shell.html — the shell remount tripwire (Implementation.md phase 5).
+ * Drives the real app in an iframe: create projects, draw, cycle
+ * mount/unmount, and assert the things that leak in exactly this kind
+ * of refactor — art lost on rebind, sessions duplicated, canvases
+ * accumulating, AssetCache claims surviving unmount. Global editor
+ * listeners are attached once by design (main.js), so canvas count and
+ * cache residency are the leak signals; per-mount listeners live on
+ * the pixi surface, which the canvas count covers.
+ */
+(async function () {
+  var out = [];
+  var pass = 0, fail = 0;
+  function log(line, cls) { out.push((cls === "fail" ? "FAIL " : "") + line); }
+  function check(name, cond, detail) {
+    if (cond) { pass++; log("  ok " + name); }
+    else { fail++; log(name + (detail ? " — " + detail : ""), "fail"); }
+  }
+  function flush() { document.getElementById("out").textContent = out.join("\n"); }
+
+  // keepalive: IDB completions need real macrotask turns under
+  // --virtual-time-budget (same lesson as the suite's package section)
+  var ticking = true;
+  (function tick() { if (ticking) setTimeout(tick, 0); })();
+
+  try {
+    var fr = document.getElementById("fr");
+    var W = await new Promise(function (res) {
+      function probe() {
+        var w = fr.contentWindow;
+        if (w && w.VBShell && w.VBApp) { res(w); return; }
+        setTimeout(probe, 5);
+      }
+      fr.addEventListener("load", probe);
+      probe();
+    });
+    var shell = W.VBShell, app = W.VBApp;
+    await shell.storeReady();
+    var store = shell.store();
+    if (!store) throw new Error("package store unavailable");
+    await shell.applyRoute(); // initial #home settled
+
+    var A = await store.create({ name: "Tripwire A" });
+    var B = await store.create({ name: "Tripwire B" });
+
+    var baseCanvases = W.document.querySelectorAll("canvas").length;
+
+    await shell.goto("#project/" + A.id + "/sketch");
+    check("route binds project A's session",
+      app.session === shell.sessions.get(A.id) && app.uiActive === true);
+    app.exec({ op: "pencil",
+               points: [{ x: 1000, y: 1000 }, { x: 6000, y: 1400 }],
+               style: { width: 20, color: { r: 0, g: 0, b: 0, a: 255 } } });
+    var edgesA = app.doc.edges.length;
+    check("draw lands in project A", edgesA > 0, edgesA + " edges");
+
+    await shell.goto("#project/" + B.id + "/sketch");
+    check("project B opens with its own empty session",
+      app.doc.edges.length === 0 && app.session === shell.sessions.get(B.id),
+      app.doc.edges.length + " edges");
+    app.exec({ op: "brush",
+               points: [{ x: 2000, y: 3000 }, { x: 6000, y: 3300 }],
+               radius: 300, color: { r: 220, g: 40, b: 40, a: 255 } });
+    var edgesB = app.doc.edges.length;
+
+    for (var i = 0; i < 4; i++) {
+      await shell.goto("#home");
+      check("cycle " + i + ": homescreen deactivates the editor",
+        app.uiActive === false);
+      await shell.goto("#project/" + A.id + "/sketch");
+      check("cycle " + i + ": project A art persists across remount",
+        app.doc.edges.length === edgesA,
+        app.doc.edges.length + " vs " + edgesA + " edges");
+    }
+    await shell.goto("#project/" + B.id + "/sketch");
+    check("project B art untouched by the cycles",
+      app.doc.edges.length === edgesB,
+      app.doc.edges.length + " vs " + edgesB + " edges");
+
+    await shell.goto("#home");
+    var endCanvases = W.document.querySelectorAll("canvas").length;
+    check("canvas count stable across remounts",
+      endCanvases === baseCanvases, baseCanvases + " -> " + endCanvases);
+    check("session registry holds exactly the two projects",
+      shell.sessions.size === 2, shell.sessions.size + " sessions");
+    check("AssetCache fully released on the homescreen",
+      W.VB.assets.stats().resident === 0,
+      W.VB.assets.stats().resident + " bytes resident");
+
+    await store.remove(A.id);
+    await store.remove(B.id);
+    check("cleanup removed the tripwire projects",
+      !(await store.list()).some(function (r) {
+        return r.id === A.id || r.id === B.id;
+      }));
+  } catch (err) {
+    fail++;
+    log("SHELL EXCEPTION: " + (err && err.stack || err), "fail");
+  }
+  ticking = false;
+  var summary = "SHELL DONE pass=" + pass + " fail=" + fail;
+  log(""); log(summary, fail ? "fail" : "");
+  document.title = summary;
+  flush();
+})();
+</script>
+</body></html>
