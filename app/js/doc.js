@@ -178,7 +178,10 @@
   function sameFill(a, b) {
     if (a.type !== b.type) return false;
     if (a.type === "solid") return sameColor(a.color, b.color);
-    return false; // gradients/bitmaps: never coalesced for now
+    // gradients/matcaps: structural equality — painting twice with the
+    // same 2DMaterial reuses one style entry (styles built by
+    // materialClone/journal JSON have stable key order)
+    return JSON.stringify(a) === JSON.stringify(b);
   }
 
   function colorToCSS(c) {

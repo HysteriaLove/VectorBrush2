@@ -20,6 +20,7 @@
     strokeColor: { r: 0, g: 0, b: 0, a: 255 },
     strokeWidth: 20,          // twips (1 px), Flash's default pencil width
     fillColor: { r: 102, g: 204, b: 255, a: 255 },
+    fillMaterial: null,       // selected 2DMaterial — overrides fillColor
     eraserWidth: 20,          // eraser diameter, px
     brushWidth: 10,           // brush diameter, px
     debug: false,
@@ -694,6 +695,12 @@
       b: parseInt(v.slice(5, 7), 16),
       a: 255
     };
+    // picking a plain color returns the brush to solid painting
+    if (app.fillMaterial) {
+      app.fillMaterial = null;
+      matSelected = -1;
+      refreshMaterials();
+    }
   });
 
   // ---- tool palette -----------------------------------------------------------------
@@ -1285,12 +1292,37 @@
     return "rgba(" + c.r + "," + c.g + "," + c.b + "," + (c.a / 255) + ")";
   }
 
+  /** The active drawing paint: selecting a material row makes it THE
+   *  drawing color for brush/bucket/shape fills; picking a plain color
+   *  in the toolbar returns to solid. */
+  function syncFillMaterial() {
+    var style = matSelected >= 0 ? app.doc.fills[matSelected] : null;
+    if (style && style.type !== "solid") {
+      app.fillMaterial = VB.materialClone(style);
+      // the toolbar swatch mirrors the material's base color so tool
+      // previews read right
+      var base = VB.materialBaseColor(style);
+      app.fillColor = { r: base.r, g: base.g, b: base.b, a: base.a };
+      var sw = document.getElementById("fill-color");
+      if (sw) sw.value = colorToHex(base);
+    } else if (style && style.type === "solid") {
+      app.fillMaterial = null;
+      app.fillColor = { r: style.color.r, g: style.color.g,
+                       b: style.color.b, a: style.color.a };
+      var sw2 = document.getElementById("fill-color");
+      if (sw2) sw2.value = colorToHex(style.color);
+    } else {
+      app.fillMaterial = null;
+    }
+  }
+
   function refreshMaterials() {
     var list = document.getElementById("matlist");
     list.innerHTML = "";
     document.getElementById("mat-gpu").textContent =
       VB.gpuMaterialsAvailable() ? "GPU ✓" : "no GPU";
     if (matSelected >= app.doc.fills.length) matSelected = -1;
+    syncFillMaterial();
     app.doc.fills.forEach(function (f, i) {
       var profile = VB.materialProfile(f);
       var row = document.createElement("div");
@@ -1500,6 +1532,37 @@
     requestRender();
     refreshMaterials();
   };
+
+  // ---- resizable side panel ------------------------------------------------------
+  // Drag the grip between the canvas and the layers/materials column;
+  // the canvas ResizeObserver keeps the stage sized. Width persists.
+  (function () {
+    var grip = document.getElementById("panelgrip");
+    var panel = document.getElementById("layerspanel");
+    var saved = parseInt(localStorage.getItem("vb-panel-width"), 10);
+    if (isFinite(saved)) panel.style.width = Math.max(140, Math.min(520, saved)) + "px";
+    var drag = null;
+    grip.addEventListener("pointerdown", function (ev) {
+      drag = { x: ev.clientX, w: panel.getBoundingClientRect().width };
+      grip.classList.add("dragging");
+      grip.setPointerCapture(ev.pointerId);
+      ev.preventDefault();
+    });
+    grip.addEventListener("pointermove", function (ev) {
+      if (!drag) return;
+      var w = Math.max(140, Math.min(520, drag.w + (drag.x - ev.clientX)));
+      panel.style.width = w + "px";
+    });
+    function endDrag() {
+      if (!drag) return;
+      drag = null;
+      grip.classList.remove("dragging");
+      localStorage.setItem("vb-panel-width",
+        String(Math.round(panel.getBoundingClientRect().width)));
+    }
+    grip.addEventListener("pointerup", endDrag);
+    grip.addEventListener("pointercancel", endDrag);
+  })();
 
   document.getElementById("btn-layer-add").addEventListener("click", function () {
     flushSelections();

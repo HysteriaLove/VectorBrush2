@@ -933,6 +933,37 @@
       Math.abs(back.fills[1].resolution - 0.5) < 1e-9,
       JSON.stringify(back.fills[1]));
 
+    // material-as-paint: ops carry the full style; drawing with a
+    // material creates/reuses ONE style entry
+    var linPaint = VB.materialDefaults("linear");
+    linPaint.matrix = { sx: 0.2, sy: 0.2, r0: 0, r1: 0, tx: 3000, ty: 3000 };
+    var mp1 = await VB.replayJournal([
+      { op: "new", width: 11000, height: 8000 },
+      { op: "brush", points: [{ x: 2000, y: 3000 }, { x: 4000, y: 3000 }],
+        radius: 400, color: { r: 1, g: 2, b: 3, a: 255 }, style: linPaint },
+      { op: "brush", points: [{ x: 2000, y: 5000 }, { x: 4000, y: 5000 }],
+        radius: 400, color: { r: 1, g: 2, b: 3, a: 255 }, style: linPaint }
+    ]);
+    check("brush paints with the selected material (op.style)",
+      mp1.doc.fills[0].type === "linear" &&
+      VB.geom.fillAt(mp1.doc, 3000, 3000) === 1 &&
+      VB.integrityReport(mp1.doc).length === 0,
+      mp1.doc.fills[0].type);
+    check("same material dedupes to one style entry",
+      mp1.doc.fills.length === 1, mp1.doc.fills.length + " styles");
+    var mp2 = await VB.replayJournal([
+      { op: "new", width: 11000, height: 8000 },
+      { op: "rect", x0: 1000, y0: 1000, x1: 6000, y1: 5000,
+        fill: VB.materialDefaults("matcap"), line: null },
+      { op: "bucket", x: 3000, y: 3000, color: { r: 9, g: 9, b: 9, a: 255 },
+        style: linPaint }
+    ]);
+    check("rect fill + bucket accept material styles",
+      mp2.doc.fills[0].type === "matcap" &&
+      mp2.doc.fills.some(function (f) { return f.type === "linear"; }) &&
+      mp2.doc.fills[VB.geom.fillAt(mp2.doc, 3000, 3000) - 1].type === "linear",
+      JSON.stringify(mp2.doc.fills.map(function (f) { return f.type; })));
+
     // gradient rendering: a linear black->white fill actually shades
     var gdoc = mr.doc; // fill 0 is the linear style over the brush blob
     gdoc.fills[0].gradient.stops[0].color = { r: 0, g: 0, b: 0, a: 255 };

@@ -25,14 +25,16 @@
 
   var FIT_TOL = 12; // twips: outline curve-fit tolerance (0.6 px)
 
-  function brushStroke(doc, points, radius, color) {
+  // paint: an RGBA color OR a full 2DMaterial style (anything with a
+  // .type) — a selected material IS the drawing color.
+  function brushStroke(doc, points, radius, paint) {
     var swath = VB.buildSwath(points, radius);
     if (!swath.path || swath.path.length === 0) return { painted: 0, boundary: 0 };
 
-    var fillIdx = doc.addFillStyle({
-      type: "solid",
-      color: { r: color.r, g: color.g, b: color.b, a: color.a }
-    });
+    var fillIdx = doc.addFillStyle(paint && paint.type
+      ? JSON.parse(JSON.stringify(paint))
+      : { type: "solid",
+          color: { r: paint.r, g: paint.g, b: paint.b, a: paint.a } });
 
     // ---- 1. exact swept region, Flash-lean fitted outline -----------------
     // The union with existing same-color paint happens in the FACE WALK:
@@ -114,7 +116,7 @@
     this.points = null;
     if (pos) pts.push({ x: pos.x, y: pos.y });
 
-    this.app.record({
+    var op = {
       op: "brush",
       points: pts.map(function (p) { return { x: p.x, y: p.y }; }),
       radius: this.radius(),
@@ -122,9 +124,14 @@
         r: this.app.fillColor.r, g: this.app.fillColor.g,
         b: this.app.fillColor.b, a: this.app.fillColor.a
       }
-    });
+    };
+    // a selected 2DMaterial paints instead of the flat color; the op
+    // carries the full style so replay stays self-contained
+    if (this.app.fillMaterial) op.style = VB.materialClone(this.app.fillMaterial);
+    this.app.record(op);
     this.app.history.push(this.app.doc);
-    var result = brushStroke(this.app.doc, pts, this.radius(), this.app.fillColor);
+    var result = brushStroke(this.app.doc, pts, this.radius(),
+                             op.style || this.app.fillColor);
     this.app.docChanged();
     this.app.setMsg("painted: " + result.boundary + " boundary pieces" +
       (result.painted ? " · " + result.painted + " edges submerged" : ""));

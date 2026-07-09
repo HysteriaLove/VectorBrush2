@@ -86,10 +86,12 @@
       return VB.mergeStroke(doc, geoms, lineIdx, 0);
     }
 
-    var fillIdx = doc.addFillStyle({
-      type: "solid",
-      color: { r: fillColor.r, g: fillColor.g, b: fillColor.b, a: fillColor.a }
-    });
+    // fillColor may be a full 2DMaterial style (anything with a .type)
+    var fillIdx = doc.addFillStyle(fillColor.type
+      ? JSON.parse(JSON.stringify(fillColor))
+      : { type: "solid",
+          color: { r: fillColor.r, g: fillColor.g,
+                   b: fillColor.b, a: fillColor.a } });
 
     // The shape boundary as edges. Lineless straight runs become quads
     // with the control at the midpoint (all-quad convention).
@@ -181,6 +183,8 @@
     };
   }
   function fillColorOf(app) {
+    // a selected 2DMaterial IS the drawing fill; ops carry it verbatim
+    if (app.fillMaterial) return VB.materialClone(app.fillMaterial);
     return {
       r: app.fillColor.r, g: app.fillColor.g,
       b: app.fillColor.b, a: app.fillColor.a

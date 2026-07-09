@@ -114,7 +114,8 @@
   });
   defineOp("bucket", function (c, op) {
     c.history.push(c.project);
-    var r = VB.bucketFill(c.doc, op.x, op.y, { color: op.color });
+    var r = VB.bucketFill(c.doc, op.x, op.y,
+                          { color: op.color, style: op.style });
     if (r.stamped === 0) c.history.undoStack.pop(); // nothing happened
   });
   defineOp("erase", function (c, op) {
@@ -124,7 +125,7 @@
   });
   defineOp("brush", function (c, op) {
     c.history.push(c.project);
-    VB.brushStroke(c.doc, op.points, op.radius, op.color);
+    VB.brushStroke(c.doc, op.points, op.radius, op.style || op.color);
   });
   defineOp("line", function (c, op) {
     c.history.push(c.project);

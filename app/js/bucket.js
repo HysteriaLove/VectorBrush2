@@ -20,10 +20,13 @@
     var face = VB.faceAt(doc, x, y);
     if (!face) return { stamped: 0, dissolved: 0 };
 
-    var idx = doc.addFillStyle({
-      type: "solid",
-      color: { r: fillStyle.color.r, g: fillStyle.color.g, b: fillStyle.color.b, a: fillStyle.color.a }
-    });
+    // fillStyle.style: a full 2DMaterial definition takes precedence
+    // over the flat color (a selected material IS the drawing color)
+    var idx = doc.addFillStyle(fillStyle.style && fillStyle.style.type
+      ? JSON.parse(JSON.stringify(fillStyle.style))
+      : { type: "solid",
+          color: { r: fillStyle.color.r, g: fillStyle.color.g,
+                   b: fillStyle.color.b, a: fillStyle.color.a } });
 
     var stamped = 0;
     function stampCycle(cycle) {
@@ -52,15 +55,18 @@
   }
 
   BucketTool.prototype.onDown = function (pos) {
-    this.app.record({
+    var op = {
       op: "bucket", x: pos.x, y: pos.y,
       color: {
         r: this.app.fillColor.r, g: this.app.fillColor.g,
         b: this.app.fillColor.b, a: this.app.fillColor.a
       }
-    });
+    };
+    if (this.app.fillMaterial) op.style = VB.materialClone(this.app.fillMaterial);
+    this.app.record(op);
     this.app.history.push(this.app.doc);
-    var result = bucketFill(this.app.doc, pos.x, pos.y, { color: this.app.fillColor });
+    var result = bucketFill(this.app.doc, pos.x, pos.y,
+                            { color: this.app.fillColor, style: op.style });
     if (result.stamped === 0) {
       this.app.history.undoStack.pop(); // nothing happened; drop the snapshot
       this.app.setMsg("no enclosed region here");
