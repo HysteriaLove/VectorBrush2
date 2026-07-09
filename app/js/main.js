@@ -722,6 +722,14 @@
   function pasteClipboard() {
     if (!clipboard) { setMsg("clipboard is empty"); return false; }
     if (app.project.activeLayer().locked) { setMsg("layer is locked"); return false; }
+    // The previous selection must END before the clip lands: commit any
+    // pending transform session and floating selection exactly like a
+    // click-away, then deselect. Pasting into a live session would
+    // inject the new content into the OLD transform state — and the
+    // exec below would discard the session's un-journaled lift.
+    if (tools.transform && tools.transform.adopt) tools.transform.adopt(null);
+    if (tools.select.commitFloat) tools.select.commitFloat();
+    if (tools.select.clearSelection) tools.select.clearSelection();
     pasteBump += 200;
     if (clipboard.kind === "shape") {
       app.exec({
