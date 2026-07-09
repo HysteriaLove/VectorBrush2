@@ -145,8 +145,21 @@
     return "#808080"; // bitmap fills
   }
 
+  // When a GPU renderer draws the document, the 2D canvas becomes a
+  // transparent overlay: clear it and set the same twips transform the
+  // tool overlays expect.
+  function applyViewTransform(ctx, view) {
+    var canvas = ctx.canvas;
+    var dpr = view.dpr || 1;
+    var s = view.zoom * dpr / VB.TWIPS;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(s, 0, 0, s, view.panX * dpr, view.panY * dpr);
+  }
+
   window.VB = window.VB || {};
   VB.render = render;
   VB.renderProject = renderProject;
+  VB.applyViewTransform = applyViewTransform;
   VB.drawTextBlock = drawText; // (ctx, doc, textBlock) — used by the text tool's live preview
 })();
