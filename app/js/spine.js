@@ -158,6 +158,27 @@
     c.sync();
   });
 
+  /** Drag the boundary AFTER a panel on the sync timeline: the panel's
+   *  duration changes and its right neighbor compensates, so every
+   *  downstream panel stays on its audio hit (the sceneBoundaryDrag
+   *  discipline — zone-preserving). The last panel's boundary just
+   *  extends or shortens the reel. */
+  VB.defineOp("panelBoundary", function (c, op) {
+    var hit = panelById(c.project, op.id);
+    if (!hit) return;
+    var next = spineOf(c.project).panels[hit.index + 1];
+    var want = Math.max(1, Math.min(9999, op.frames | 0));
+    c.history.push(c.project);
+    if (next) {
+      var pair = Math.max(1, hit.panel.duration | 0) +
+                 Math.max(1, next.duration | 0);
+      want = Math.min(want, pair - 1);
+      next.duration = pair - want;
+    }
+    hit.panel.duration = want;
+    c.sync();
+  });
+
   /** Assign/clear the panel's setting — scene boundaries move with it
    *  (scenes are derived from setting runs, never stored). */
   VB.defineOp("panelSetting", function (c, op) {

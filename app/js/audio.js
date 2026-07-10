@@ -374,6 +374,7 @@
   function tickUI(ms) {
     if (view.host) {
       if (view.timeEl) view.timeEl.textContent = fmtMs(ms);
+      syncBoardStrip();
       renderLanes();
     }
     if (VB.audioTickHook) {
@@ -408,12 +409,21 @@
   }
 
   // ---- workspace view -----------------------------------------------------------
+  // Two stacked views (user spec, the AP2 shape): the BOARD STRIP —
+  // storyboard panels playing left-to-right — over the SYNC TIMELINE:
+  // a panel lane (board lengths against real time), the MASTER track
+  // (the mixdown every workspace scrubs against), and the stem tracks
+  // that feed it. Panel durations stay journaled FRAMES; the lane only
+  // EDITS them (never absolute audio ms — re-cutting audio must not
+  // re-time the board).
 
   var RULER_H = 24, LANE_H = 64;
+  var PANEL_LANE_H = 54, MASTER_LANE_H = 34;
 
   var view = {
     host: null, app: null, lanes: null, stems: null, timeEl: null,
-    playBtn: null, ro: null,
+    playBtn: null, ro: null, board: null,
+    bitems: {},                    // panel id -> board strip item
     pxPerMs: 0.1, panMs: 0,        // 100 px/s default
     sel: null,                     // selected clip id
     drag: null                     // {kind, ...} pointer session
@@ -430,9 +440,53 @@
   function xOf(ms) { return (ms - view.panMs) * view.pxPerMs; }
   function msOf(x) { return x / view.pxPerMs + view.panMs; }
 
+  function tracksY() { return RULER_H + PANEL_LANE_H + MASTER_LANE_H; }
+
   function laneIndexAt(y) {
-    if (y < RULER_H) return -1;
-    return Math.floor((y - RULER_H) / LANE_H);
+    if (y < tracksY()) return -1;
+    return Math.floor((y - tracksY()) / LANE_H);
+  }
+
+  /** Which band of the sync timeline a y sits in. */
+  function zoneAt(y) {
+    if (y < RULER_H) return "ruler";
+    if (y < RULER_H + PANEL_LANE_H) return "panels";
+    if (y < tracksY()) return "master";
+    return "tracks";
+  }
+
+  // ---- the panel lane (T1 animatic time = the audio ms axis) ----------------------
+
+  function frameMsOf(project) { return 1000 / (project.fps || 24); }
+
+  /** Panel spans in ms: [{ panel, index, startMs, endMs }]. */
+  function panelSpans(project) {
+    var fm = frameMsOf(project);
+    var out = [];
+    var at = 0;
+    (VB.spineOf ? VB.spineOf(project).panels : []).forEach(function (p, i) {
+      var len = Math.max(1, p.duration | 0) * fm;
+      out.push({ panel: p, index: i, startMs: at, endMs: at + len });
+      at += len;
+    });
+    return out;
+  }
+
+  function panelSpanAt(project, ms) {
+    var spans = panelSpans(project);
+    for (var i = 0; i < spans.length; i++) {
+      if (ms < spans[i].endMs || i === spans.length - 1) return spans[i];
+    }
+    return null;
+  }
+
+  /** The boundary (panel end) within grab range of x, or null. */
+  function boundaryAt(project, x) {
+    var spans = panelSpans(project);
+    for (var i = 0; i < spans.length; i++) {
+      if (Math.abs(xOf(spans[i].endMs) - x) < 6) return spans[i];
+    }
+    return null;
   }
 
   function clipAt(x, y) {
@@ -500,9 +554,119 @@
     }
     ctx.stroke();
 
-    // lanes
+    // the PANEL LANE: board lengths against real time — blocks drawn
+    // from journaled frame durations, boundaries dragged here
+    var py = RULER_H;
+    ctx.fillStyle = C.panel;
+    ctx.fillRect(0, py, w, PANEL_LANE_H);
+    var spans = panelSpans(project);
+    var curSpan = panelSpanAt(project, rig.masterMs);
+    spans.forEach(function (sp) {
+      var bx = xOf(sp.startMs);
+      var bw = (sp.endMs - sp.startMs) * view.pxPerMs;
+      if (view.drag && view.drag.kind === "pboundary") {
+        // live ghost: the dragged boundary re-times this pair
+        var d = view.drag;
+        var fm = frameMsOf(project);
+        if (sp.index === d.index) {
+          bw = d.frames * fm * view.pxPerMs;
+        } else if (sp.index === d.index + 1 && d.nextFrames0 !== null) {
+          var lx = xOf(sp.startMs) +
+            (d.frames - d.frames0) * fm * view.pxPerMs;
+          bx = lx;
+          bw = (d.frames0 + d.nextFrames0 - d.frames) * fm * view.pxPerMs;
+        }
+      }
+      if (bx + bw < 0 || bx > w) return;
+      ctx.fillStyle = "#ece0b4"; // the paper-board tan
+      ctx.strokeStyle = sp === curSpan ? C.accent : "#8f8869";
+      ctx.lineWidth = sp === curSpan ? 2 : 1;
+      ctx.beginPath();
+      ctx.roundRect(bx + 1, py + 5, Math.max(2, bw - 2), PANEL_LANE_H - 10, 2);
+      ctx.fill(); ctx.stroke();
+      ctx.lineWidth = 1;
+      // thumbnail when the block affords it, else just the number
+      var num = String(sp.index + 1);
+      if (bw > 46 && VB.thumbGet) {
+        var tw = Math.min(58, bw - 8);
+        var cached = VB.thumbGet("panel:" + sp.panel.id, sp.panel.cell);
+        if (cached) {
+          ctx.drawImage(cached, bx + 4, py + 8, tw, tw * 9 / 16);
+        } else if (VB.thumbRequest) {
+          VB.thumbRequest("panel:" + sp.panel.id, sp.panel.cell,
+                          96, 54, sp.index).then(function () {
+            if (view.host) renderLanes();
+          });
+        }
+      }
+      ctx.fillStyle = "#4b4736";
+      ctx.font = "10px system-ui";
+      ctx.textAlign = "right";
+      ctx.save();
+      ctx.beginPath(); ctx.rect(bx, py, Math.max(2, bw), PANEL_LANE_H);
+      ctx.clip();
+      ctx.fillText(num, bx + bw - 5, py + PANEL_LANE_H - 10);
+      ctx.restore();
+    });
+    if (!spans.length) {
+      ctx.fillStyle = C.dim;
+      ctx.font = "11px system-ui";
+      ctx.textAlign = "left";
+      ctx.fillText("no panels yet — write in Story or board in Boards",
+                   6, py + PANEL_LANE_H / 2 + 4);
+    }
+    ctx.strokeStyle = C.edge;
+    ctx.beginPath();
+    ctx.moveTo(0, py + PANEL_LANE_H + 0.5);
+    ctx.lineTo(w, py + PANEL_LANE_H + 0.5);
+    ctx.stroke();
+
+    // the MASTER track: every stem mixes into this one lane — the
+    // sync everything scrubs against (combined peak envelope, drawn
+    // per visible pixel from the per-clip pyramids; no bake needed)
+    var my = RULER_H + PANEL_LANE_H;
+    ctx.fillStyle = "#2f3350";
+    ctx.fillRect(0, my, w, MASTER_LANE_H);
+    ctx.fillStyle = "#7b86e8";
+    var mid = my + MASTER_LANE_H / 2;
+    var amp = MASTER_LANE_H / 2 - 3;
+    for (var mx = 0; mx < w; mx++) {
+      var ms = msOf(mx);
+      if (ms < 0) continue;
+      var lo = 0, hi = 0;
+      for (var ti = 0; ti < tracks.length; ti++) {
+        for (var ci = 0; ci < tracks[ti].clips.length; ci++) {
+          var cl = tracks[ti].clips[ci];
+          if (ms < cl.at || ms > cl.at + cl.duration) continue;
+          var ah = assetById(project, cl.asset);
+          var pk = ah && peaksFor(ah.asset);
+          if (!pk) continue;
+          var b = Math.floor((cl.offset + ms - cl.at) / 1000 *
+                             pk.rate / pk.bin);
+          if (b < 0 || b >= pk.bins) continue;
+          lo += pk.min[b] * (cl.gain || 1);
+          hi += pk.max[b] * (cl.gain || 1);
+        }
+      }
+      lo = Math.max(-1, lo); hi = Math.min(1, hi);
+      if (hi > lo) {
+        ctx.fillRect(mx, mid + lo * amp, 1,
+                     Math.max(1, (hi - lo) * amp));
+      }
+    }
+    ctx.fillStyle = "#aab2f0";
+    ctx.font = "10px system-ui";
+    ctx.textAlign = "left";
+    ctx.fillText("master", 6, my + 12);
+    ctx.strokeStyle = C.edge;
+    ctx.beginPath();
+    ctx.moveTo(0, my + MASTER_LANE_H + 0.5);
+    ctx.lineTo(w, my + MASTER_LANE_H + 0.5);
+    ctx.stroke();
+
+    // stem lanes
     for (var i = 0; i < tracks.length; i++) {
-      var y = RULER_H + i * LANE_H;
+      var y = tracksY() + i * LANE_H;
       ctx.fillStyle = i % 2 ? C.bg : C.panel;
       ctx.fillRect(0, y, w, LANE_H);
       ctx.strokeStyle = C.edge;
@@ -520,7 +684,7 @@
 
     // drop ghost while dragging a stem in
     if (view.drag && view.drag.kind === "place" && view.drag.overMs !== undefined) {
-      var gy = RULER_H + view.drag.overLane * LANE_H;
+      var gy = tracksY() + view.drag.overLane * LANE_H;
       ctx.fillStyle = C.hover;
       ctx.globalAlpha = 0.7;
       ctx.fillRect(xOf(view.drag.overMs), gy + 4,
@@ -544,7 +708,7 @@
     var at = cl.at, dur = cl.duration, off = cl.offset;
     if (view.drag && view.drag.clip === cl) {
       at = view.drag.at; dur = view.drag.duration; off = view.drag.offset;
-      laneY = RULER_H + view.drag.lane * LANE_H;
+      laneY = tracksY() + view.drag.lane * LANE_H;
     }
     var x = xOf(at), cw = dur * view.pxPerMs;
     if (x + cw < 0 || x > ctx.canvas.width) return;
@@ -585,6 +749,117 @@
         ? " · " + Math.round(cl.gain * 100) + "%" : ""), x + 4, y + 11);
       ctx.restore();
     }
+  }
+
+  // ---- the board strip: panels playing left-to-right --------------------------------
+  // items are RECONCILED by panel id (never rebuilt mid-play); thumbs
+  // ride the shared thumbnail cache + prefetcher, priority = distance
+  // to the playhead — the streaming proxy ladder (empty → thumb)
+
+  function syncBoardStrip() {
+    if (!view.board || !view.app) return;
+    var project = view.app.project;
+    var spans = panelSpans(project);
+    var cur = panelSpanAt(project, rig.masterMs);
+    var want = [];
+    spans.forEach(function (sp) {
+      var item = view.bitems[sp.panel.id];
+      if (!item) {
+        item = { root: document.createElement("div"),
+                 cvs: document.createElement("canvas"),
+                 num: document.createElement("span") };
+        item.root.className = "au-bpanel";
+        item.cvs.width = 128; item.cvs.height = 72;
+        item.num.className = "au-bnum";
+        item.root.appendChild(item.cvs);
+        item.root.appendChild(item.num);
+        (function (pid) {
+          item.root.addEventListener("pointerdown", function (ev) {
+            if (ev.button !== 0) return;
+            var sp2 = null;
+            panelSpans(view.app.project).forEach(function (s) {
+              if (s.panel.id === pid) sp2 = s;
+            });
+            if (!sp2) return;
+            view.app.exec({ op: "boardsSelect", panel: sp2.index });
+            if (!rig.playing) {
+              rig.masterMs = Math.round(sp2.startMs);
+              if (view.timeEl) view.timeEl.textContent = fmtMs(rig.masterMs);
+              syncBoardStrip();
+              renderLanes();
+            }
+          });
+        })(sp.panel.id);
+        view.bitems[sp.panel.id] = item;
+      }
+      item.num.textContent = String(sp.index + 1) + " · " +
+        ((sp.endMs - sp.startMs) / 1000).toFixed(1) + "s";
+      item.root.classList.toggle("cur", sp === cur);
+      var cached = VB.thumbGet &&
+        VB.thumbGet("panel:" + sp.panel.id, sp.panel.cell);
+      if (cached) {
+        item.cvs.getContext("2d").drawImage(cached, 0, 0, 128, 72);
+      } else if (VB.thumbRequest) {
+        // priority: how far this panel sits from the playhead
+        var dist = Math.abs(sp.index - (cur ? cur.index : 0));
+        VB.thumbRequest("panel:" + sp.panel.id, sp.panel.cell,
+                        128, 72, dist).then(function (cv) {
+          if (cv && item.cvs.isConnected) {
+            item.cvs.getContext("2d").drawImage(cv, 0, 0, 128, 72);
+          }
+        });
+      }
+      want.push(item.root);
+    });
+    Object.keys(view.bitems).forEach(function (id) {
+      if (!VB.spinePanelById(project, id)) {
+        view.bitems[id].root.remove();
+        delete view.bitems[id];
+      }
+    });
+    var have = Array.prototype.slice.call(view.board.children);
+    var same = have.length === want.length && want.every(function (el, i) {
+      return have[i] === el;
+    });
+    if (!same) want.forEach(function (el) { view.board.appendChild(el); });
+    view.board.classList.toggle("empty", spans.length === 0);
+    // the reel follows the playhead
+    if (cur && rig.playing) {
+      var el = view.bitems[cur.panel.id];
+      if (el && el.root.scrollIntoView) {
+        el.root.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }
+    }
+  }
+
+  /** Warm the caches nearest-first (the §5 contract): stems whose
+   *  clips play soonest decode first; everything is droppable — the
+   *  AssetCache evict just forces a re-decode later. */
+  function prefetchAround(project, ms) {
+    var jobs = [];
+    audioOf(project).tracks.forEach(function (tr) {
+      tr.clips.forEach(function (cl) {
+        var hit = assetById(project, cl.asset);
+        if (!hit || rig.buffers[cl.asset]) return;
+        var dist = cl.at + cl.duration < ms ? ms - (cl.at + cl.duration)
+          : cl.at > ms ? cl.at - ms : 0;
+        jobs.push({ id: cl.asset, asset: hit.asset, dist: dist });
+      });
+    });
+    jobs.sort(function (a, b) { return a.dist - b.dist; });
+    jobs.forEach(function (j, i) {
+      if (VB.prefetcher) {
+        VB.prefetcher.schedule("audio:" + j.id, i, function () {
+          return decodeAsset(j.asset).then(function () {
+            if (view.host) renderLanes();
+          }, function () {});
+        });
+      } else {
+        decodeAsset(j.asset).then(function () {
+          if (view.host) renderLanes();
+        }, function () {});
+      }
+    });
   }
 
   function refreshStems() {
@@ -813,6 +1088,14 @@
         });
       }));
 
+    // the BOARD STRIP (panels left-to-right) over the SYNC TIMELINE
+    view.board = document.createElement("div");
+    view.board.id = "au-board";
+    view.board.dataset.ph =
+      "the storyboard plays here — panels appear as they are written";
+    view.bitems = {};
+    host.appendChild(view.board);
+
     var body = document.createElement("div");
     body.id = "au-body";
     view.stems = document.createElement("div");
@@ -836,12 +1119,40 @@
       }
       if (ev.button !== 0) return;
       lanes.setPointerCapture(ev.pointerId);
-      if (y < RULER_H) {
+      var zone = zoneAt(y);
+      if (zone === "panels") {
+        // a boundary drag re-times the pair (zone-preserving); any
+        // other press scrubs AND selects the panel under the pointer
+        var project = view.app.project;
+        var bd = boundaryAt(project, x);
+        if (bd && bd.index < panelSpans(project).length - 0) {
+          var next = VB.spineOf(project).panels[bd.index + 1];
+          view.drag = { kind: "pboundary", id: bd.panel.id,
+                        index: bd.index, x0: x,
+                        frames0: Math.max(1, bd.panel.duration | 0),
+                        nextFrames0: next
+                          ? Math.max(1, next.duration | 0) : null,
+                        frames: Math.max(1, bd.panel.duration | 0) };
+          renderLanes();
+          return;
+        }
+        var sp = panelSpanAt(project, msOf(x));
+        if (sp) view.app.exec({ op: "boardsSelect", panel: sp.index });
+        rig.masterMs = Math.max(0, Math.round(msOf(x)));
+        if (view.timeEl) view.timeEl.textContent = fmtMs(rig.masterMs);
+        if (rig.playing) { stopPlayback(); togglePlay(); }
+        view.drag = { kind: "seek" };
+        syncBoardStrip();
+        renderLanes();
+        return;
+      }
+      if (zone === "ruler" || zone === "master") {
         // scrub/seek the SHARED master position
         rig.masterMs = Math.max(0, Math.round(msOf(x)));
         if (view.timeEl) view.timeEl.textContent = fmtMs(rig.masterMs);
         if (rig.playing) { stopPlayback(); togglePlay(); }
         view.drag = { kind: "seek" };
+        syncBoardStrip();
         renderLanes();
         return;
       }
@@ -863,6 +1174,11 @@
       var r = lanes.getBoundingClientRect();
       var x = ev.clientX - r.left, y = ev.clientY - r.top;
       if (!view.drag) {
+        if (zoneAt(y) === "panels") {
+          lanes.style.cursor = boundaryAt(view.app.project, x)
+            ? "ew-resize" : "default";
+          return;
+        }
         var over = clipAt(x, y);
         if (over) {
           var ex0 = xOf(over.clip.at), ex1 = xOf(over.clip.at + over.clip.duration);
@@ -881,6 +1197,18 @@
       if (d.kind === "seek") {
         rig.masterMs = Math.max(0, Math.round(msOf(x)));
         if (view.timeEl) view.timeEl.textContent = fmtMs(rig.masterMs);
+        syncBoardStrip();
+        renderLanes();
+        return;
+      }
+      if (d.kind === "pboundary") {
+        var fm = frameMsOf(view.app.project);
+        var dFrames = Math.round((x - d.x0) / view.pxPerMs / fm);
+        var want = Math.max(1, d.frames0 + dFrames);
+        if (d.nextFrames0 !== null) {
+          want = Math.min(want, d.frames0 + d.nextFrames0 - 1);
+        }
+        d.frames = want;
         renderLanes();
         return;
       }
@@ -907,6 +1235,13 @@
     lanes.addEventListener("pointerup", function () {
       var d = view.drag;
       view.drag = null;
+      if (d && d.kind === "pboundary") {
+        if (d.frames !== d.frames0) {
+          exec({ op: "panelBoundary", id: d.id, frames: d.frames });
+        }
+        refresh();
+        return;
+      }
       if (!d || !d.clip) { renderLanes(); return; }
       var tracks = audioOf(view.app.project).tracks;
       if (d.kind === "move" &&
@@ -957,8 +1292,10 @@
     // prune a stale selection
     if (view.sel && !clipById(view.app.project, view.sel)) view.sel = null;
     refreshStems();
+    syncBoardStrip();
     renderLanes();
     syncPlayBtn();
+    prefetchAround(view.app.project, rig.masterMs);
   }
 
   function unmount() {
@@ -973,6 +1310,8 @@
     view.host = null;
     view.lanes = null;
     view.stems = null;
+    view.board = null;
+    view.bitems = {};
     view.timeEl = null;
     view.playBtn = null;
     view.drag = null;

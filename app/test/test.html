@@ -3150,6 +3150,28 @@
       VB.spineSceneRuns(spe.project).length === 3 &&
       VB.spineSceneRuns(spe.project)[1].setting === null);
 
+    // the sync-timeline boundary drag: zone-preserving so downstream
+    // panels stay on their audio hits; the last boundary extends
+    spe.exec({ op: "panelDuration", id: "p1", frames: 24 });
+    spe.exec({ op: "panelDuration", id: "p2", frames: 24 });
+    spe.exec({ op: "panelBoundary", id: "p1", frames: 30 });
+    check("a boundary drag re-times the pair (total preserved)",
+      VB.spinePanelById(spe.project, "p1").panel.duration === 30 &&
+      VB.spinePanelById(spe.project, "p2").panel.duration === 18);
+    spe.exec({ op: "panelBoundary", id: "p1", frames: 999 });
+    check("the neighbor never collapses below one frame",
+      VB.spinePanelById(spe.project, "p1").panel.duration === 47 &&
+      VB.spinePanelById(spe.project, "p2").panel.duration === 1);
+    spe.exec({ op: "panelBoundary", id: "p0", frames: 60 });
+    check("the last panel's boundary extends the reel freely",
+      VB.spinePanelById(spe.project, "p0").panel.duration === 60);
+    spe.exec({ op: "undo" });
+    spe.exec({ op: "undo" });
+    check("boundary drags undo as single steps",
+      VB.spinePanelById(spe.project, "p1").panel.duration === 30 &&
+      VB.spinePanelById(spe.project, "p2").panel.duration === 18 &&
+      VB.spinePanelById(spe.project, "p0").panel.duration === 24);
+
     // rows sit in exactly one panel (one-seat integrity)
     spe.exec({ op: "blockAdd", panel: "p1", id: "k1", kind: "action",
                content: "Kai ducks behind the console." });

@@ -90,6 +90,49 @@ integration): clips today anchor at absolute master-ms; scene-anchored
 placement (`{seqInstance, offsetMs}`) should join before T2 re-timing
 ships.
 
+### The animatic sync area (Audio workspace — SHIPPED first slice)
+
+The AP2 two-timeline shape: the BOARD STRIP (panels playing
+left-to-right, following the playhead) over the SYNC TIMELINE — ruler,
+PANEL LANE, MASTER track, then the stem tracks that feed it.
+
+**Sync model — one clock, one axis, no conversions:**
+
+- T1 animatic time IS the audio ms axis: panel k occupies the ms span
+  of its cumulative frame range (`frames × 1000/fps` from 0), exactly
+  where clips already live. `rig.masterMs` stays THE playhead; the
+  strip, the lanes, the boards animatic, and every other workspace
+  read the same number. No second clock exists.
+- The MASTER track is the stems' mixdown — the sync surface. It renders
+  as a combined peak envelope summed per visible pixel from the
+  per-clip pyramids (no bake required; the baked WAV remains the export
+  artifact). Playback already schedules the same clips, so what the
+  lane shows is what plays.
+- Board lengths are determined HERE: dragging a boundary on the panel
+  lane emits one journaled `panelBoundary` op — zone-preserving (the
+  pair re-times, total kept) so downstream panels stay on their audio
+  hits; the last boundary extends the reel. Durations remain FRAMES in
+  the journal; the lane is only their editor.
+
+**Streaming / dynamic loading (the §5 contract applied):**
+
+- Proxy ladder per resource: stems = nothing → peak pyramid → decoded
+  PCM (AssetCache tenant, evict = re-decode); panels = nothing → shared
+  thumbnail (cellHash-invalidated) → full cell (only the Boards cards
+  render cells).
+- Nearest-first prefetch: on mount/refresh the view schedules decodes
+  for stems whose clips play soonest relative to the playhead
+  (VB.prefetcher priority = time distance), and panel thumbs request
+  with priority = panel distance from the playhead.
+- Rendering is windowed by construction: peaks and lane blocks are
+  sampled per visible pixel only; nothing decodes to draw off-screen
+  time.
+- Known seam for scale: the transport still awaits full decode of
+  needed stems and schedules whole BufferSources. When stems outgrow
+  memory, the §5.5 windowed transport (AudioWorklet ring fed by PCM
+  windows) replaces the internals of `startPlayback` — the call sites
+  and the clock don't change.
+
 ---
 
 ## 2. The membrane: two personas, one script
@@ -144,8 +187,10 @@ import/export is a projection, the journal stays truth.
 
 ## 4. Open questions
 
-1. **The audio-ruler timing lane** (T1 editor): panel blocks against
-   the waveform, boundary drags → `panelDuration` ops. Next slice.
+1. ~~The audio-ruler timing lane~~ SHIPPED — the Audio workspace's
+   sync area (board strip + panel lane + master track + stems;
+   `panelBoundary` op). Remaining: bake-aware master rendering and the
+   windowed transport at scale.
 2. **establishScenes promotion**: consumes setting runs + durations,
    mints production scenes with `seededFrom` provenance and revs; the
    drift-badge UX rides on it.

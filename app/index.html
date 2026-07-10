@@ -653,6 +653,28 @@
     font: 12px Consolas, monospace; color: var(--text-dim);
   }
   #au-hint { color: var(--text-dim); font-size: 11px; margin-left: auto; }
+  /* the board strip: storyboard panels playing left-to-right over the
+     sync timeline — the current panel follows the playhead */
+  #au-board {
+    flex: none; height: 104px;
+    display: flex; gap: 8px; align-items: center;
+    padding: 6px 10px; overflow-x: auto;
+    background: var(--panel);
+    border-bottom: 1px solid var(--panel-edge);
+  }
+  #au-board.empty::before {
+    content: attr(data-ph); color: var(--text-dim);
+    font-size: 11px; margin: auto;
+  }
+  .au-bpanel {
+    flex: none; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 1px;
+    background: #fdfdfa; border: 1px solid #202327; border-radius: 2px;
+    padding: 2px;
+  }
+  .au-bpanel.cur { outline: 2px solid var(--accent); }
+  .au-bpanel canvas { display: block; background: #fff; }
+  .au-bnum { font: 9px system-ui, sans-serif; color: #4b4736; }
   #au-body { flex: 1; min-height: 0; display: flex; }
   #au-stems {
     flex: none; width: 200px; overflow-y: auto;
