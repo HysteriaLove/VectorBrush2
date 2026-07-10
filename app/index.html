@@ -84,12 +84,13 @@
     background: var(--panel);
     border-bottom: 1px solid var(--panel-edge);
   }
-  #topbar .brand {
+  .brand {
     font-weight: 600;
     letter-spacing: .4px;
     margin-right: 8px;
+    white-space: nowrap;
   }
-  #topbar .brand span { color: var(--accent); }
+  .brand span { color: var(--accent); }
   button {
     font: inherit;
     color: var(--text);
@@ -275,12 +276,29 @@
   .y2kxbar button, .y2kxbar input, .y2kxbar select,
   .y2kxbar .y2kxgrip { cursor: pointer; }
   .y2kxbar input[type="number"], .y2kxbar select { cursor: auto; }
-  #topdrawer-body {
-    min-height: 72px;
-    display: flex; align-items: center; justify-content: center;
-    background: var(--panel);
+  /* the shared scratchpad drawer: one infinite vector canvas every
+     workspace can see — pull the toolbar below it to extend it */
+  #scratchwrap {
+    position: relative; height: 100%; overflow: hidden;
+    background: var(--bg);
     border-bottom: 1px solid var(--panel-edge);
-    color: var(--text-dim); font-size: 11px;
+  }
+  #scratch-canvas {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    display: block; touch-action: none;
+  }
+  #scratch-draw {
+    position: absolute; top: 8px; right: 10px; z-index: 2;
+    background: var(--field); color: var(--text);
+    border: 1px solid var(--panel-edge); border-radius: 4px;
+    height: 26px; padding: 0 10px; cursor: pointer;
+  }
+  #scratch-draw.active {
+    background: var(--accent); border-color: var(--accent); color: #fff;
+  }
+  #scratch-hint {
+    position: absolute; left: 10px; bottom: 6px; z-index: 2;
+    color: var(--text-dim); font-size: 10px; pointer-events: none;
   }
   #scenebar {
     display: flex; gap: 4px; padding: 6px;
@@ -477,7 +495,6 @@
   }
   /* stub workspaces: future sections mount here; the editor hides */
   #workspace-stub { display: none; }
-  body.ws-stub-mode #drawer-top,
   body.ws-stub-mode #drawer-bottom,
   body.ws-stub-mode #xbar-bottom,
   body.ws-stub-mode #middle { display: none; }
@@ -492,7 +509,6 @@
 
   /* mounted workspaces (brainstorm, writing, …): the active container
      covers the editor chrome */
-  body.ws-mount-mode #drawer-top,
   body.ws-mount-mode #drawer-bottom,
   body.ws-mount-mode #xbar-bottom,
   body.ws-mount-mode #middle { display: none; }
@@ -971,6 +987,7 @@
 </head>
 <body>
   <div id="workspacebar">
+    <div class="brand">Vector<span>Brush</span></div>
     <button id="ws-home" title="Save and return to the projects menu">◀ Projects</button>
     <span id="ws-name">scratch</span>
     <div id="ws-tabs"></div>
@@ -989,8 +1006,16 @@
         moves them as .y2kproj packages.</div>
     </div>
   </div>
+  <div id="drawer-top" class="y2kdrawer closed">
+    <div id="scratchwrap">
+      <canvas id="scratch-canvas"></canvas>
+      <button id="scratch-draw"
+              title="Draw on the shared scratchpad (vector tools, journaled)">✎ Draw</button>
+      <span id="scratch-hint">shared scratchpad — every workspace sees this canvas</span>
+    </div>
+  </div>
+
   <div id="topbar" class="y2kxbar" data-xbar="top">
-    <div class="brand">Vector<span>Brush</span></div>
     <div class="y2kxpanel" data-panel="file">
       <span class="y2kxgrip" title="Drag to rearrange">⠿</span>
       <button id="btn-open" title="Open .swf or .y2kvector (legacy .vbd) (Ctrl+O)">Open…</button>
@@ -1050,10 +1075,6 @@
     </div>
     <div class="spacer"></div>
     <div id="fileinfo">no file loaded</div>
-  </div>
-
-  <div id="drawer-top" class="y2kdrawer closed">
-    <div id="topdrawer-body">workspace drawer — panels arrive here</div>
   </div>
 
   <div id="workspace-stub">

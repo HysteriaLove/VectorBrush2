@@ -36,8 +36,9 @@
         bottom: { scroll: 0, panels: [], order: [] }
       },
       drawers: {
-        top:    { open: false }, // the workspace drawer starts tucked away
-        bottom: { open: true }   // the animation timeline starts out
+        // the scratchpad drawer starts tucked; h is the user's pull
+        top:    { open: false, h: 220 },
+        bottom: { open: true } // the animation timeline starts out
       }
     };
   }
@@ -331,7 +332,9 @@
     ["top", "bottom"].forEach(function (key) {
       if (!state.toolbars[key]) state.toolbars[key] = { scroll: 0, panels: [], order: [] };
       if (!state.toolbars[key].order) state.toolbars[key].order = [];
+      if (!state.drawers[key]) state.drawers[key] = { open: key === "bottom" };
     });
+    if (state.drawers.top.h === undefined) state.drawers.top.h = 220;
     return state;
   }
 

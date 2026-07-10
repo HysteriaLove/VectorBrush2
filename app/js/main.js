@@ -197,6 +197,7 @@
     if (VB.PitchView) VB.PitchView.refresh();
     if (VB.BoardsView) VB.BoardsView.refresh();
     if (VB.AudioView) VB.AudioView.refresh();
+    if (app.renderScratch) app.renderScratch(); // the shared scratchpad
     app.debugPin = -1;
     app.debugHover = -1;
     refreshDebugPanel();
@@ -1859,8 +1860,11 @@
       });
       ["top", "bottom"].forEach(function (which) {
         var drawer = document.getElementById("drawer-" + which);
-        if (drawer) {
-          drawer.classList.toggle("closed", !state.drawers[which].open);
+        if (!drawer) return;
+        var d = state.drawers[which];
+        drawer.classList.toggle("closed", !d.open);
+        if (which === "top" && d.open) { // pulled as far as the user likes
+          drawer.style.height = Math.max(60, d.h | 0) + "px";
         }
       });
       persist();
@@ -1970,8 +1974,153 @@
         barEl.addEventListener("pointercancel", onUp);
       });
     }
-    wireDrawerPull(document.getElementById("topbar"), "top", 1);
+    // the TOP toolbar sits under the scratchpad drawer and pulls it
+    // open continuously — drag down extends it as far as you like
+    (function wireScratchPull() {
+      var barEl = document.getElementById("topbar");
+      if (!barEl) return;
+      barEl.addEventListener("pointerdown", function (ev) {
+        if (ev.button !== 0) return;
+        var t = ev.target;
+        if (t !== barEl && !(t.classList &&
+            t.classList.contains("spacer"))) return;
+        barEl.setPointerCapture(ev.pointerId);
+        var d = state.drawers.top;
+        var y0 = ev.clientY;
+        var h0 = d.open ? (d.h | 0) : 0;
+        function onMove(e2) {
+          var h = Math.min(Math.round(window.innerHeight * 0.7),
+                           h0 + (e2.clientY - y0));
+          d.open = h > 40;
+          if (d.open) d.h = Math.max(60, h);
+          applyShell();
+          renderScratch();
+        }
+        function onUp() {
+          barEl.removeEventListener("pointermove", onMove);
+          barEl.removeEventListener("pointerup", onUp);
+          barEl.removeEventListener("pointercancel", onUp);
+          requestRender();
+        }
+        barEl.addEventListener("pointermove", onMove);
+        barEl.addEventListener("pointerup", onUp);
+        barEl.addEventListener("pointercancel", onUp);
+      });
+    })();
     wireDrawerPull(document.getElementById("xbar-bottom"), "bottom", -1);
+
+    // ---- the shared scratchpad --------------------------------------------------
+    // The drawer is another VIEW of the Sketchbook's shared vector cell
+    // (project.notesCanvas(), journaled editTarget {notes:true}): visible
+    // from EVERY workspace, drawn with the real tools, byte-exact in
+    // replay, and the Sketchbook board shows the same ink.
+    var scratch = {
+      canvas: document.getElementById("scratch-canvas"),
+      btn: document.getElementById("scratch-draw"),
+      pan: { x: 40, y: 30 }, zoom: 1
+    };
+    function scratchDrawing() {
+      var t = app.project.editTarget;
+      return !!(t && t.notes);
+    }
+    function renderScratch() {
+      var cvs = scratch.canvas;
+      if (!cvs || !state.drawers.top.open) return;
+      var w = cvs.clientWidth, h = cvs.clientHeight;
+      if (!w || !h) return;
+      if (cvs.width !== w || cvs.height !== h) { cvs.width = w; cvs.height = h; }
+      var ctx = cvs.getContext("2d");
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+      var s = scratch.zoom / VB.TWIPS;
+      ctx.setTransform(s, 0, 0, s, scratch.pan.x, scratch.pan.y);
+      var cell = app.project.notes && app.project.notes.canvas;
+      if (cell) VB.renderDocContent(ctx, cell, { zoom: scratch.zoom, dpr: 1 });
+      if (scratchDrawing()) {
+        var tool = app.toolByName(app.tool);
+        if (tool && tool.drawOverlay) {
+          try { tool.drawOverlay(ctx); } catch (e) { /* overlay only */ }
+        }
+      }
+      if (scratch.btn) {
+        scratch.btn.classList.toggle("active", scratchDrawing());
+      }
+    }
+    app.renderScratch = renderScratch; // docChanged repaints the drawer
+    function scratchTwips(ev) {
+      var r = scratch.canvas.getBoundingClientRect();
+      return {
+        x: (ev.clientX - r.left - scratch.pan.x) / scratch.zoom * VB.TWIPS,
+        y: (ev.clientY - r.top - scratch.pan.y) / scratch.zoom * VB.TWIPS
+      };
+    }
+    if (scratch.btn) {
+      scratch.btn.addEventListener("click", function () {
+        if (scratchDrawing()) app.exec({ op: "editTargetClear" });
+        else app.exec({ op: "editTargetSet", target: { notes: true } });
+        renderScratch();
+      });
+    }
+    if (scratch.canvas) {
+      var sDrag = null;
+      scratch.canvas.addEventListener("pointerdown", function (ev) {
+        scratch.canvas.setPointerCapture(ev.pointerId);
+        if (ev.button === 1) {
+          ev.preventDefault();
+          sDrag = { kind: "pan", x0: ev.clientX, y0: ev.clientY,
+                    p0: { x: scratch.pan.x, y: scratch.pan.y } };
+          return;
+        }
+        if (ev.button !== 0 || !scratchDrawing()) return;
+        var tool = app.toolByName(app.tool);
+        if (tool && tool.onDown) {
+          tool.onDown(scratchTwips(ev));
+          renderScratch();
+        }
+        sDrag = { kind: "tool" };
+      });
+      scratch.canvas.addEventListener("pointermove", function (ev) {
+        if (!sDrag) return;
+        if (sDrag.kind === "pan") {
+          scratch.pan.x = sDrag.p0.x + ev.clientX - sDrag.x0;
+          scratch.pan.y = sDrag.p0.y + ev.clientY - sDrag.y0;
+          renderScratch();
+          return;
+        }
+        var tool = app.toolByName(app.tool);
+        if (tool && tool.onMove) {
+          tool.onMove(scratchTwips(ev));
+          renderScratch();
+        }
+      });
+      scratch.canvas.addEventListener("pointerup", function (ev) {
+        if (!sDrag) return;
+        if (sDrag.kind === "tool") {
+          var tool = app.toolByName(app.tool);
+          if (tool && tool.onUp) tool.onUp(scratchTwips(ev));
+        }
+        sDrag = null;
+        renderScratch();
+      });
+      scratch.canvas.addEventListener("pointercancel", function () {
+        sDrag = null;
+      });
+      scratch.canvas.addEventListener("wheel", function (ev) {
+        ev.preventDefault();
+        var r = scratch.canvas.getBoundingClientRect();
+        var mx = ev.clientX - r.left, my = ev.clientY - r.top;
+        var factor = ev.deltaY < 0 ? 1.15 : 1 / 1.15;
+        var z = Math.max(0.1, Math.min(8, scratch.zoom * factor));
+        scratch.pan.x = mx - (mx - scratch.pan.x) * (z / scratch.zoom);
+        scratch.pan.y = my - (my - scratch.pan.y) * (z / scratch.zoom);
+        scratch.zoom = z;
+        renderScratch();
+      }, { passive: false });
+      if (window.ResizeObserver) {
+        new ResizeObserver(function () { renderScratch(); })
+          .observe(scratch.canvas);
+      }
+    }
 
     // xToolbars: panels group left-to-right; drag the ⠿ grip to
     // rearrange, wheel scrolls an overflowing strip sideways
