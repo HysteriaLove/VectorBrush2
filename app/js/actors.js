@@ -202,7 +202,10 @@
     c.sync();
   });
 
-  VB.defineOp("symbolRename", function (c, op) {
+  // "actorSymbol*" — NOT "symbol*": the object library owns the bare
+  // symbolRename/symbolRemove names (library.js), and defineOp is
+  // last-writer-wins, so sharing names would silently shadow one family
+  VB.defineOp("actorSymbolRename", function (c, op) {
     var a = actorById(c.project, op.actor);
     var hit = a && findSymbol(a, op.symbol);
     if (!hit) return;
@@ -211,7 +214,7 @@
     c.sync();
   });
 
-  VB.defineOp("symbolRemove", function (c, op) {
+  VB.defineOp("actorSymbolRemove", function (c, op) {
     var a = actorById(c.project, op.actor);
     var hit = a && findSymbol(a, op.symbol);
     if (!hit) return;

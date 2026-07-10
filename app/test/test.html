@@ -2311,7 +2311,7 @@
     var res5 = await VB.replayJournal([
       { op: "new", width: 11000, height: 8000 },
       { op: "rect", x0: 2000, y0: 2000, x1: 5000, y1: 4000, fill: red, line: null },
-      { op: "sceneAdd" },
+      { op: "sceneAdd", id: "sc_r5b" },
       { op: "rect", x0: 6000, y0: 5000, x1: 9000, y1: 7000, fill: blue, line: null },
       { op: "sceneSelect", index: 0 }
     ]);
@@ -3484,6 +3484,27 @@
       pupils.symbol.drawings[1].name === "drawing_02",
       JSON.stringify(pupils && pupils.symbol.cur));
 
+    // actor symbol ops own the "actorSymbol*" names — the bare
+    // symbolRename/Remove belong to the object LIBRARY (library.js);
+    // sharing names once silently shadowed this whole family
+    ase.exec({ op: "actorSymbolRename", actor: "actor_t1",
+               symbol: "sym_pupils", name: "pupils v2" });
+    check("actorSymbolRename reaches the actor family (no library shadow)",
+      VB.actorFindSymbol(aT1, "sym_pupils").symbol.name === "pupils v2");
+    ase.exec({ op: "symbolRename", id: "nope", name: "x" });
+    check("a library symbolRename never touches actor symbols",
+      VB.actorFindSymbol(aT1, "sym_pupils").symbol.name === "pupils v2");
+    ase.exec({ op: "actorSymbolRemove", actor: "actor_t1",
+               symbol: "sym_pupils" });
+    check("actorSymbolRemove prunes the nested symbol",
+      VB.actorFindSymbol(aT1, "sym_pupils") === null &&
+      VB.actorFindSymbol(aT1, "sym_eyes").symbol.symbols.length === 0);
+    ase.exec({ op: "undo" }); // restore rebuilds objects — re-fetch refs
+    aT1 = VB.actorById(ase.project, "actor_t1");
+    pupils = VB.actorFindSymbol(aT1, "sym_pupils");
+    check("actor symbol removal undoes",
+      pupils !== null && pupils.symbol.name === "pupils v2");
+
     // art in an actor cell: the SAME planar-map pipeline
     var pupilCell = pupils.symbol.drawings[0].cell;
     VB.pencilCommit(pupilCell, [{ x: 1000, y: 1000 }, { x: 6000, y: 1400 }],
@@ -3875,11 +3896,21 @@
         [{ id: "seq@0", scene: "scene@0", duration: 144, locked: false }]));
 
     sqe.exec({ op: "sceneAdd", id: "sc_b", name: "Bridge" });
-    sqe.exec({ op: "sceneAdd" }); // legacy op without an id
-    check("sceneAdd carries its id; legacy ops get the deterministic fallback",
+    // an id-less sceneAdd is a recorder bug: an index-derived fallback
+    // could alias a deleted scene's id in sequence/cast references
+    var idless = false;
+    try { sqe.exec({ op: "sceneAdd" }); }
+    catch (e) { idless = true; sqe.journal.pop(); }
+    check("sceneAdd carries its id; an id-less op is refused",
       sqe.project.scenes[1].id === "sc_b" &&
-      sqe.project.scenes[2].id === "scene@2" &&
-      sqe.project.cur.scene === 2);
+      idless && sqe.project.scenes.length === 2 &&
+      sqe.project.cur.scene === 1);
+    // direct (non-journaled) addScene mints a collision-resistant id
+    sqe.project.addScene("Direct");
+    check("direct addScene mints a random id, never index-derived",
+      /^scene_[0-9a-f]+$/.test(sqe.project.scenes[2].id));
+    sqe.project.scenes.pop(); // leave the section's fixture unchanged
+    sqe.project.cur.scene = 1;
 
     // no same-scene instance yet -> inherits from the after-instance
     sqe.exec({ op: "sceneInstAdd", id: "sq_b1", scene: "sc_b" });

@@ -516,7 +516,7 @@
    "editTargetSet", "editTargetClear",
    "actorAdd", "actorRename", "actorRemove", "actorImport", "poseAdd",
    "poseRename", "poseRemove", "poseSelect", "symbolAdd", "drawingAdd",
-   "drawingSelect",
+   "drawingSelect", "actorSymbolRename", "actorSymbolRemove",
    "symbolCreate", "symbolRename", "symbolRemove",
    "noteAdd", "noteMove", "noteMoveMany", "noteResize", "noteEdit",
    "noteInk", "noteRemove", "noteRemoveMany",

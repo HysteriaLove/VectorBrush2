@@ -101,6 +101,10 @@
     c.project.scene().layers[op.index].locked = !!op.on;
   });
   defineOp("sceneAdd", function (c, op) {
+    // ops CARRY their ids (recorder mints VB.actorNewId("scene")) — an
+    // index-derived fallback could alias a deleted scene's id in
+    // sequence/cast references, so a missing id is a recorder bug
+    if (!op.id) throw new Error("sceneAdd op requires an id");
     c.history.push(c.project);
     c.project.addScene(op.name, op.id);
     c.sync();

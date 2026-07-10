@@ -365,9 +365,12 @@
   };
 
   Project.prototype.addScene = function (name, id) {
+    // journaled callers always pass the op's id; direct callers get a
+    // collision-resistant random one (never index-derived — a reused
+    // index would alias a deleted scene's id in sequence/cast refs)
     this.scenes.push(new Scene(name || "Scene " + (this.scenes.length + 1),
                                this.newCell(),
-                               id || "scene@" + this.scenes.length));
+                               id || VB.actorNewId("scene")));
     this.cur.scene = this.scenes.length - 1;
     this.cur.layer = 0;
   };
