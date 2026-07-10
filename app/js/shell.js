@@ -61,7 +61,9 @@
     { id: "compositing", label: "Composite", mount: "compositing", note: "" },
     { id: "post", label: "Grading", mount: "post", note: "" },
     { id: "export", label: "Export",
-      note: "Every render, reproducible from its journal revision — Architecture §6.10." }
+      note: "Use 🎞 Export… on the top toolbar (WebM — flat or through " +
+            "the Composite camera). Reproducible renders from journal " +
+            "revisions arrive here — Architecture §6.10." }
   ];
   var activeSection = "roughs";
 

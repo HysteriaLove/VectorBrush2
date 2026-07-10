@@ -556,6 +556,46 @@
   .cp-note {
     margin: auto; color: var(--text-dim); font-size: 13px;
   }
+  #cp-cam {
+    position: absolute; top: 48px; right: 12px; z-index: 2;
+    display: flex; flex-direction: column; gap: 4px;
+    background: var(--field); border: 1px solid var(--panel-edge);
+    border-radius: 4px; padding: 6px 8px; font-size: 11px;
+    color: var(--text);
+  }
+  #cp-cam input { width: 52px; }
+  #cp-frame {
+    position: absolute; z-index: 1; pointer-events: none;
+    border: 1px solid rgba(255,255,255,0.35);
+    box-shadow: 0 0 0 4000px rgba(0,0,0,0.35);
+  }
+
+  /* the video export menu */
+  #exportmenu {
+    position: fixed; inset: 0; z-index: 250; display: none;
+    align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.35);
+  }
+  #exp-panel {
+    width: 320px; background: var(--panel);
+    border: 1px solid var(--panel-edge); border-radius: 6px;
+    padding: 14px 16px; font-size: 12px; color: var(--text);
+    display: flex; flex-direction: column; gap: 8px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+  }
+  #exp-panel h3 { font-size: 14px; }
+  #exp-panel label {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px;
+  }
+  #exp-panel input, #exp-panel select {
+    background: var(--field); color: var(--text);
+    border: 1px solid var(--panel-edge); border-radius: 3px;
+    padding: 2px 6px; width: 150px;
+  }
+  #exp-note { color: var(--text-dim); font-size: 10px; }
+  #exp-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  #exp-progress { color: var(--text-dim); min-height: 14px; }
 
   /* Audio workspace (audio.js) — stems, track lanes, bake */
   #au-tools {
@@ -1093,6 +1133,7 @@
       <button id="btn-save" title="Save as compact .y2kvector">Save .y2kvector</button>
       <button id="btn-save-swf" title="Export as SWF v7 (opens in Flash MX 2004)">Save .swf</button>
       <button id="btn-log" title="Export the action log (deterministic bug repro)">Save log</button>
+      <button id="btn-export-video" title="Export the sequence as a WebM video">🎞 Export…</button>
     </div>
     <div class="y2kxpanel" data-panel="edit">
       <span class="y2kxgrip" title="Drag to rearrange">⠿</span>
@@ -1402,6 +1443,7 @@
   <script src="js/audio.js"></script>
   <script src="vendor/three.min.js"></script>
   <script src="js/composite.js"></script>
+  <script src="js/export.js"></script>
   <script src="js/text.js"></script>
   <script src="js/fonts-builtin.js"></script>
   <script src="js/session.js"></script>

@@ -32,6 +32,21 @@
 
   function three() { return window.THREE || null; }
 
+  // the FRAMING camera settings (fov + export aspect) — adjustable
+  // from the view, persisted per user; the journaled per-scene camera
+  // abstraction supersedes this later
+  var camCfg = { fov: 45, aw: 16, ah: 9 };
+  try {
+    var savedCam = JSON.parse(localStorage.getItem("vb-cpcam") || "{}");
+    if (savedCam.fov > 0) camCfg.fov = savedCam.fov;
+    if (savedCam.aw > 0) camCfg.aw = savedCam.aw;
+    if (savedCam.ah > 0) camCfg.ah = savedCam.ah;
+  } catch (e) { /* defaults */ }
+  function saveCam() {
+    try { localStorage.setItem("vb-cpcam", JSON.stringify(camCfg)); }
+    catch (e) { /* storage unavailable */ }
+  }
+
   function stagePx(app) {
     var st = app.project.stage ? app.project.stage() : app.project;
     return { w: st.width / VB.TWIPS, h: st.height / VB.TWIPS };
@@ -203,6 +218,54 @@
     applyCamera();
   }
 
+  /** The letterbox overlay: what the EXPORT camera frames at the
+   *  chosen aspect (same vertical fov as the view). */
+  function layoutFrame() {
+    if (!view.frameEl || !view.host) return;
+    var w = view.host.clientWidth, h = view.host.clientHeight;
+    if (!w || !h) return;
+    var ar = camCfg.aw / camCfg.ah;
+    var fw, fh;
+    if (ar <= w / h) { fh = h; fw = h * ar; }
+    else { fw = w; fh = w / ar; }
+    view.frameEl.style.width = Math.round(fw) + "px";
+    view.frameEl.style.height = Math.round(fh) + "px";
+    view.frameEl.style.left = Math.round((w - fw) / 2) + "px";
+    view.frameEl.style.top = Math.round((h - fh) / 2) + "px";
+  }
+
+  /** Render the composition into ANY canvas at w×h through the export
+   *  camera — the video export steps the sequence through this. */
+  function renderInto(cvs, w, h) {
+    var T = three();
+    if (!T || !view.scene) return false;
+    if (!view.expRenderer || view.expRenderer.domElement !== cvs) {
+      if (view.expRenderer) view.expRenderer.dispose();
+      try {
+        view.expRenderer = new T.WebGLRenderer({
+          canvas: cvs, antialias: true, preserveDrawingBuffer: true
+        });
+      } catch (e) { return false; }
+    }
+    view.expRenderer.setSize(w, h, false);
+    var cam;
+    if (view.mode === "2d") {
+      cam = view.camO.clone();
+      var half = (view.camO.top - view.camO.bottom) / 2;
+      cam.left = -half * (w / h);
+      cam.right = half * (w / h);
+      cam.top = half;
+      cam.bottom = -half;
+    } else {
+      cam = view.camP.clone();
+      cam.fov = camCfg.fov;
+      cam.aspect = w / h;
+    }
+    cam.updateProjectionMatrix();
+    view.expRenderer.render(view.scene, cam);
+    return true;
+  }
+
   function renderLoop() {
     if (!view.host || !view.renderer) return;
     view.renderer.render(view.scene, camera());
@@ -245,6 +308,43 @@
     });
     host.appendChild(view.modeBtn);
 
+    // the CAMERA settings cluster: fov + export aspect
+    var camPanel = document.createElement("div");
+    camPanel.id = "cp-cam";
+    function camField(label, key, min, max) {
+      var lab = document.createElement("label");
+      lab.textContent = label + " ";
+      var input = document.createElement("input");
+      input.type = "number";
+      input.min = min;
+      input.max = max;
+      input.step = key === "fov" ? 1 : 0.1;
+      input.value = camCfg[key];
+      input.addEventListener("change", function () {
+        var v = parseFloat(input.value);
+        if (!(v > 0)) return;
+        camCfg[key] = Math.max(min, Math.min(max, v));
+        input.value = camCfg[key];
+        saveCam();
+        if (view.camP) {
+          view.camP.fov = camCfg.fov;
+          view.camP.updateProjectionMatrix();
+        }
+        layoutFrame();
+      });
+      lab.appendChild(input);
+      camPanel.appendChild(lab);
+    }
+    camField("fov", "fov", 10, 120);
+    camField("aspect", "aw", 0.1, 64);
+    camField(":", "ah", 0.1, 64);
+    host.appendChild(camPanel);
+
+    view.frameEl = document.createElement("div");
+    view.frameEl.id = "cp-frame";
+    view.frameEl.title = "The export frame at the chosen aspect";
+    host.appendChild(view.frameEl);
+
     var hint = document.createElement("div");
     hint.id = "cp-hint";
     hint.textContent = "Composite — every placement is its own plane · " +
@@ -259,7 +359,7 @@
     view.orbit = { theta: 0, phi: 0, dist: Math.max(st.w, st.h) * 1.4,
                    target: new T.Vector3(0, 0, 0) };
     view.pan2d = { x: 0, y: 0, zoom: 1 };
-    view.camP = new T.PerspectiveCamera(45, 1, 1, 100000);
+    view.camP = new T.PerspectiveCamera(camCfg.fov, 1, 1, 100000);
     view.camO = new T.OrthographicCamera(-1, 1, 1, -1, 0.1, 100000);
 
     var grid = new T.GridHelper(Math.max(st.w, st.h) * 4, 40,
@@ -326,6 +426,7 @@
       view.camO.top = half;
       view.camO.bottom = -half;
       view.camO.updateProjectionMatrix();
+      layoutFrame();
     }
     if (window.ResizeObserver) {
       view.ro = new ResizeObserver(size);
@@ -355,6 +456,10 @@
       view.renderer.dispose();
       view.renderer = null;
     }
+    if (view.expRenderer) {
+      view.expRenderer.dispose();
+      view.expRenderer = null;
+    }
     view.host.innerHTML = "";
     view.host = null;
     view.scene = null;
@@ -362,12 +467,15 @@
     view.camP = null;
     view.camO = null;
     view.modeBtn = null;
+    view.frameEl = null;
   }
 
   window.VB = window.VB || {};
   VB.CompositeView = {
     mount: mount, unmount: unmount, refresh: refresh,
     sync: syncFrame, // playback frame ticks land here
+    renderInto: renderInto, // the video export renders through this
+    camConfig: function () { return camCfg; },
     isMounted: function () { return !!view.host; }
   };
 })();

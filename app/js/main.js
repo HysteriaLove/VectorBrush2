@@ -3441,17 +3441,17 @@
 
   ensureSeqStrip(); // build the strip at load — remounts never add canvases
 
-  // In the EDITOR, Space is sequence playback (picture + sound from
-  // the master position); elsewhere it toggles the raw transport. A
-  // playing reel always stops first.
+  // SYNC AUDIT (user report): the global timeline is visible in EVERY
+  // workspace now, so Space plays the SEQUENCE (picture + sound from
+  // the master position) everywhere — including Composite/Grading,
+  // whose three.js stage follows the frames. Stubs and symbol-edit
+  // fall through to the raw transport; the Boards animatic and Pitch
+  // present-mode interceptors keep their priority (registered first).
   VB.audioSpaceIntercept = VB.audioSpaceIntercept || [];
   VB.audioSpaceIntercept.push(function () {
     if (seqPlay.playing) { stopSeqPlay(); return true; }
-    var editorActive =
-      !document.body.classList.contains("ws-mount-mode") &&
-      !document.body.classList.contains("ws-stub-mode");
-    if (editorActive && !app.project.editTarget &&
-        VB.audioHasClips && VB.audioHasClips(app.project)) {
+    if (!document.body.classList.contains("ws-stub-mode") &&
+        !app.project.editTarget) {
       startSeqPlay();
       return true;
     }
