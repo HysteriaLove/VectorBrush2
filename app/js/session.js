@@ -22,7 +22,9 @@
     opts = opts || {};
 
     // ---- store -------------------------------------------------------------
-    this.project = new VB.Project();
+    // The live project takes the SAME dims the seeded "new" op carries —
+    // live and replay-from-nothing must agree on the stage.
+    this.project = new VB.Project(opts.width, opts.height);
 
     // ---- journal -----------------------------------------------------------
     // The deterministic op log. Seeded with the document-creating op so

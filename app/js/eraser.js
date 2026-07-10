@@ -264,7 +264,8 @@
   }
 
   EraserTool.prototype.radius = function () {
-    return this.app.eraserWidth * VB.TWIPS / 2;
+    var scale = this.app.strokeScale ? this.app.strokeScale() : 1;
+    return this.app.eraserWidth * VB.TWIPS / 2 * scale;
   };
 
   EraserTool.prototype.onDown = function (pos) {

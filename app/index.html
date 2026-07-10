@@ -839,7 +839,8 @@
   }
   .bdtitle:empty::before { content: attr(data-ph); color: #b0ada0; }
   .bdframe {
-    width: 100%; aspect-ratio: 16 / 9; display: block;
+    /* boards are 800×600 — exactly half the 1600×1200 stage */
+    width: 100%; aspect-ratio: 4 / 3; display: block;
     background: #ffffff; border-bottom: 1.5px solid #202327;
     touch-action: none;
   }
@@ -1225,6 +1226,35 @@
   }
   #seq-play:hover { background: var(--btn-hover); }
   #seq-strip { flex: 1; min-width: 0; height: 100%; touch-action: none; }
+
+  /* the ROUGHS timeline (roughtl.js) — replaces the scene strip AND
+     the step sequencer in the Roughs workspace only: read-only boards
+     + master-audio reference lanes over ONE rough frame lane */
+  #roughbar {
+    display: none;
+    position: relative;
+    flex: 1 1 132px; min-height: 132px;
+    background: var(--panel);
+    border-top: 1px solid var(--panel-edge);
+    user-select: none;
+  }
+  #rt-canvas {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    touch-action: none;
+  }
+  #rt-ref {
+    position: absolute; top: 2px; right: 8px;
+    display: flex; align-items: center; gap: 6px;
+    font-size: 10px; color: var(--text-dim);
+    background: var(--panel);
+    border: 1px solid var(--panel-edge);
+    border-radius: var(--radius-sm);
+    padding: 2px 8px;
+  }
+  #rt-ref input[type="range"] { width: 90px; height: 12px; }
+  body.ws-roughs #seqbar, body.ws-roughs #timebar { display: none; }
+  body.ws-roughs #roughbar { display: block; }
 
   #ctxmenu {
     position: absolute; z-index: 20; min-width: 200px;
@@ -1614,6 +1644,10 @@
     <div id="step-names"></div>
     <canvas id="step-grid"></canvas>
   </div>
+
+  <!-- the ROUGHS timeline (roughtl.js): boards + master audio, both
+       read-only, over ONE frame-by-frame rough lane -->
+  <div id="roughbar"></div>
   </div>
   </div>
 
@@ -1675,6 +1709,7 @@
   <script src="js/writing.js"></script>
   <script src="js/boards.js"></script>
   <script src="js/audio.js"></script>
+  <script src="js/roughtl.js"></script>
   <script src="vendor/three.min.js"></script>
   <script src="js/composite.js"></script>
   <script src="js/export.js"></script>

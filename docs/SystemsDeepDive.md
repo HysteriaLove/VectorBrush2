@@ -149,7 +149,7 @@ package units to read ranges from.
 
 | Field | Shape |
 | --- | --- |
-| `width, height` | stage twips (default 550×400 px × 20) — SWF frame definition only, canvases are infinite |
+| `width, height` | stage twips (default 1600×1200 px × 20; storyboards mint at exactly 0.5× = 800×600) — SWF frame definition only, canvases are infinite |
 | `fps` | 24; `fpsSet` op |
 | `background` | `{r,g,b,a}` |
 | `scenes` | `[Scene]`; `Scene = {id, name, layers:[Layer], cast:[], tracks:[]}`; `Layer = {name, visible, locked, frames:[cell]}`; **layers[0] is TOP** (JSFL convention) |

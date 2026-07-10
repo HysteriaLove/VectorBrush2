@@ -133,6 +133,48 @@ PANEL LANE, MASTER track, then the stem tracks that feed it.
   windows) replaces the internals of `startPlayback` — the call sites
   and the clock don't change.
 
+### Fixed resolutions + stroke consistency (SHIPPED)
+
+Vector cells thumbnail badly when authored at arbitrary scales, so the
+resolutions are now FIXED by decree:
+
+- the project stage defaults to **1600×1200 px** (32000×24000 twips) —
+  `Project()` defaults, the boot session, and the shell's new-project
+  path all agree (`Session(opts)` now constructs the live project from
+  the same dims its seeded `new` op carries; they can never diverge);
+- storyboard panels mint at exactly **0.5× = 800×600** (spine.js
+  `PANEL_W/H`), so a board maps onto the stage at a clean 2×. Board
+  card frames, reel thumbs, and filmstrip tiles are all 4:3.
+
+Stroke consistency across the scales is enforced at RECORD time:
+`app.strokeScale()` = active cell width / PROJECT width, and every
+drawing tool (brush + eraser radius, pencil + shapes width) multiplies
+by it before the op is journaled. Ops carry final scaled geometry, so
+replay needs no context and cross-resolution paste stays honest. A
+50 px brush on the stage and a 50 px brush on a board read as the same
+weight when the board is referenced at 2× over the canvas.
+
+### The Roughs timeline (roughtl.js — SHIPPED)
+
+Roughs swaps the editor's scene strip + step sequencer (`body.ws-roughs`
+hides `#seqbar`/`#timebar`, shows `#roughbar`; Actors keeps the classic
+pair) for a three-lane view on the SAME T1 ms axis as Audio
+(`VB.spinePanelSpans`/`VB.spinePanelAtMs`):
+
+- **BOARDS** — the storyboard filmstrip, read-only here (clicks seek,
+  never edit; board lengths are still cut in Audio);
+- **MASTER** — the stems' mixdown envelope, read-only (same per-pixel
+  peak sum as the Audio lane);
+- **ROUGH** — the one editable track: the current scene's active layer,
+  frame by frame, positioned at the scene's first sequence-instance
+  start. Scrubbing any lane drives `cur.frame` live and pins one
+  `frameSelect` on release.
+
+The BOARD REFERENCE: a slider on the bar (persisted,
+`vb-roughref`) sets `app.boardRefAlpha`; the render loop draws the
+panel under the current frame across the stage at 2× with that opacity
+— referencing, never editable from Roughs.
+
 ---
 
 ## 2. The membrane: two personas, one script

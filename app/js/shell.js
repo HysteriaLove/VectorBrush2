@@ -102,6 +102,13 @@
     document.body.classList.toggle("ws-stub-mode", !sec.editor && !mount);
     document.body.classList.toggle("ws-mount-mode", !!mount);
     document.body.classList.toggle("ws-preprod", !!PREPROD[sec.id]);
+    // Roughs swaps the scene strip + step sequencer for its own
+    // timeline (roughtl.js); Actors keeps the classic pair
+    document.body.classList.toggle("ws-roughs", sec.id === "roughs");
+    if (sec.id === "roughs" && window.VB && VB.RoughTimeline) {
+      var rb = document.getElementById("roughbar");
+      if (rb) VB.RoughTimeline.mount(rb, app);
+    }
     if (app.floatContext) {
       app.floatContext(PREPROD[sec.id] ? EDITOR_PANELS : []);
     }
@@ -253,7 +260,8 @@
     var handle = store.open(id);
     var segPaths = await handle.listUnits("journal/");
     if (!segPaths.length) {
-      var fresh = new VB.Session({ width: 550 * VB.TWIPS, height: 400 * VB.TWIPS });
+      var fresh = new VB.Session({ width: 1600 * VB.TWIPS,
+                                   height: 1200 * VB.TWIPS });
       persistState(fresh);
       return fresh;
     }

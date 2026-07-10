@@ -98,7 +98,8 @@
   }
 
   BrushTool.prototype.radius = function () {
-    return this.app.brushWidth * VB.TWIPS / 2;
+    var scale = this.app.strokeScale ? this.app.strokeScale() : 1;
+    return this.app.brushWidth * VB.TWIPS / 2 * scale;
   };
 
   BrushTool.prototype.onDown = function (pos) {

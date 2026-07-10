@@ -40,8 +40,11 @@
   }
 
   function Project(width, height) {
-    this.width = width || 550 * 20;
-    this.height = height || 400 * 20;
+    // 1600×1200 default (user decision, fixed-resolution round):
+    // Roughs draws over this fixed canvas; storyboards are exactly
+    // half (800×600, spine.js) so stroke weights stay consistent
+    this.width = width || 1600 * 20;
+    this.height = height || 1200 * 20;
     this.fps = 24; // playback rate (reference default); journaled via fpsSet
     this.background = { r: 255, g: 255, b: 255, a: 255 };
     this.scenes = [new Scene("Scene 1", this.newCell(), "scene@0")];

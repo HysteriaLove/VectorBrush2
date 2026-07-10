@@ -28,6 +28,19 @@
     fillMaterial: null,       // selected 2DMaterial — overrides fillColor
     eraserWidth: 20,          // eraser diameter, px
     brushWidth: 10,           // brush diameter, px
+    // stroke sizes stay CONSISTENT across canvas resolutions (user
+    // decision, fixed-resolution round): drawing into a half-size
+    // board panel halves the recorded twip sizes, so strokes read the
+    // same weight when the board is referenced at stage scale or
+    // thumbnailed. Applied at RECORD time — ops carry final geometry.
+    strokeScale: function () {
+      // denominator is the PROJECT resolution, not stage() — stage()
+      // follows the edit target and would collapse the ratio to 1
+      var p = app.project;
+      var cell = p && p.activeCell();
+      return cell && cell.width > 0 && p.width > 0
+        ? cell.width / p.width : 1;
+    },
     debug: false,
     debugHover: -1,
     debugPin: -1,
@@ -47,7 +60,8 @@
     },
     docChanged: docChanged
   };
-  app.session = new VB.Session({ width: 550 * VB.TWIPS, height: 400 * VB.TWIPS });
+  // the fixed default resolution (boards are minted at exactly half)
+  app.session = new VB.Session({ width: 1600 * VB.TWIPS, height: 1200 * VB.TWIPS });
 
   Object.defineProperty(app, "history", {
     get: function () { return app.session.history; }
@@ -129,6 +143,23 @@
     }
   };
 
+  // Where the current scene STARTS on the master (audio) axis — the
+  // first sequence instance that plays it, in ms. The board-ref
+  // overlay and the roughs timeline agree on this mapping.
+  function roughSceneStartMs() {
+    var project = app.project;
+    var scene = project.scenes[project.cur.scene];
+    if (!scene) return 0;
+    var fm = 1000 / (project.fps || 24);
+    var at = 0;
+    for (var i = 0; i < (project.sequence || []).length; i++) {
+      var inst = project.sequence[i];
+      if (inst.scene === scene.id) return at * fm;
+      at += Math.max(1, inst.duration | 0);
+    }
+    return 0;
+  }
+
   var renderQueued = false;
   function requestRender() {
     if (renderQueued) return;
@@ -140,6 +171,26 @@
         VB.applyViewTransform(ctx, app.view); // overlays/debug only
       } else {
         VB.renderProject(ctx, app.project, app.view);
+      }
+      // board REFERENCE (roughs): the storyboard panel under the
+      // current frame, drawn across the stage at 2× — boards are half
+      // the stage by decree. Opacity comes from the roughbar slider.
+      if (app.boardRefAlpha > 0 && !app.project.editTarget &&
+          VB.spinePanelAtMs &&
+          document.body.classList.contains("ws-roughs")) {
+        var refSpan = VB.spinePanelAtMs(app.project,
+          roughSceneStartMs() + ((app.project.cur.frame || 0) + 0.5) *
+            (1000 / (app.project.fps || 24)));
+        var refCell = refSpan && refSpan.panel.cell;
+        if (refCell && refCell.width > 0) {
+          var rr = app.project.width / refCell.width;
+          ctx.save();
+          ctx.globalAlpha = app.boardRefAlpha;
+          ctx.scale(rr, rr);
+          VB.renderDocContent(ctx, refCell,
+            { zoom: app.view.zoom * rr, dpr: app.view.dpr });
+          ctx.restore();
+        }
       }
       // onion skin: neighbor-frame ghosts of the active layer (roughs
       // workflow); skipped during playback and inside actor cells
@@ -3254,6 +3305,9 @@
   }
 
   function refreshTimeline() {
+    if (VB.RoughTimeline && VB.RoughTimeline.isMounted()) {
+      VB.RoughTimeline.refresh();
+    }
     var project = app.project;
     var total = project.sceneSpan ? project.sceneSpan() : project.frameCount();
     var cur = project.cur.frame || 0;
@@ -3657,7 +3711,14 @@
     refreshSequence();
   }
 
+  // external timelines (roughtl.js) halt both transports before seeking
+  app.stopPlayback = function () { stopPlay(); stopSeqPlay(); };
+
   ensureSeqStrip(); // build the strip at load — remounts never add canvases
+  (function () {    // same for the roughs timeline's canvas
+    var rb = document.getElementById("roughbar");
+    if (rb && VB.RoughTimeline) VB.RoughTimeline.mount(rb, app);
+  })();
 
   // SYNC AUDIT (user report): the global timeline is visible in EVERY
   // workspace now, so Space plays the SEQUENCE (picture + sound from

@@ -20,7 +20,11 @@
 (function () {
   "use strict";
 
-  var PANEL_W = 960 * 20, PANEL_H = 540 * 20;
+  // FIXED RESOLUTIONS (user decision): storyboards are exactly HALF
+  // the main canvas (1600×1200 default) — 800×600. The 2:1 ratio is
+  // what keeps stroke weights consistent when boards are referenced
+  // over the rough canvas or drawn at card scale.
+  var PANEL_W = 800 * 20, PANEL_H = 600 * 20;
   var DEFAULT_DURATION = 24; // frames
 
   function spineOf(project) {
@@ -110,6 +114,29 @@
     d.width = PANEL_W;
     d.height = PANEL_H;
     return d;
+  }
+
+  /** Panel spans on the T1 audio-ms axis (frames × 1000/fps from 0):
+   *  [{ panel, index, startMs, endMs }] — the shared ruler the Audio
+   *  sync area and the Roughs timeline both draw against. */
+  function panelSpans(project) {
+    var fm = 1000 / (project.fps || 24);
+    var out = [];
+    var at = 0;
+    spineOf(project).panels.forEach(function (p, i) {
+      var len = Math.max(1, p.duration | 0) * fm;
+      out.push({ panel: p, index: i, startMs: at, endMs: at + len });
+      at += len;
+    });
+    return out;
+  }
+
+  function panelAtMs(project, ms) {
+    var spans = panelSpans(project);
+    for (var i = 0; i < spans.length; i++) {
+      if (ms < spans[i].endMs || i === spans.length - 1) return spans[i];
+    }
+    return null;
   }
 
   // ---- panel ops (the one container — both workspaces record these) ---------------
@@ -251,4 +278,6 @@
   VB.spineFindByName = findByName;
   VB.spineSceneRuns = sceneRuns;
   VB.spinePanelText = panelText;
+  VB.spinePanelSpans = panelSpans;
+  VB.spinePanelAtMs = panelAtMs;
 })();

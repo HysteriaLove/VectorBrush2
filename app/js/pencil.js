@@ -59,11 +59,15 @@
     // zoomed in = precise, zoomed out = forgiving.
     var snapTol = Math.min(200, Math.max(20,
       Math.round(4 * VB.TWIPS / this.app.view.zoom)));
+    // widths scale with the target cell so strokes read the same
+    // weight across canvas resolutions (ops carry the FINAL width)
+    var width = Math.round(this.app.strokeWidth *
+      (this.app.strokeScale ? this.app.strokeScale() : 1));
     this.app.record({
       op: "pencil",
       points: pts.map(function (p) { return { x: p.x, y: p.y }; }),
       style: {
-        width: this.app.strokeWidth,
+        width: width,
         color: {
           r: this.app.strokeColor.r, g: this.app.strokeColor.g,
           b: this.app.strokeColor.b, a: this.app.strokeColor.a
@@ -73,7 +77,7 @@
       snapTol: snapTol
     });
     var added = pencilCommit(this.app.doc, pts, {
-      width: this.app.strokeWidth,
+      width: width,
       color: this.app.strokeColor
     }, undefined, snapTol);
     this.app.docChanged();

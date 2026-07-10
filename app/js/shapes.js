@@ -174,8 +174,11 @@
   }
 
   function strokeStyleOf(app) {
+    // width scales with the target cell (half-size boards get
+    // half-width strokes — consistent weight across resolutions)
+    var scale = app.strokeScale ? app.strokeScale() : 1;
     return {
-      width: Math.round(app.strokeWidth), // already twips
+      width: Math.round(app.strokeWidth * scale), // twips
       color: {
         r: app.strokeColor.r, g: app.strokeColor.g,
         b: app.strokeColor.b, a: app.strokeColor.a

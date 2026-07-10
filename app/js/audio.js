@@ -593,7 +593,7 @@
         var cached = VB.thumbGet("panel:" + sp.panel.id, sp.panel.cell);
         if (cached) {
           var th = PANEL_LANE_H - 14;
-          var tw = th * 16 / 9;
+          var tw = th * 4 / 3; // boards are 800×600
           ctx.save();
           ctx.beginPath();
           ctx.rect(bx + 2, py + 7, Math.max(1, bw - 4), th);
@@ -604,7 +604,7 @@
           ctx.restore();
         } else if (VB.thumbRequest) {
           VB.thumbRequest("panel:" + sp.panel.id, sp.panel.cell,
-                          96, 54, sp.index).then(function () {
+                          96, 72, sp.index).then(function () {
             if (view.host) renderLanes();
           });
         }
@@ -901,7 +901,8 @@
     // offscreen/absent boards CULL (no reserved gap at the reel ends)
     slot.root.style.display = sp ? "" : "none";
     if (!sp) return;
-    if (slot.cvs.width !== 128) { slot.cvs.width = 128; slot.cvs.height = 72; }
+    // 4:3 — the boards' half-stage shape
+    if (slot.cvs.width !== 128) { slot.cvs.width = 128; slot.cvs.height = 96; }
     slot.num.textContent = String(sp.index + 1) + " · " +
       ((sp.endMs - sp.startMs) / 1000).toFixed(1) + "s";
     var ctx = slot.cvs.getContext("2d");
@@ -913,7 +914,7 @@
     } else {
       ctx.clearRect(0, 0, slot.cvs.width, slot.cvs.height);
       if (VB.thumbRequest) {
-        VB.thumbRequest("panel:" + sp.panel.id, sp.panel.cell, 128, 72,
+        VB.thumbRequest("panel:" + sp.panel.id, sp.panel.cell, 128, 96,
                         Math.abs(sp.index - curIndex)).then(function (cv) {
           if (cv && slot.cvs.isConnected) {
             slot.cvs.getContext("2d")
