@@ -52,6 +52,10 @@
     // The Brainstorm board (brainstorm.js): placeable note items,
     // z-order = array order. Rides the journal.
     this.notes = { items: [] };
+    // Writing (writing.js): documents of blocks; dialogue LINE blocks
+    // are the app-wide language backbone (stable ids, per-language
+    // text). Rides the journal.
+    this.writing = { docs: [] };
     // Actor edit mode (Flash's symbol-edit): when set, scene()/stage()/
     // activeCell() resolve to the targeted actor cell, so every tool,
     // renderer, and journaled art op follows. Set ONLY through the

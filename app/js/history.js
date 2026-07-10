@@ -119,6 +119,7 @@
         canvas: (target.notes && target.notes.canvas)
           ? snapshotDoc(target.notes.canvas) : null
       },
+      writing: JSON.parse(JSON.stringify(target.writing || { docs: [] })),
       scenes: target.scenes.map(function (sc) {
         return {
           name: sc.name,
@@ -157,6 +158,7 @@
       restoreDoc(noteCv, snap.notes.canvas);
       target.notes.canvas = noteCv;
     }
+    target.writing = JSON.parse(JSON.stringify(snap.writing || { docs: [] }));
     target.scenes = snap.scenes.map(function (sc) {
       return {
         name: sc.name,

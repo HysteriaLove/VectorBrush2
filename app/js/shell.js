@@ -27,11 +27,20 @@
   // Sections marked editor:true show the current editor (the
   // DrawingSurface hosts — Roughs and Actors per the architecture);
   // the rest are stub workspaces their build-order steps mount into.
+  // Mounted workspace views: sections with `mount` show their own DOM
+  // container over the editor; each container/view pair registers here.
+  var MOUNTS = {
+    brainstorm: { el: "brainstorm-board",
+                  view: function () { return VB.BrainstormView; } },
+    writing: { el: "writing-view",
+               view: function () { return VB.WritingView; } }
+  };
+
   var SECTIONS = [
-    { id: "brainstorm", label: "Brainstorm", board: true,
+    { id: "brainstorm", label: "Brainstorm", mount: "brainstorm",
       note: "" },
-    { id: "writing", label: "Writing",
-      note: "Documents and dialogue Lines, the app-wide language backbone — step 5 (Architecture §6.2)." },
+    { id: "writing", label: "Writing", mount: "writing",
+      note: "" },
     { id: "storyboards", label: "Storyboards",
       note: "Panels and beats, playable as an animatic — step 5 (Architecture §6.3)." },
     { id: "audio", label: "Audio",
@@ -57,6 +66,15 @@
     return null;
   }
 
+  function unmountAllViews() {
+    Object.keys(MOUNTS).forEach(function (k) {
+      var v = MOUNTS[k].view();
+      if (v) v.unmount();
+      var el = document.getElementById(MOUNTS[k].el);
+      if (el) el.classList.remove("wsactive");
+    });
+  }
+
   function setSection(id) {
     var sec = sectionById(id) || sectionById("roughs");
     activeSection = sec.id;
@@ -64,17 +82,23 @@
     for (var i = 0; i < tabs.length; i++) {
       tabs[i].classList.toggle("active", tabs[i].dataset.sec === sec.id);
     }
-    document.body.classList.toggle("ws-stub-mode", !sec.editor && !sec.board);
-    document.body.classList.toggle("ws-board-mode", !!sec.board);
-    if (!sec.editor && !sec.board) {
+    var mount = sec.mount ? MOUNTS[sec.mount] : null;
+    document.body.classList.toggle("ws-stub-mode", !sec.editor && !mount);
+    document.body.classList.toggle("ws-mount-mode", !!mount);
+    if (!sec.editor && !mount) {
       document.getElementById("ws-stub-title").textContent = sec.label;
       document.getElementById("ws-stub-note").textContent = sec.note;
     }
-    if (sec.board && VB.BrainstormView) {
-      VB.BrainstormView.mount(document.getElementById("brainstorm-board"), app);
-    } else if (VB.BrainstormView) {
-      VB.BrainstormView.unmount();
-    }
+    Object.keys(MOUNTS).forEach(function (k) {
+      var m = MOUNTS[k];
+      var v = m.view();
+      var el = document.getElementById(m.el);
+      var active = m === mount;
+      if (el) el.classList.toggle("wsactive", active);
+      if (!v) return;
+      if (active) v.mount(el, app);
+      else v.unmount();
+    });
     // editor input (keyboard/tools) only while an editor section shows
     app.uiActive = !!sec.editor && overlay.style.display !== "flex";
     if (sec.editor) app.requestRender();
@@ -318,7 +342,7 @@
   function showHome() {
     app.uiActive = false;
     app.unmountRenderer();
-    if (VB.BrainstormView) VB.BrainstormView.unmount();
+    unmountAllViews();
     overlay.style.display = "flex";
     renderHome();
   }

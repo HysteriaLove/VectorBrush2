@@ -192,6 +192,7 @@
     syncEditCrumb();
     refreshTimeline();
     if (VB.BrainstormView) VB.BrainstormView.refresh(); // undo/redo on the board
+    if (VB.WritingView) VB.WritingView.refresh();
     app.debugPin = -1;
     app.debugHover = -1;
     refreshDebugPanel();

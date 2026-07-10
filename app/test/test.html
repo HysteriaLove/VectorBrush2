@@ -50,6 +50,7 @@
 <script src="../js/actors.js"></script>
 <script src="../js/thumbs.js"></script>
 <script src="../js/brainstorm.js"></script>
+<script src="../js/writing.js"></script>
 <script src="../js/text.js"></script>
 <script src="../js/debug.js"></script>
 <script src="../js/pencil.js"></script>
@@ -3014,6 +3015,74 @@
   } catch (err) {
     fail++;
     log("  VISUAL EXCEPTION: " + (err && err.stack || err), "fail");
+  }
+
+  // =============================== writing ===================================
+  // Documents of blocks; dialogue LINE blocks are the language backbone
+  // — stable ids that storyboards (and later subtitles/lip-sync)
+  // reference, with per-language text maps resolved at read time.
+  log("");
+  log("writing:");
+  try {
+    var wse = new VB.Session({ width: 11000, height: 8000 });
+    wse.exec({ op: "writingDocAdd", id: "wd1" });
+    wse.exec({ op: "writingDocAdd", id: "wd2", name: "Episode 2" });
+    check("documents land with auto/explicit names",
+      wse.project.writing.docs.length === 2 &&
+      wse.project.writing.docs[0].name === "Document 01" &&
+      wse.project.writing.docs[1].name === "Episode 2");
+    wse.exec({ op: "blockAdd", doc: "wd1", id: "b1", kind: "text",
+               content: "EXT. ROOFTOP — NIGHT" });
+    wse.exec({ op: "blockAdd", doc: "wd1", id: "line_a", kind: "line",
+               character: "MIRA", text: "We jump on three." });
+    wse.exec({ op: "blockAdd", doc: "wd1", id: "line_b", kind: "line",
+               character: "JUNO", text: "Three as in NOW three?" });
+    wse.exec({ op: "blockAdd", doc: "wd1", id: "b2", kind: "text",
+               index: 1, content: "Wind. Sirens far below." });
+    var wdoc = VB.writingDocById(wse.project, "wd1");
+    check("blocks insert in order (explicit index respected)",
+      wdoc.blocks.map(function (b) { return b.id; }).join(",") ===
+      "b1,b2,line_a,line_b");
+    check("lines resolve by id anywhere in the project",
+      VB.lineById(wse.project, "line_b").block.character === "JUNO" &&
+      VB.lineTextOf(VB.lineById(wse.project, "line_b").block) ===
+      "Three as in NOW three?" &&
+      !VB.lineById(wse.project, "b1"), // text blocks are not lines
+      JSON.stringify(VB.lineById(wse.project, "line_b").block.text));
+    wse.exec({ op: "blockEdit", doc: "wd1", block: "line_a",
+               lang: "default", text: "We jump on three. Trust me." });
+    wse.exec({ op: "blockEdit", doc: "wd1", block: "line_a",
+               character: "MIRA (calm)" });
+    wse.exec({ op: "blockEdit", doc: "wd1", block: "line_a",
+               lang: "fr", text: "On saute à trois. Fais-moi confiance." });
+    var lineA = VB.lineById(wse.project, "line_a").block;
+    check("per-language text edits keep every language",
+      VB.lineTextOf(lineA) === "We jump on three. Trust me." &&
+      VB.lineTextOf(lineA, "fr") ===
+      "On saute à trois. Fais-moi confiance." &&
+      lineA.character === "MIRA (calm)" &&
+      VB.lineTextOf(lineA, "de") === VB.lineTextOf(lineA), // fallback
+      JSON.stringify(lineA.text));
+    wse.exec({ op: "blockMove", doc: "wd1", block: "line_b", index: 0 });
+    check("blocks reorder",
+      wdoc.blocks[0].id === "line_b", wdoc.blocks.map(function (b) {
+        return b.id; }).join(","));
+    var wRep = await VB.replayJournal(JSON.parse(JSON.stringify(wse.journal)));
+    check("writing replays byte-exact",
+      JSON.stringify(wRep.project.writing) ===
+      JSON.stringify(wse.project.writing));
+    wse.exec({ op: "blockRemove", doc: "wd1", block: "b2" });
+    wse.exec({ op: "undo" });
+    check("block removal undoes through project history",
+      VB.writingDocById(wse.project, "wd1").blocks.length === 4 &&
+      wse.project.writing.docs[0].blocks.some(function (b) {
+        return b.id === "b2"; }));
+    wse.exec({ op: "writingDocRemove", doc: "wd2" });
+    check("document removal drops the doc",
+      wse.project.writing.docs.length === 1);
+  } catch (err) {
+    fail++;
+    log("  WRITING EXCEPTION: " + (err && err.stack || err), "fail");
   }
 
   // ============================ brainstorm board =============================

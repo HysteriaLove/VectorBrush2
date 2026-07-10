@@ -88,16 +88,23 @@
       app.doc.edges.length === edgesB,
       app.doc.edges.length + " vs " + edgesB + " edges");
 
-    // workspace tabs: stub sections cover the editor, editor sections
-    // restore it — same session, same art
+    // workspace tabs: mounted sections (writing) and stub sections
+    // (storyboards) cover the editor; editor sections restore it —
+    // same session, same art
     await shell.goto("#project/" + A.id + "/writing");
-    check("stub workspaces cover the editor",
+    check("mounted workspaces cover the editor",
       shell.section() === "writing" && app.uiActive === false &&
+      W.document.body.classList.contains("ws-mount-mode") &&
+      W.document.getElementById("writing-view").classList.contains("wsactive"));
+    await shell.goto("#project/" + A.id + "/storyboards");
+    check("stub workspaces cover the editor",
+      shell.section() === "storyboards" && app.uiActive === false &&
       W.document.body.classList.contains("ws-stub-mode"));
     await shell.goto("#project/" + A.id + "/roughs");
     check("editor sections restore input and art",
       shell.section() === "roughs" && app.uiActive === true &&
       !W.document.body.classList.contains("ws-stub-mode") &&
+      !W.document.body.classList.contains("ws-mount-mode") &&
       app.doc.edges.length === edgesA,
       shell.section() + " uiActive=" + app.uiActive);
 
