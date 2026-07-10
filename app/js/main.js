@@ -2168,6 +2168,18 @@
     });
   });
 
+  // App-owned right-click (user directive): the browser context menu
+  // never shows — right-click is reserved for app menus (the canvas
+  // #ctxmenu today, per-workspace menus later). Editable text keeps the
+  // native menu: paste and spellcheck are expected in a writing tool.
+  document.addEventListener("contextmenu", function (ev) {
+    var el = ev.target;
+    var tag = el && el.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" ||
+        (el && el.isContentEditable)) return;
+    ev.preventDefault();
+  });
+
   // ---- boot ------------------------------------------------------------------------
 
   resizeCanvas();

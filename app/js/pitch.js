@@ -40,8 +40,62 @@
     var pitch = pitchOf(c.project);
     var at = op.index === undefined ? pitch.slides.length
       : Math.max(0, Math.min(pitch.slides.length, op.index));
-    pitch.slides.splice(at, 0, { id: op.id, cell: newSlideCell() });
+    pitch.slides.splice(at, 0, { id: op.id, cell: newSlideCell(), texts: [] });
     pitch.cur = at;
+    c.sync();
+  });
+
+  // slide TEXT boxes (double-click authoring; coordinates in slide px)
+  function slideTexts(slide) {
+    slide.texts = slide.texts || [];
+    return slide.texts;
+  }
+
+  function slideTextById(slide, id) {
+    var texts = slideTexts(slide);
+    for (var i = 0; i < texts.length; i++) {
+      if (texts[i].id === id) return { text: texts[i], index: i };
+    }
+    return null;
+  }
+
+  VB.defineOp("pitchTextAdd", function (c, op) {
+    var hit = slideById(c.project, op.slide);
+    if (!hit) return;
+    c.history.push(c.project);
+    slideTexts(hit.slide).push({
+      id: op.id, x: op.x, y: op.y,
+      size: op.size || 28,
+      content: op.text || ""
+    });
+    c.sync();
+  });
+
+  VB.defineOp("pitchTextEdit", function (c, op) {
+    var hit = slideById(c.project, op.slide);
+    var t = hit && slideTextById(hit.slide, op.id);
+    if (!t) return;
+    c.history.push(c.project);
+    t.text.content = op.text;
+    c.sync();
+  });
+
+  VB.defineOp("pitchTextMove", function (c, op) {
+    var hit = slideById(c.project, op.slide);
+    var t = hit && slideTextById(hit.slide, op.id);
+    if (!t) return;
+    c.history.push(c.project);
+    t.text.x = op.x;
+    t.text.y = op.y;
+    c.sync();
+  });
+
+  VB.defineOp("pitchTextRemove", function (c, op) {
+    var hit = slideById(c.project, op.slide);
+    var t = hit && slideTextById(hit.slide, op.id);
+    if (!t) return;
+    c.history.push(c.project);
+    slideTexts(hit.slide).splice(t.index, 1);
     c.sync();
   });
 
@@ -94,7 +148,7 @@
   DRAW_TOOLS.forEach(function (t) { DRAW_SET[t[0]] = true; });
 
   var view = {
-    host: null, app: null, stage: null, strip: null,
+    host: null, app: null, stage: null, strip: null, texts: null,
     drawBtn: null, toolStrip: null, presentBtn: null,
     drawMode: false, present: false
   };
@@ -116,6 +170,70 @@
       x: (ev.clientX - rect.left - m.panX) / m.zoom * VB.TWIPS,
       y: (ev.clientY - rect.top - m.panY) / m.zoom * VB.TWIPS
     };
+  }
+
+  function slidePx(ev) {
+    var rect = view.stage.getBoundingClientRect();
+    var m = stageMetrics();
+    return {
+      x: (ev.clientX - rect.left - m.panX) / m.zoom,
+      y: (ev.clientY - rect.top - m.panY) / m.zoom
+    };
+  }
+
+  function isEditingText() {
+    var el = document.activeElement;
+    return !!(el && view.host && view.host.contains(el) &&
+              el.classList && el.classList.contains("pttext"));
+  }
+
+  /** Lay the current slide's text boxes over the stage as DOM (crisp,
+   *  editable in place — double-click authoring, drag to move). */
+  function layoutTexts() {
+    if (!view.texts) return;
+    if (isEditingText()) return;
+    view.texts.innerHTML = "";
+    var slide = currentSlide(view.app.project);
+    if (!slide) return;
+    var m = stageMetrics();
+    (slide.texts || []).forEach(function (t) {
+      var el = document.createElement("div");
+      el.className = "pttext";
+      el.dataset.id = t.id;
+      el.style.left = (m.panX + t.x * m.zoom) + "px";
+      el.style.top = (m.panY + t.y * m.zoom) + "px";
+      el.style.fontSize = (t.size * m.zoom) + "px";
+      el.textContent = t.content;
+      el.title = "Double-click to edit · drag to move";
+      view.texts.appendChild(el);
+    });
+    view.texts.classList.toggle("nohit", view.drawMode || view.present);
+  }
+
+  function beginSlideTextEdit(el, textId) {
+    var slide = currentSlide(view.app.project);
+    if (!slide) return;
+    el.contentEditable = "true";
+    el.classList.add("editing");
+    el.focus();
+    var sel = window.getSelection();
+    sel.selectAllChildren(el);
+    sel.collapseToEnd();
+    el.addEventListener("blur", function onBlur() {
+      el.removeEventListener("blur", onBlur);
+      el.contentEditable = "false";
+      el.classList.remove("editing");
+      var hit = slideTextById(slide, textId);
+      var next = el.innerText.replace(/\n$/, "");
+      if (!hit) { layoutTexts(); return; }
+      if (next.trim() === "") {
+        view.app.exec({ op: "pitchTextRemove", slide: slide.id, id: textId });
+      } else if (next !== hit.text.content) {
+        view.app.exec({ op: "pitchTextEdit", slide: slide.id,
+                        id: textId, text: next });
+      }
+      refresh();
+    });
   }
 
   function renderStage() {
@@ -162,14 +280,24 @@
       tc.width = 96;
       tc.height = 54;
       cellEl.appendChild(tc);
+      var paintThumb = function (cv) {
+        if (!cv || !tc.isConnected) return;
+        var tctx = tc.getContext("2d");
+        tctx.drawImage(cv, 0, 0);
+        // text boxes ride on top at thumb scale
+        var s = 96 / (SLIDE_W / VB.TWIPS);
+        tctx.fillStyle = "#222";
+        (slide.texts || []).forEach(function (t) {
+          tctx.font = Math.max(2, t.size * s) + "px system-ui";
+          tctx.fillText(t.content.split("\n")[0], t.x * s, t.y * s + t.size * s);
+        });
+      };
       var cached = VB.thumbGet("pitch:" + slide.id, slide.cell);
       if (cached) {
-        tc.getContext("2d").drawImage(cached, 0, 0);
+        paintThumb(cached);
       } else {
         VB.thumbRequest("pitch:" + slide.id, slide.cell, 96, 54, i)
-          .then(function (cv) {
-            if (cv && tc.isConnected) tc.getContext("2d").drawImage(cv, 0, 0);
-          });
+          .then(paintThumb);
       }
       var num = document.createElement("span");
       num.textContent = String(i + 1);
@@ -182,6 +310,7 @@
     if (view.drawBtn) view.drawBtn.classList.toggle("active", view.drawMode);
     syncToolStrip();
     renderStage();
+    layoutTexts();
   }
 
   function selectSlide(index) {
@@ -219,6 +348,7 @@
     view.host.classList.toggle("presenting", on);
     if (on && view.drawMode) setDrawMode(false);
     renderStage();
+    layoutTexts();
   }
 
   function syncToolStrip() {
@@ -363,12 +493,74 @@
     var stage = document.createElement("canvas");
     stage.id = "pt-stage";
     body.appendChild(stage);
+    var texts = document.createElement("div");
+    texts.id = "pt-texts";
+    body.appendChild(texts);
     host.appendChild(body);
     var stripEl = document.createElement("div");
     stripEl.id = "pt-strip";
     host.appendChild(stripEl);
     view.stage = stage;
     view.strip = stripEl;
+    view.texts = texts;
+
+    // text boxes: double-click empty slide → new box; double-click a
+    // box → edit in place; drag a box → move
+    var textDrag = null;
+    texts.addEventListener("dblclick", function (ev) {
+      if (view.drawMode || view.present) return;
+      var slide = currentSlide(app.project);
+      if (!slide) return;
+      var box = ev.target.closest ? ev.target.closest(".pttext") : null;
+      if (box) {
+        ev.preventDefault();
+        beginSlideTextEdit(box, box.dataset.id);
+        return;
+      }
+      var p = slidePx(ev);
+      if (p.x < 0 || p.y < 0 || p.x > SLIDE_W / VB.TWIPS ||
+          p.y > SLIDE_H / VB.TWIPS) return;
+      var id = VB.actorNewId("ptext");
+      app.exec({ op: "pitchTextAdd", slide: slide.id, id: id,
+                 x: Math.round(p.x), y: Math.round(p.y) });
+      layoutTexts();
+      var el = texts.querySelector('[data-id="' + id + '"]');
+      if (el) beginSlideTextEdit(el, id);
+    });
+    texts.addEventListener("pointerdown", function (ev) {
+      if (view.drawMode || view.present || ev.button !== 0) return;
+      var box = ev.target.closest ? ev.target.closest(".pttext") : null;
+      if (!box || box.isContentEditable) return;
+      texts.setPointerCapture(ev.pointerId);
+      var slide = currentSlide(app.project);
+      var hit = slide && slideTextById(slide, box.dataset.id);
+      if (!hit) return;
+      textDrag = { el: box, id: box.dataset.id, slide: slide,
+                   x0: hit.text.x, y0: hit.text.y,
+                   p0: slidePx(ev), moved: false };
+    });
+    texts.addEventListener("pointermove", function (ev) {
+      if (!textDrag) return;
+      var p = slidePx(ev);
+      textDrag.moved = true;
+      var m = stageMetrics();
+      textDrag.el.style.left =
+        (m.panX + (textDrag.x0 + p.x - textDrag.p0.x) * m.zoom) + "px";
+      textDrag.el.style.top =
+        (m.panY + (textDrag.y0 + p.y - textDrag.p0.y) * m.zoom) + "px";
+    });
+    texts.addEventListener("pointerup", function (ev) {
+      if (!textDrag) return;
+      var d = textDrag;
+      textDrag = null;
+      if (!d.moved) return;
+      var p = slidePx(ev);
+      app.exec({ op: "pitchTextMove", slide: d.slide.id, id: d.id,
+                 x: Math.round(d.x0 + p.x - d.p0.x),
+                 y: Math.round(d.y0 + p.y - d.p0.y) });
+      refresh();
+    });
+    texts.addEventListener("pointercancel", function () { textDrag = null; });
 
     var activeTool = null;
     stage.addEventListener("pointerdown", function (ev) {
@@ -399,14 +591,19 @@
     });
 
     window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("resize", renderStage);
+    window.addEventListener("resize", onViewResize);
     refresh();
+  }
+
+  function onViewResize() {
+    renderStage();
+    layoutTexts();
   }
 
   function unmount() {
     if (!view.host) return;
     window.removeEventListener("keydown", onKeyDown);
-    window.removeEventListener("resize", renderStage);
+    window.removeEventListener("resize", onViewResize);
     var t = view.app && view.app.project.editTarget;
     if (view.drawMode && t && t.pitchSlide) {
       view.app.exec({ op: "editTargetClear" });
@@ -418,6 +615,7 @@
     view.host = null;
     view.stage = null;
     view.strip = null;
+    view.texts = null;
   }
 
   window.VB = window.VB || {};

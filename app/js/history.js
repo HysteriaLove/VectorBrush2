@@ -123,7 +123,8 @@
       pitch: {
         cur: (target.pitch || {}).cur || 0,
         slides: ((target.pitch || {}).slides || []).map(function (s) {
-          return { id: s.id, cell: snapshotDoc(s.cell) };
+          return { id: s.id, cell: snapshotDoc(s.cell),
+                   texts: JSON.parse(JSON.stringify(s.texts || [])) };
         })
       },
       // panel.lines arrays are copy-on-write (boards.js contract), so
@@ -184,7 +185,8 @@
       slides: ((snap.pitch || {}).slides || []).map(function (s) {
         var cell = new VB.Y2KVectorDocument();
         restoreDoc(cell, s.cell);
-        return { id: s.id, cell: cell };
+        return { id: s.id, cell: cell,
+                 texts: JSON.parse(JSON.stringify(s.texts || [])) };
       })
     };
     target.boards = {

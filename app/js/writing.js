@@ -60,8 +60,20 @@
     docs.push({
       id: op.id,
       name: op.name || "Document " + String(docs.length + 1).padStart(2, "0"),
-      blocks: []
+      text: "",   // the infinite document body (the authoring surface)
+      blocks: []  // dormant dialogue-Line store — ids get assigned to
+                  // stretches of the text when the dialogue system lands
     });
+    c.sync();
+  });
+
+  /** The whole document body as one text (Google-Docs-style editing;
+   *  user decision 2026-07-10). One op per editing session (blur). */
+  VB.defineOp("writingDocEdit", function (c, op) {
+    var doc = docById(c.project, op.doc);
+    if (!doc) return;
+    c.history.push(c.project);
+    doc.text = op.text;
     c.sync();
   });
 
@@ -170,53 +182,6 @@
     refresh();
   }
 
-  function commitEditable(el, doc, block) {
-    var val = el.textContent;
-    if (block.kind === "text") {
-      if (val !== (block.content || "")) {
-        exec({ op: "blockEdit", doc: doc.id, block: block.id, content: val });
-        return true;
-      }
-    } else if (el.classList.contains("wrchar")) {
-      if (val !== (block.character || "")) {
-        exec({ op: "blockEdit", doc: doc.id, block: block.id, character: val });
-        return true;
-      }
-    } else {
-      if (val !== lineText(block)) {
-        exec({ op: "blockEdit", doc: doc.id, block: block.id,
-               lang: LANG, text: val });
-        return true;
-      }
-    }
-    return false;
-  }
-
-  function focusBlock(blockId, cls) {
-    var el = view.editorEl.querySelector(
-      '[data-id="' + blockId + '"] .' + cls);
-    if (el) {
-      el.focus();
-      var sel = window.getSelection();
-      sel.selectAllChildren(el);
-      sel.collapseToEnd();
-    }
-  }
-
-  function addBlock(kind, afterBlockId, character) {
-    var doc = activeDoc();
-    if (!doc) { addDoc(); doc = activeDoc(); if (!doc) return; }
-    var index = doc.blocks.length;
-    if (afterBlockId) {
-      var hit = blockById(doc, afterBlockId);
-      if (hit) index = hit.index + 1;
-    }
-    var id = VB.actorNewId(kind === "line" ? "line" : "blk");
-    exec({ op: "blockAdd", doc: doc.id, id: id, kind: kind, index: index,
-           character: character || "" });
-    focusBlock(id, kind === "line" ? (character ? "wrdial" : "wrchar") : "wrtext");
-  }
-
   function addDoc() {
     exec({ op: "writingDocAdd", id: VB.actorNewId("wdoc") });
     var docs = writingOf(view.app.project).docs;
@@ -224,25 +189,14 @@
     refresh();
   }
 
-  function editable(cls, text, placeholder, doc, block) {
-    var el = document.createElement("div");
-    el.className = "wredit " + cls;
-    el.contentEditable = "true";
-    el.textContent = text || "";
-    el.dataset.ph = placeholder;
-    el.addEventListener("blur", function () { commitEditable(el, doc, block); });
-    el.addEventListener("keydown", function (ev) {
-      if (ev.key === "Enter" && !ev.shiftKey) {
-        ev.preventDefault();
-        el.blur(); // commits
-        // authoring flow: Enter continues with a new block of the kind
-        addBlock(block.kind, block.id,
-                 block.kind === "line" ? block.character : undefined);
-      }
-      if (ev.key === "Escape") el.blur();
-      ev.stopPropagation();
-    });
-    return el;
+  function commitBody() {
+    var body = view.editorEl && view.editorEl.querySelector(".wrbody");
+    var doc = activeDoc();
+    if (!body || !doc) return;
+    var val = body.innerText.replace(/\n$/, "");
+    if (val !== (doc.text || "")) {
+      exec({ op: "writingDocEdit", doc: doc.id, text: val });
+    }
   }
 
   function refresh() {
@@ -291,42 +245,23 @@
       view.editorEl.appendChild(empty);
       return;
     }
+    // ONE infinite document (user decision): a single flowing editable
+    // page, Google-Docs style. The body commits as one op on blur.
     var page = document.createElement("div");
     page.className = "wrpage";
-    doc.blocks.forEach(function (block, bi) {
-      var row = document.createElement("div");
-      row.className = "wrblock wr-" + block.kind;
-      row.dataset.id = block.id;
-      if (block.kind === "text") {
-        row.appendChild(editable("wrtext", block.content,
-          "action / description…", doc, block));
-      } else {
-        row.title = "line id: " + block.id;
-        row.appendChild(editable("wrchar", block.character,
-          "CHARACTER", doc, block));
-        row.appendChild(editable("wrdial", lineText(block),
-          "dialogue…", doc, block));
-      }
-      var ctl = document.createElement("div");
-      ctl.className = "wrctl";
-      function ctlBtn(label, title, fn) {
-        var b = document.createElement("button");
-        b.textContent = label;
-        b.title = title;
-        b.addEventListener("click", fn);
-        return b;
-      }
-      ctl.appendChild(ctlBtn("↑", "Move up", function () {
-        exec({ op: "blockMove", doc: doc.id, block: block.id, index: bi - 1 });
-      }));
-      ctl.appendChild(ctlBtn("↓", "Move down", function () {
-        exec({ op: "blockMove", doc: doc.id, block: block.id, index: bi + 1 });
-      }));
-      ctl.appendChild(ctlBtn("✕", "Delete block", function () {
-        exec({ op: "blockRemove", doc: doc.id, block: block.id });
-      }));
-      row.appendChild(ctl);
-      page.appendChild(row);
+    var body = document.createElement("div");
+    body.className = "wredit wrbody wrtext";
+    body.contentEditable = "true";
+    body.innerText = doc.text || "";
+    body.dataset.ph = "write…";
+    body.addEventListener("blur", commitBody);
+    body.addEventListener("keydown", function (ev) {
+      if (ev.key === "Escape") body.blur();
+      ev.stopPropagation(); // typing never triggers app shortcuts
+    });
+    page.appendChild(body);
+    page.addEventListener("click", function (ev) {
+      if (ev.target === page) body.focus(); // click the margin, type anyway
     });
     view.editorEl.appendChild(page);
   }
@@ -365,13 +300,9 @@
       return b;
     }
     bar.appendChild(toolBtn("＋ Document", "New writing document", addDoc));
-    bar.appendChild(toolBtn("＋ ¶ Text", "Append an action/description block",
-      function () { addBlock("text"); }));
-    bar.appendChild(toolBtn("＋ 💬 Line", "Append a dialogue line",
-      function () { addBlock("line"); }));
     var hint = document.createElement("span");
     hint.id = "wr-hint";
-    hint.textContent = "Enter continues with a new block · line ids are what storyboards reference";
+    hint.textContent = "one flowing document — dialogue ids get assigned to text later";
     bar.appendChild(hint);
     host.appendChild(bar);
 
@@ -393,6 +324,7 @@
 
   function unmount() {
     if (!view.host) return;
+    commitBody(); // leaving the tab never loses an uncommitted edit
     window.removeEventListener("keydown", onKeyDown);
     view.host.innerHTML = "";
     view.host = null;

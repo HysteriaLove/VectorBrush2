@@ -3139,6 +3139,29 @@
     check("slide removal undoes with its ink",
       pse.project.pitch.slides.length === 3 &&
       VB.pitchSlideById(pse.project, "sl2").slide.cell.edges.length > 0);
+
+    // slide text boxes (double-click authoring): journaled, replayed
+    pse.exec({ op: "pitchTextAdd", slide: "sl1", id: "pt1",
+               x: 120, y: 80, text: "OUR IDEA" });
+    pse.exec({ op: "pitchTextAdd", slide: "sl1", id: "pt2",
+               x: 120, y: 200, size: 18, text: "a story about jumping" });
+    pse.exec({ op: "pitchTextEdit", slide: "sl1", id: "pt2",
+               text: "a story about jumping (on three)" });
+    pse.exec({ op: "pitchTextMove", slide: "sl1", id: "pt1", x: 300, y: 60 });
+    var sl1 = VB.pitchSlideById(pse.project, "sl1").slide;
+    check("slide texts add, edit, and move",
+      sl1.texts.length === 2 && sl1.texts[0].x === 300 &&
+      sl1.texts[1].content === "a story about jumping (on three)" &&
+      sl1.texts[0].size === 28 && sl1.texts[1].size === 18,
+      JSON.stringify(sl1.texts.map(function (t) { return [t.id, t.x, t.y]; })));
+    var pRepT = await VB.replayJournal(JSON.parse(JSON.stringify(pse.journal)));
+    check("slide texts replay byte-exact",
+      JSON.stringify(VB.pitchSlideById(pRepT.project, "sl1").slide.texts) ===
+      JSON.stringify(sl1.texts));
+    pse.exec({ op: "pitchTextRemove", slide: "sl1", id: "pt1" });
+    pse.exec({ op: "undo" });
+    check("text removal undoes",
+      VB.pitchSlideById(pse.project, "sl1").slide.texts.length === 2);
   } catch (err) {
     fail++;
     log("  PITCH EXCEPTION: " + (err && err.stack || err), "fail");
@@ -3207,6 +3230,21 @@
     wse.exec({ op: "writingDocRemove", doc: "wd2" });
     check("document removal drops the doc",
       wse.project.writing.docs.length === 1);
+
+    // the infinite document body (Google-Docs-style; user decision):
+    // one text per doc, one op per editing session
+    wse.exec({ op: "writingDocEdit", doc: "wd1",
+               text: "EXT. ROOFTOP — NIGHT\n\nMIRA\nWe jump on three." });
+    check("the document body edits as one text",
+      VB.writingDocById(wse.project, "wd1").text.indexOf("ROOFTOP") === 5);
+    var wRepT = await VB.replayJournal(JSON.parse(JSON.stringify(wse.journal)));
+    check("the document body replays byte-exact",
+      wRepT.project.writing.docs[0].text ===
+      wse.project.writing.docs[0].text);
+    wse.exec({ op: "writingDocEdit", doc: "wd1", text: "rewritten" });
+    wse.exec({ op: "undo" });
+    check("body edits undo as one step",
+      VB.writingDocById(wse.project, "wd1").text.indexOf("ROOFTOP") === 5);
   } catch (err) {
     fail++;
     log("  WRITING EXCEPTION: " + (err && err.stack || err), "fail");
