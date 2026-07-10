@@ -50,6 +50,7 @@
 <script src="../js/actors.js"></script>
 <script src="../js/thumbs.js"></script>
 <script src="../js/brainstorm.js"></script>
+<script src="../js/pitch.js"></script>
 <script src="../js/writing.js"></script>
 <script src="../js/text.js"></script>
 <script src="../js/debug.js"></script>
@@ -3015,6 +3016,56 @@
   } catch (err) {
     fail++;
     log("  VISUAL EXCEPTION: " + (err && err.stack || err), "fail");
+  }
+
+  // ================================ pitch =====================================
+  // A sequential slide deck; each slide is a y2kvector cell edited with
+  // the real stage tools through the journaled editTarget.
+  log("");
+  log("pitch:");
+  try {
+    var pse = new VB.Session({ width: 11000, height: 8000 });
+    pse.exec({ op: "pitchSlideAdd", id: "sl1" });
+    pse.exec({ op: "pitchSlideAdd", id: "sl2", index: 1 });
+    pse.exec({ op: "pitchSlideAdd", id: "sl3", index: 1 }); // between
+    check("slides insert sequentially with explicit index",
+      pse.project.pitch.slides.map(function (s) { return s.id; }).join(",") ===
+      "sl1,sl3,sl2" && pse.project.pitch.cur === 1 &&
+      pse.project.pitch.slides[0].cell.width === 960 * 20);
+    pse.exec({ op: "pitchSlideMove", id: "sl3", index: 2 });
+    check("slides reorder",
+      pse.project.pitch.slides.map(function (s) { return s.id; }).join(",") ===
+      "sl1,sl2,sl3" && pse.project.pitch.cur === 2);
+    pse.exec({ op: "pitchSelect", index: 99 });
+    check("selection clamps to the deck",
+      pse.project.pitch.cur === 2);
+    pse.exec({ op: "editTargetSet", target: { pitchSlide: "sl2" } });
+    check("pitch edit target retargets the active cell",
+      pse.project.activeCell() === pse.project.pitch.slides[1].cell &&
+      pse.project.resolveEditCell().label === "pitch ▸ slide 2");
+    pse.exec({ op: "brush",
+               points: [{ x: 3000, y: 5000 }, { x: 14000, y: 5600 }],
+               radius: 400, color: { r: 220, g: 40, b: 40, a: 255 } });
+    pse.exec({ op: "editTargetClear" });
+    check("slide ink lands in the slide cell",
+      pse.project.pitch.slides[1].cell.edges.length > 0 &&
+      pse.project.pitch.slides[0].cell.edges.length === 0 &&
+      pse.project.scenes[0].layers[0].frames[0].edges.length === 0);
+    var pRep = await VB.replayJournal(JSON.parse(JSON.stringify(pse.journal)));
+    check("the deck replays byte-exact",
+      JSON.stringify(pRep.project.pitch.slides.map(function (s) {
+        return [s.id, s.cell.edges];
+      })) === JSON.stringify(pse.project.pitch.slides.map(function (s) {
+        return [s.id, s.cell.edges];
+      })) && pRep.project.pitch.cur === pse.project.pitch.cur);
+    pse.exec({ op: "pitchSlideRemove", id: "sl2" });
+    pse.exec({ op: "undo" });
+    check("slide removal undoes with its ink",
+      pse.project.pitch.slides.length === 3 &&
+      VB.pitchSlideById(pse.project, "sl2").slide.cell.edges.length > 0);
+  } catch (err) {
+    fail++;
+    log("  PITCH EXCEPTION: " + (err && err.stack || err), "fail");
   }
 
   // =============================== writing ===================================

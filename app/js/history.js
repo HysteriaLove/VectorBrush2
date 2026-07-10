@@ -120,6 +120,12 @@
           ? snapshotDoc(target.notes.canvas) : null
       },
       writing: JSON.parse(JSON.stringify(target.writing || { docs: [] })),
+      pitch: {
+        cur: (target.pitch || {}).cur || 0,
+        slides: ((target.pitch || {}).slides || []).map(function (s) {
+          return { id: s.id, cell: snapshotDoc(s.cell) };
+        })
+      },
       scenes: target.scenes.map(function (sc) {
         return {
           name: sc.name,
@@ -159,6 +165,14 @@
       target.notes.canvas = noteCv;
     }
     target.writing = JSON.parse(JSON.stringify(snap.writing || { docs: [] }));
+    target.pitch = {
+      cur: (snap.pitch || {}).cur || 0,
+      slides: ((snap.pitch || {}).slides || []).map(function (s) {
+        var cell = new VB.Y2KVectorDocument();
+        restoreDoc(cell, s.cell);
+        return { id: s.id, cell: cell };
+      })
+    };
     target.scenes = snap.scenes.map(function (sc) {
       return {
         name: sc.name,

@@ -77,8 +77,8 @@ App
 │  ├─ Test Exports   — scratch renders, auto-pruned shelf
 │  └─ Finished Exports — curated deliverables
 └─ Project workspace (one open project)
-   ├─ Brainstorm │ Writing │ Storyboards │ Audio
-   ├─ Roughs │ Actors │ Compositing │ Post
+   ├─ Notepad │ Pitch │ Story │ Boards │ Audio
+   ├─ Roughs │ Actors │ Composite │ Grading
    └─ Export
 ```
 
@@ -90,8 +90,10 @@ App
   newest-first, and prunable; finished exports are explicit promotions
   with a name and a lock. Both record WHICH journal revision they were
   rendered from, so any export can be reproduced or diffed later.
-- Section navigation inside a project is a persistent rail (the nine
-  sections in production order). Sections lazy-load: opening a project
+- Section navigation inside a project is a persistent rail (the ten
+  sections in production order — tab names: Notepad, Pitch, Story,
+  Boards, Audio, Roughs, Actors, Composite, Grading, Export; decided
+  2026-07-10). Sections lazy-load: opening a project
   loads the manifest + the section you enter, nothing else (§5).
 - **`.theme` reskinning (DECIDED, future).** The whole UI — homescreen
   and every section view — is reskinnable via `.theme` packages, built
@@ -110,7 +112,8 @@ The reference prototype validates the shape (Managment.py `Project`):
 ```
 Project
 ├─ meta            — title, fps, language list, cover, ids
-├─ notes           — Brainstorm canvas (infinite, NoteObjects)
+├─ notes           — Notepad canvas (infinite, NoteObjects)
+├─ pitch           — sequential pitch slides (y2kvector cells)
 ├─ writing         — documents → dialogue Lines (line-id, per-language text)
 ├─ boards          — storyboard panels, grouped by beat, timed
 ├─ audio           — stems, edits, baked master(s)
@@ -326,7 +329,7 @@ of this (multiplatform principle, §1.5).
 review: fine as sketched, details will be understood when each is
 actually built. The DECIDED/PROPOSED markers below respect that.)
 
-### 6.1 Brainstorm (Notes)
+### 6.1 Notepad (brainstorm)
 
 - Infinite canvas; content = placed objects: images, text notes, sketch
   patches (small y2kvector docs), and **NoteObjects**.
@@ -341,7 +344,20 @@ actually built. The DECIDED/PROPOSED markers below respect that.)
   z-order + grouping + lock/pin (reference boards use lock/pin and it is
   enough there); revisit only if real boards drown.
 
-### 6.2 Writing
+### 6.2 Pitch
+
+- A simple SEQUENTIAL set of slides used to demonstrate the idea to
+  team members (user-specified, 2026-07-10) — the bridge between loose
+  Notepad material and the written story.
+- Each slide is a y2kvector cell drawn with the stage tools (the same
+  journaled editTarget mechanism as actor cells and the Notepad
+  canvas), so slides are vector-native and replay byte-exact. Slides
+  order by array position; add/remove/reorder are journaled ops.
+- A minimal Present mode plays the deck full-frame with arrow-key
+  navigation. Future: speaker notes, slide export (PDF/video to the
+  Test Exports shelf), and pulling reference images from the Notepad.
+
+### 6.3 Story (writing)
 
 - Documents (script, outline, loose notes) made of blocks; dialogue
   blocks own **Line objects**: `line_id → { character?, per-language
@@ -356,7 +372,7 @@ actually built. The DECIDED/PROPOSED markers below respect that.)
   same `writing.lineEdit` op — there is one source of truth, so
   "editing storyboard writing changes writing docs" is automatic.
 
-### 6.3 Storyboards
+### 6.4 Boards (storyboards)
 
 - **Panel** = one y2kvector drawing + optional line refs + duration +
   notes. Panels with NO text at all are first-class (user note); lines
@@ -379,7 +395,7 @@ actually built. The DECIDED/PROPOSED markers below respect that.)
   (grid vs corkboard vs timeline-first, beat nesting depth) to be worked
   out during development, not up front.
 
-### 6.4 Audio
+### 6.5 Audio
 
 - Stems (imported files) → non-destructive edit list (trim, gain, fade,
   placement on tracks) → **bake** to a master (reference README:
@@ -388,9 +404,9 @@ actually built. The DECIDED/PROPOSED markers below respect that.)
 - Own mini-suite: track lanes, waveforms, snap-to-frame; no plugin/DSP
   ambitions in v1 beyond gain/fade/pan.
 - Baked masters are per-language when language-tagged stems exist (the
-  reserved hook from §6.2); default is one master.
+  reserved hook from §6.3); default is one master.
 
-### 6.5 Roughs
+### 6.6 Roughs
 
 - **Scenes are established here, by the user** (DECIDED — per the
   Animation Program V2 workflow). A Scene is a sub-timeline (reference:
@@ -404,7 +420,7 @@ actually built. The DECIDED/PROPOSED markers below respect that.)
   with a **small fixed layer count** (user: limited layers for drawing),
   no actors, no material brushes — the point is timing against audio.
 
-### 6.6 Actors
+### 6.7 Actors
 
 - Actor = canvas size + **poses → symbol groups → drawings** (reference
   `Actor/Pose/Symbol/SymbolDrawing`, .actor format v3). Drawings are
@@ -419,7 +435,7 @@ actually built. The DECIDED/PROPOSED markers below respect that.)
   reading the prototype's `.actor` v3 files is a cheap compatibility
   importer worth keeping).
 
-### 6.7 Compositing
+### 6.8 Composite (compositing)
 
 - Per scene: actor placements (position/scale/rotation in 2D, reserved z
   for 2.5D), backgrounds, camera (a transform track over the scene),
@@ -436,7 +452,7 @@ actually built. The DECIDED/PROPOSED markers below respect that.)
 - Blender bridge (reference `blender_compositing_addon.py`): EXPORT-ONLY
   (decided) — camera + placement tracks + plates out; no import.
 
-### 6.8 Post-processing
+### 6.9 Grading (post-processing)
 
 - UX shape: a **CapCut-style effects editing area** (user direction) —
   effect clips on lanes over the scene/master timeline, tap to add,
@@ -451,11 +467,11 @@ actually built. The DECIDED/PROPOSED markers below respect that.)
   the oracle discipline intact (CPU reference implementation per effect,
   GPU validated against it, same as matcaps).
 
-### 6.9 Export
+### 6.10 Export
 
 - One pipeline, many targets: animatic (video), scene render, master
   render, image sequences, per-actor sheets, `.y2kactor`, Blender bundle
-  (§6.7), audio master, subtitle/dialogue sheets from Lines (§6.2), SWF7
+  (§6.8), audio master, subtitle/dialogue sheets from Lines (§6.3), SWF7
   for the classic-Flash interchange goal, and `.y2kvector`.
 - Every export = journal revision + settings snapshot → artifact +
   shelf entry (Test or Finished). Reproducible by construction.

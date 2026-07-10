@@ -32,29 +32,30 @@
   var MOUNTS = {
     brainstorm: { el: "brainstorm-board",
                   view: function () { return VB.BrainstormView; } },
+    pitch: { el: "pitch-view",
+             view: function () { return VB.PitchView; } },
     writing: { el: "writing-view",
                view: function () { return VB.WritingView; } }
   };
 
+  // Tab names decided 2026-07-10 (Architecture §2); internal ids stay
+  // stable so routes and packages never break on a rename.
   var SECTIONS = [
-    { id: "brainstorm", label: "Brainstorm", mount: "brainstorm",
-      note: "" },
-    { id: "writing", label: "Writing", mount: "writing",
-      note: "" },
-    { id: "storyboards", label: "Storyboards",
-      note: "Panels and beats, playable as an animatic — step 5 (Architecture §6.3)." },
+    { id: "brainstorm", label: "Notepad", mount: "brainstorm", note: "" },
+    { id: "pitch", label: "Pitch", mount: "pitch", note: "" },
+    { id: "writing", label: "Story", mount: "writing", note: "" },
+    { id: "storyboards", label: "Boards",
+      note: "Panels and beats, playable as an animatic — Architecture §6.4." },
     { id: "audio", label: "Audio",
-      note: "Stems → edits → the baked master track — step 4 (Architecture §6.4)." },
-    { id: "roughs", label: "Roughs", editor: true,
-      note: "" },
-    { id: "actors", label: "Actors", editor: true,
-      note: "" },
-    { id: "compositing", label: "Compositing",
-      note: "Placements, camera, and per-scene tracks — step 6 (Architecture §6.7)." },
-    { id: "post", label: "Post",
-      note: "Effect stacks over the composited frame — step 8 (Architecture §6.8)." },
+      note: "Stems → edits → the baked master track — Architecture §6.5." },
+    { id: "roughs", label: "Roughs", editor: true, note: "" },
+    { id: "actors", label: "Actors", editor: true, note: "" },
+    { id: "compositing", label: "Composite",
+      note: "Placements, camera, and per-scene tracks — Architecture §6.8." },
+    { id: "post", label: "Grading",
+      note: "Effect stacks over the composited frame — Architecture §6.9." },
     { id: "export", label: "Export",
-      note: "Every render, reproducible from its journal revision — step 8 (Architecture §6.9)." }
+      note: "Every render, reproducible from its journal revision — Architecture §6.10." }
   ];
   var activeSection = "roughs";
 

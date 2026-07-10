@@ -56,6 +56,9 @@
     // are the app-wide language backbone (stable ids, per-language
     // text). Rides the journal.
     this.writing = { docs: [] };
+    // Pitch (pitch.js): a sequential slide deck; each slide is a
+    // y2kvector cell. Rides the journal.
+    this.pitch = { slides: [], cur: 0 };
     // Actor edit mode (Flash's symbol-edit): when set, scene()/stage()/
     // activeCell() resolve to the targeted actor cell, so every tool,
     // renderer, and journaled art op follows. Set ONLY through the
@@ -139,7 +142,17 @@
     if (!t) return null;
     if (t.notes) {
       return { cell: this.notesCanvas(), actor: null,
-               label: "brainstorm canvas" };
+               label: "notepad canvas" };
+    }
+    if (t.pitchSlide) {
+      var slides = (this.pitch && this.pitch.slides) || [];
+      for (var si2 = 0; si2 < slides.length; si2++) {
+        if (slides[si2].id === t.pitchSlide) {
+          return { cell: slides[si2].cell, actor: null,
+                   label: "pitch ▸ slide " + (si2 + 1) };
+        }
+      }
+      return null;
     }
     var actors = this.actors || [];
     var actor = null;
