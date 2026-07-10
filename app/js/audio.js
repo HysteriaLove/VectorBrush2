@@ -818,6 +818,100 @@
     return { root: root, cvs: cvs, num: num };
   }
 
+  /** The CENTER is a full board card — the same form the Boards page
+   *  shows (header fields, action title, drawing, Dialog) — while the
+   *  side slots stay plain drawing previews (user spec). Display-only:
+   *  editing lives in Boards; timing lives in the lane below. */
+  function makeCenterCard() {
+    var root = document.createElement("div");
+    root.className = "bdcard au-bcard";
+    function headField(label) {
+      var box = document.createElement("div");
+      box.className = "bdheadfield";
+      var lab = document.createElement("span");
+      lab.className = "bdheadlab";
+      lab.textContent = label;
+      box.appendChild(lab);
+      var val = document.createElement("span");
+      val.className = "bdheadval";
+      box.appendChild(val);
+      return { box: box, val: val };
+    }
+    var head = document.createElement("div");
+    head.className = "bdhead";
+    var fScene = headField("Scene");
+    var fPanel = headField("Panel");
+    var fTime = headField("Time");
+    var fFrames = headField("Frames");
+    head.appendChild(fScene.box);
+    head.appendChild(fPanel.box);
+    head.appendChild(fTime.box);
+    head.appendChild(fFrames.box);
+    root.appendChild(head);
+    var title = document.createElement("div");
+    title.className = "bdtitle";
+    root.appendChild(title);
+    var cvs = document.createElement("canvas");
+    cvs.className = "bdframe";
+    root.appendChild(cvs);
+    var dialog = document.createElement("div");
+    dialog.className = "bddialog";
+    var dlab = document.createElement("span");
+    dlab.className = "bddialoglab";
+    dlab.textContent = "Dialog";
+    dialog.appendChild(dlab);
+    var lines = document.createElement("div");
+    lines.className = "bdlines";
+    dialog.appendChild(lines);
+    root.appendChild(dialog);
+    return { root: root, cvs: cvs, title: title, lines: lines,
+             scene: fScene.val, num: fPanel.val, time: fTime.val,
+             frames: fFrames.val };
+  }
+
+  function updateCenterCard(cur, force) {
+    var project = view.app.project;
+    var c = view.bmain;
+    var fps = project.fps || 24;
+    var hash = VB.pixiHashCell ? VB.pixiHashCell(cur.panel.cell) : 0;
+    var changed = view.bcenterId !== cur.panel.id ||
+                  view.bcenterHash !== hash;
+    if (changed) drawPanelInto(c.cvs, cur.panel);
+    if (!changed && !force) return;
+    view.bcenterId = cur.panel.id;
+    view.bcenterHash = hash;
+    var runOf = 1;
+    VB.spineSceneRuns(project).forEach(function (run, ri) {
+      if (cur.index >= run.from && cur.index <= run.to) runOf = ri + 1;
+    });
+    c.scene.textContent = String(runOf);
+    c.num.textContent = String(cur.index + 1);
+    c.time.textContent =
+      ((cur.endMs - cur.startMs) / 1000).toFixed(1) + "s";
+    c.frames.textContent = String(cur.panel.duration);
+    var action = null;
+    cur.panel.rows.forEach(function (r) {
+      if (!action && r.kind === "action") action = r;
+    });
+    c.title.textContent = action ? (action.content || "") : "";
+    c.lines.innerHTML = "";
+    cur.panel.rows.forEach(function (r) {
+      if (r.kind !== "line") return;
+      var row = document.createElement("div");
+      row.className = "bdline";
+      var who = document.createElement("div");
+      who.className = "au-bcwho";
+      var entry = VB.spineCharacterById(project, r.character);
+      who.textContent = entry ? entry.name : "";
+      var say = document.createElement("div");
+      say.className = "bdsay";
+      say.textContent = VB.lineTextOf(r);
+      row.appendChild(who);
+      row.appendChild(say);
+      c.lines.appendChild(row);
+    });
+  }
+
   function sideThumb(slot, sp, curIndex) {
     // offscreen/absent boards CULL (no reserved gap at the reel ends)
     slot.root.style.display = sp ? "" : "none";
@@ -845,13 +939,12 @@
     }
   }
 
-  /** As many side boards as the width affords — the reel fills the
-   *  screen left-to-right and culls offscreen (user spec). */
+  /** As many side boards as each ZONE affords — the reel fills the
+   *  screen left-to-right and culls past the ends (user spec). */
   function ensureSideSlots() {
-    var boardW = view.board.clientWidth || 0;
-    var centerW = (view.bmain.cvs.clientWidth || 480) + 60;
-    var perSide = Math.max(1, Math.min(12,
-      Math.floor((boardW - centerW) / 2 / 152)));
+    var zoneW = Math.max(view.bzoneL.clientWidth || 0,
+                         view.bzoneR.clientWidth || 0);
+    var perSide = Math.max(1, Math.min(12, Math.floor(zoneW / 152)));
     if (view.bsides.length === perSide * 2) return;
     view.bsides.forEach(function (s) { s.slot.root.remove(); });
     view.bsides = [];
@@ -859,16 +952,16 @@
     for (o = -perSide; o <= -1; o++) {
       var sl = { off: o, slot: makeViewerSlot("au-bside", o) };
       view.bsides.push(sl);
-      view.board.insertBefore(sl.slot.root, view.bmain.root);
+      view.bzoneL.appendChild(sl.slot.root);
     }
     for (o = 1; o <= perSide; o++) {
       var sr = { off: o, slot: makeViewerSlot("au-bside", o) };
       view.bsides.push(sr);
-      view.board.appendChild(sr.slot.root);
+      view.bzoneR.appendChild(sr.slot.root);
     }
   }
 
-  function syncBoardStrip() {
+  function syncBoardStrip(force) {
     if (!view.board || !view.app || !view.bmain) return;
     var project = view.app.project;
     var spans = panelSpans(project);
@@ -881,15 +974,7 @@
       return;
     }
     view.bmain.root.style.visibility = "visible";
-    view.bmain.num.textContent = "panel " + (cur.index + 1) + " · " +
-      ((cur.endMs - cur.startMs) / 1000).toFixed(1) + "s";
-    // re-render the big center only when the panel or its art changed
-    var hash = VB.pixiHashCell ? VB.pixiHashCell(cur.panel.cell) : 0;
-    if (view.bcenterId !== cur.panel.id || view.bcenterHash !== hash) {
-      view.bcenterId = cur.panel.id;
-      view.bcenterHash = hash;
-      drawPanelInto(view.bmain.cvs, cur.panel);
-    }
+    updateCenterCard(cur, force);
     view.bsides.forEach(function (s) {
       sideThumb(s.slot, spans[cur.index + s.off] || null, cur.index);
     });
@@ -1157,13 +1242,20 @@
     view.board.id = "au-board";
     view.board.dataset.ph =
       "the storyboard plays here — panels appear as they are written";
-    // side slots are created to FILL the width (user spec) — see
-    // ensureSideSlots; the reel culls whatever falls offscreen
+    // BALANCED ZONES keep the main board pinned to the true middle
+    // (user spec) no matter how many side boards each side has; side
+    // slots fill each zone's width and cull past the ends
     view.bsides = [];
-    view.bmain = makeViewerSlot("au-bmain", 0);
+    view.bzoneL = document.createElement("div");
+    view.bzoneL.className = "au-bzone left";
+    view.bzoneR = document.createElement("div");
+    view.bzoneR.className = "au-bzone right";
+    view.bmain = makeCenterCard();
     view.bcenterId = null;
     view.bcenterHash = null;
+    view.board.appendChild(view.bzoneL);
     view.board.appendChild(view.bmain.root);
+    view.board.appendChild(view.bzoneR);
     host.appendChild(view.board);
 
     var body = document.createElement("div");
@@ -1365,7 +1457,7 @@
     // prune a stale selection
     if (view.sel && !clipById(view.app.project, view.sel)) view.sel = null;
     refreshStems();
-    syncBoardStrip();
+    syncBoardStrip(true); // doc changed: the card's text may differ
     renderLanes();
     syncPlayBtn();
     prefetchAround(view.app.project, rig.masterMs);
@@ -1386,6 +1478,8 @@
     view.board = null;
     view.bmain = null;
     view.bsides = [];
+    view.bzoneL = null;
+    view.bzoneR = null;
     view.bcenterId = null;
     view.bcenterHash = null;
     view.timeEl = null;

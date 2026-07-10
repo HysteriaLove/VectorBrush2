@@ -536,6 +536,8 @@
   /* workspace bar — the project sections as tabs (Architecture §2) */
   #workspacebar {
     flex: none; height: 44px;
+    position: relative; /* the tab group centers on the BAR, not on
+                           the leftover space between the side groups */
     display: flex; align-items: center; gap: 10px;
     padding: 0 12px;
     background: var(--panel);
@@ -554,8 +556,17 @@
     color: var(--text-dim); max-width: 160px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  #ws-tabs { flex: 1; display: flex; gap: 4px; overflow-x: auto;
-             justify-content: center; }
+  #ws-tabs {
+    position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    display: flex; gap: 4px;
+    max-width: calc(100% - 560px);
+    overflow-x: auto; scrollbar-width: none;
+    justify-content: safe center;
+  }
+  #ws-tabs::-webkit-scrollbar { display: none; }
+  /* the tabs left the flex flow, so the right group anchors itself */
+  #ws-save { margin-left: auto; }
   .wstab {
     flex: none; padding: 6px 14px; cursor: pointer;
     color: var(--text-dim); border-radius: 999px;
@@ -585,7 +596,8 @@
      toolbar + scene/frame timelines hide (Audio has its own sync
      timeline inside its view) */
   body.ws-preprod #botdock,
-  body.ws-preprod #dockspace-bottom { display: none; }
+  body.ws-preprod #dockspace-bottom,
+  body.ws-preprod #statusbar { display: none; }
   #brainstorm-board, #writing-view, #pitch-view, #boards-view,
   #audio-view, #composite-view { display: none; }
   #brainstorm-board.wsactive, #writing-view.wsactive, #pitch-view.wsactive,
@@ -687,34 +699,45 @@
     font: 12px Consolas, monospace; color: var(--text-dim);
   }
   #au-hint { color: var(--text-dim); font-size: 11px; margin-left: auto; }
-  /* the board VIEWER: the playhead's panel LARGE and centered over
-     the sync timeline, neighbors small and dim at its sides */
+  /* the board VIEWER: the playhead's panel as a FULL BOARD CARD (the
+     Boards-page form — header, title, drawing, dialog), PINNED to the
+     true middle by balanced zones; neighbors are plain drawing
+     previews that fill each side and cull past the ends */
   #au-board {
-    flex: none; height: min(340px, 38vh);
-    display: flex; gap: 18px; align-items: center;
-    justify-content: center;
-    padding: 8px 10px;
-    background: var(--panel);
+    flex: none; height: min(420px, 46vh);
+    display: flex; gap: 14px; align-items: center;
+    padding: 10px 12px;
+    background: var(--bg);
     border-bottom: 1px solid var(--panel-edge);
   }
   #au-board.empty::before {
     content: attr(data-ph); color: var(--text-dim);
     font-size: 11px; margin: auto;
   }
-  #au-board.empty .au-bmain, #au-board.empty .au-bside { display: none; }
-  .au-bmain, .au-bside {
+  #au-board.empty .au-bcard, #au-board.empty .au-bzone { display: none; }
+  .au-bzone {
+    flex: 1 1 0; min-width: 0; overflow: hidden;
+    display: flex; gap: 12px; align-items: center;
+  }
+  .au-bzone.left { justify-content: flex-end; }
+  .au-bzone.right { justify-content: flex-start; }
+  .au-bcard {
+    flex: none; width: min(520px, 38vw);
+    max-height: 100%; overflow: hidden;
+  }
+  .au-bcard .bdframe { cursor: default; }
+  .au-bcard .bddialog { overflow-y: auto; }
+  .au-bcwho {
+    text-align: center; color: #3a3a3a; text-transform: uppercase;
+    font: 700 10px/1.5 system-ui, sans-serif; letter-spacing: 0.06em;
+  }
+  .au-bside {
     flex: none; cursor: pointer;
     display: flex; flex-direction: column; align-items: center; gap: 2px;
-    background: #fdfdfa; border: 1.5px solid #202327; border-radius: 2px;
+    background: #fdfdfa; border: 1px solid #202327; border-radius: 2px;
     padding: 3px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.14);
+    opacity: 0.55;
   }
-  .au-bmain canvas {
-    display: block; background: #fff;
-    height: calc(min(340px, 38vh) - 40px);
-    aspect-ratio: 16 / 9;
-  }
-  .au-bside { opacity: 0.55; border-width: 1px; box-shadow: none; }
   .au-bside:hover { opacity: 0.9; }
   .au-bside canvas {
     display: block; background: #fff;
