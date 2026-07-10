@@ -712,9 +712,16 @@
       }
       return;
     }
-    // timeline: Enter plays/stops, , / . step frames, F7 adds a frame
+    // timeline: Enter plays/stops the scene loop, Shift+Enter the whole
+    // sequence, , / . step frames, F7 adds a frame
     if (ev.key === "Enter" && !ev.ctrlKey && !ev.altKey) {
-      if (playback.playing) stopPlay(); else startPlay();
+      if (ev.shiftKey) {
+        if (seqPlay.playing) stopSeqPlay(); else startSeqPlay();
+      } else if (playback.playing) {
+        stopPlay();
+      } else {
+        startPlay();
+      }
       return;
     }
     if (ev.key === "." && !ev.ctrlKey) {
@@ -1990,6 +1997,7 @@
   function seqChipDown(inst, index) {
     return function (ev) {
       if (ev.button !== 0) return;
+      stopSeqPlay();
       seqSel = inst.id;
       var sc = VB.sceneById(app.project, inst.scene);
       if (sc) selectSceneIndex(sc.index);
@@ -2035,6 +2043,15 @@
     label.id = "seq-label";
     label.textContent = "Sequence";
     bar.appendChild(label);
+    var play = document.createElement("button");
+    play.id = "seq-play";
+    play.textContent =
+      (typeof seqPlay !== "undefined" && seqPlay.playing) ? "⏹" : "▶";
+    play.title = "Play the sequence, audio-synced (Shift+Enter)";
+    play.addEventListener("click", function () {
+      if (seqPlay.playing) stopSeqPlay(); else startSeqPlay();
+    });
+    bar.appendChild(play);
     seq.forEach(function (inst, i) {
       var sc = VB.sceneById(app.project, inst.scene);
       var chip = document.createElement("div");
@@ -2119,6 +2136,7 @@
   }
 
   function startPlay() {
+    stopSeqPlay(); // the scene loop and the sequence never play together
     if (playback.playing || app.project.editTarget) return;
     if (app.project.frameCount() <= 1) { setMsg("only one frame — add frames (＋ / F7)"); return; }
     flushSelections();
@@ -2185,7 +2203,113 @@
     if (isFinite(fps)) app.exec({ op: "fpsSet", fps: fps });
   });
   // any canvas edit gesture stops playback first (capture phase)
-  canvas.addEventListener("pointerdown", function () { stopPlay(); }, true);
+  canvas.addEventListener("pointerdown", function () {
+    stopPlay();
+    stopSeqPlay();
+  }, true);
+
+  // ---- master playback: play ACROSS the sequence (sequence.js) ------------------
+  // The reel walks scene instances via VB.sequenceAt; audio (when the
+  // project has clips) IS the clock, exactly like the Boards animatic.
+  // cur.scene/cur.frame advance directly — no journal spam — and STOP
+  // pins the landing scene + frame with journaled ops so replay agrees
+  // with what the user sees.
+
+  var seqPlay = { playing: false, raf: 0, last: 0, ms: 0, frame: -1,
+                  audio: false };
+
+  function seqFrameMs() { return 1000 / (app.project.fps || 24); }
+
+  /** Where play starts: the selected chip, else the current scene's
+   *  first instance, else the top of the sequence. */
+  function seqStartMs() {
+    var seq = VB.sequenceOf(app.project);
+    var hit = seqSel ? VB.sequenceInstById(app.project, seqSel) : null;
+    if (!hit) {
+      var sc = app.project.scenes[app.project.cur.scene];
+      for (var i = 0; sc && i < seq.length; i++) {
+        if (seq[i].scene === sc.id) { hit = { index: i }; break; }
+      }
+    }
+    return hit
+      ? VB.sequenceInstStart(app.project, hit.index) * seqFrameMs() : 0;
+  }
+
+  function startSeqPlay() {
+    if (seqPlay.playing) return;
+    if (app.project.editTarget) {
+      setMsg("leave symbol edit to play the sequence");
+      return;
+    }
+    stopPlay();
+    flushSelections();
+    seqPlay.playing = true;
+    seqPlay.ms = seqStartMs();
+    if (seqPlay.ms >= VB.sequenceDuration(app.project) * seqFrameMs() - 1) {
+      seqPlay.ms = 0;
+    }
+    seqPlay.frame = -1;
+    seqPlay.last = performance.now();
+    seqPlay.audio = false;
+    app.session.clock.playing = true;
+    refreshSequence();
+    function startAudio() {
+      if (!(VB.audioHasClips && VB.audioHasClips(app.project))) return;
+      seqPlay.audio = true;
+      VB.audioPlay(app.project, Math.round(seqPlay.ms), function (ms) {
+        if (seqPlay.playing) seqPlay.ms = ms; // audio drives the clock
+      }, function () {
+        seqPlay.audio = false;                // silent tail: raf resumes
+      });
+    }
+    startAudio();
+    function tick(now) {
+      if (!seqPlay.playing) return;
+      var dt = now - seqPlay.last;
+      seqPlay.last = now;
+      if (!seqPlay.audio) seqPlay.ms += dt;
+      var total = VB.sequenceDuration(app.project) * seqFrameMs();
+      if (seqPlay.ms >= total) { // loop; the audio restarts with the reel
+        seqPlay.ms = 0;
+        seqPlay.frame = -1;
+        if (VB.audioStop) VB.audioStop();
+        seqPlay.audio = false;
+        startAudio();
+      }
+      var frame = Math.floor(seqPlay.ms / seqFrameMs());
+      if (frame !== seqPlay.frame) {
+        seqPlay.frame = frame;
+        var at = VB.sequenceAt(app.project, frame);
+        if (!at) { stopSeqPlay(); return; }
+        var sc = VB.sceneById(app.project, at.inst.scene);
+        if (sc && sc.index !== app.project.cur.scene) {
+          app.project.selectScene(sc.index); // direct: no journal spam
+          refreshLayers();
+          refreshSequence();
+        }
+        app.project.cur.frame = Math.max(0, frame - at.start);
+        app.session.clock.frame = app.project.cur.frame;
+        requestRender();
+        refreshTimeline();
+      }
+      seqPlay.raf = requestAnimationFrame(tick);
+    }
+    seqPlay.raf = requestAnimationFrame(tick);
+  }
+
+  function stopSeqPlay() {
+    if (!seqPlay.playing) return;
+    seqPlay.playing = false;
+    seqPlay.audio = false;
+    if (VB.audioStop) VB.audioStop();
+    cancelAnimationFrame(seqPlay.raf);
+    app.session.clock.playing = false;
+    // pin the landing scene + frame in the journal (selectScene already
+    // applied live; frameSelect clamps identically live and in replay)
+    app.record({ op: "sceneSelect", index: app.project.cur.scene });
+    app.exec({ op: "frameSelect", index: app.project.cur.frame });
+    refreshSequence();
+  }
 
   // ---- Actors panel (actors.js; Architecture §6.6, step-2 beat 2) --------------
   // The library lists actors and their poses; clicking a pose enters the
