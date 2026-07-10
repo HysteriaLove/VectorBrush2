@@ -219,10 +219,13 @@
   }
 
   /** The letterbox overlay: what the EXPORT camera frames at the
-   *  chosen aspect (same vertical fov as the view). */
+   *  chosen aspect (same vertical fov as the view). Measures the
+   *  CANVAS box — the host's client size includes the workspace
+   *  paddings (dock/toolpanel clearance) and would skew the frame. */
   function layoutFrame() {
-    if (!view.frameEl || !view.host) return;
-    var w = view.host.clientWidth, h = view.host.clientHeight;
+    if (!view.frameEl || !view.host || !view.renderer) return;
+    var cvs = view.renderer.domElement;
+    var w = cvs.clientWidth, h = cvs.clientHeight;
     if (!w || !h) return;
     var ar = camCfg.aw / camCfg.ah;
     var fw, fh;
@@ -230,8 +233,10 @@
     else { fw = w; fh = w / ar; }
     view.frameEl.style.width = Math.round(fw) + "px";
     view.frameEl.style.height = Math.round(fh) + "px";
-    view.frameEl.style.left = Math.round((w - fw) / 2) + "px";
-    view.frameEl.style.top = Math.round((h - fh) / 2) + "px";
+    view.frameEl.style.left =
+      Math.round(cvs.offsetLeft + (w - fw) / 2) + "px";
+    view.frameEl.style.top =
+      Math.round(cvs.offsetTop + (h - fh) / 2) + "px";
   }
 
   /** Render the composition into ANY canvas at w×h through the export
@@ -415,8 +420,14 @@
     }, { passive: false });
 
     function size() {
-      var w = host.clientWidth, h = host.clientHeight;
-      if (!w || !h || !view.renderer) return;
+      if (!view.renderer) return;
+      // the CANVAS box, never the host: the host's client size
+      // includes the workspace paddings (dock/toolpanel clearance),
+      // and a buffer sized to it gets CSS-squeezed into the content
+      // box — the "squished 3D view" bug
+      var cvs = view.renderer.domElement;
+      var w = cvs.clientWidth, h = cvs.clientHeight;
+      if (!w || !h) return;
       view.renderer.setSize(w, h, false);
       view.camP.aspect = w / h;
       view.camP.updateProjectionMatrix();
