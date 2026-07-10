@@ -683,19 +683,23 @@
     });
   }
 
+  // The transport toggle is GLOBAL: it works from any workspace (the
+  // Audio view merely shows it), and keeps playing across tab switches.
   function togglePlay() {
     if (rig.playing) {
       stopPlayback();
       syncPlayBtn();
       return;
     }
-    startPlayback(view.app.project, view.playMs, function (ms) {
-      view.playMs = ms;
-      if (view.timeEl) view.timeEl.textContent = fmtMs(ms);
-      renderLanes();
+    var appRef = view.app || window.VBApp;
+    if (!appRef || !appRef.project) return;
+    startPlayback(appRef.project, view.playMs, function (ms) {
+      view.playMs = ms; // the playhead survives unmounts
+      if (view.host && view.timeEl) view.timeEl.textContent = fmtMs(ms);
+      if (view.host) renderLanes();
     }, function () {
       syncPlayBtn();
-      renderLanes();
+      if (view.host) renderLanes();
     }).then(syncPlayBtn);
   }
 
@@ -718,11 +722,7 @@
       if (view.app.doRedo) view.app.doRedo();
       return;
     }
-    if (ev.key === " ") {
-      ev.preventDefault();
-      togglePlay();
-      return;
-    }
+    // Space is handled by the GLOBAL transport toggle below
     if ((ev.key === "Delete" || ev.key === "Backspace") && view.sel) {
       ev.preventDefault();
       exec({ op: "clipRemove", id: view.sel });
@@ -941,14 +941,45 @@
 
   function unmount() {
     if (!view.host) return;
-    stopPlayback();
+    // the transport deliberately KEEPS PLAYING — audio runs on while
+    // the user works in other tabs; Space or ▶ stops it from anywhere
     window.removeEventListener("keydown", onKeyDown);
     if (view.ro) { view.ro.disconnect(); view.ro = null; }
     view.host.innerHTML = "";
     view.host = null;
+    view.lanes = null;
+    view.stems = null;
+    view.timeEl = null;
+    view.playBtn = null;
     view.drag = null;
     view.sel = null;
   }
+
+  // ---- the global Space bar --------------------------------------------------
+  // Space starts/stops audio from ANY workspace (user directive) —
+  // except while typing, and except when a view with a richer Space
+  // meaning is active: interceptors run first (the Boards animatic and
+  // the sequence playhead stop themselves; Pitch keeps Space for slide
+  // advance while presenting). Views register on VB.audioSpaceIntercept.
+  VB.audioSpaceIntercept = VB.audioSpaceIntercept || [];
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key !== " " || ev.ctrlKey || ev.altKey || ev.metaKey) return;
+    var el = ev.target;
+    var tag = el && el.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" ||
+        (el && el.isContentEditable)) return;
+    var hooks = VB.audioSpaceIntercept;
+    for (var i = 0; i < hooks.length; i++) {
+      if (hooks[i]()) { ev.preventDefault(); return; }
+    }
+    var appRef = view.app || window.VBApp;
+    if (!rig.playing &&
+        !(appRef && appRef.project && VB.audioHasClips(appRef.project))) {
+      return; // nothing to play — leave Space to whoever else wants it
+    }
+    ev.preventDefault();
+    togglePlay();
+  });
 
   window.VB = window.VB || {};
   VB.AudioView = {

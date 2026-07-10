@@ -651,6 +651,13 @@
 
   window.VB = window.VB || {};
   VB.pitchSlideById = slideById;
+  // while presenting, Space belongs to slide advance — the global
+  // audio toggle stands down
+  VB.audioSpaceIntercept = VB.audioSpaceIntercept || [];
+  VB.audioSpaceIntercept.push(function () {
+    return !!view.present;
+  });
+
   VB.PitchView = {
     mount: mount,
     unmount: unmount,

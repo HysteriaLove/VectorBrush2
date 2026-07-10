@@ -763,6 +763,14 @@
   VB.boardsPanelById = panelById;
   VB.boardsFlatten = flattenPanels;
   VB.boardsTotalFrames = totalFrames;
+  // the global Space bar defers to a playing animatic: it stops the
+  // reel (sound included) instead of toggling raw audio underneath it
+  VB.audioSpaceIntercept = VB.audioSpaceIntercept || [];
+  VB.audioSpaceIntercept.push(function () {
+    if (view.animatic.playing) { stopAnimatic(); return true; }
+    return false;
+  });
+
   VB.BoardsView = {
     mount: mount,
     unmount: unmount,

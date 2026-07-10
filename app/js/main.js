@@ -2601,6 +2601,14 @@
 
   ensureSeqStrip(); // build the strip at load — remounts never add canvases
 
+  // the global Space bar defers to sequence playback: Space stops the
+  // reel (sound included) instead of toggling raw audio underneath it
+  VB.audioSpaceIntercept = VB.audioSpaceIntercept || [];
+  VB.audioSpaceIntercept.push(function () {
+    if (seqPlay.playing) { stopSeqPlay(); return true; }
+    return false;
+  });
+
   // ---- Actors panel (actors.js; Architecture §6.6, step-2 beat 2) --------------
   // The library lists actors and their poses; clicking a pose enters the
   // journaled symbol-edit mode (editTargetSet) — the stage, the tools,
