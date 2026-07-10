@@ -191,6 +191,7 @@
     refreshActors(); // …and the actor library / edit mode
     syncEditCrumb();
     refreshTimeline();
+    refreshSequence();
     if (VB.BrainstormView) VB.BrainstormView.refresh(); // undo/redo on the board
     if (VB.WritingView) VB.WritingView.refresh();
     if (VB.PitchView) VB.PitchView.refresh();
@@ -1907,13 +1908,167 @@
 
   document.getElementById("btn-scene-add").addEventListener("click", function () {
     flushSelections();
-    app.record({ op: "sceneAdd" });
-    app.history.push();
-    app.project.addScene();
+    // definition only (the reference's add_scene) — the sequence strip's
+    // ＋ is the one that also places an instance
+    app.exec({ op: "sceneAdd", id: VB.actorNewId("scene") });
+  });
+
+  // ---- the master timeline strip (sequence.js) -----------------------------------
+  // Scene INSTANCES in play order. Click follows the scene into the
+  // editor; drag reorders; right-click carries the reference's sequence
+  // menu (add instance per scene, lock, durations, fill-to-audio).
+  var seqSel = null;
+
+  function selectSceneIndex(i) {
+    if (i === app.project.cur.scene) return;
+    flushSelections();
+    app.record({ op: "sceneSelect", index: i });
+    app.project.selectScene(i);
+    app.debugPin = -1;
     refreshLayers();
+    refreshDebugPanel();
     requestRender();
     updateStatus();
-  });
+  }
+
+  function seqMenu(ev, inst) {
+    var project = app.project;
+    var sc = VB.sceneById(project, inst.scene);
+    var items = [
+      { label: "Rename Scene", fn: function () {
+          var n = prompt("Scene name", sc ? sc.scene.name : "");
+          if (n && n.trim()) {
+            app.exec({ op: "sceneRename", scene: inst.scene, name: n });
+          }
+        } },
+      { label: "Set Duration…", fn: function () {
+          var v = parseInt(prompt("Duration (frames)", inst.duration), 10);
+          if (v > 0) app.exec({ op: "sceneInstDuration", id: inst.id, frames: v });
+        } },
+      { label: inst.locked ? "Unlock" : "Lock", fn: function () {
+          app.exec({ op: "sceneInstLock", id: inst.id, on: !inst.locked });
+        } }
+    ];
+    project.scenes.forEach(function (s) {
+      items.push({ label: "Add Instance: " + s.name, fn: function () {
+        app.exec({ op: "sceneInstAdd", id: VB.actorNewId("seq"),
+                   scene: s.id, after: inst.id });
+      } });
+    });
+    if (VB.sequenceOf(project).length > 1) {
+      items.push({ label: "Remove Instance", fn: function () {
+        app.exec({ op: "sceneInstRemove", id: inst.id });
+      } });
+    }
+    // reference feature: fill numbered scenes until the audio is covered
+    var frameMs = 1000 / (project.fps || 24);
+    var audioEnd = VB.audioEndMs ? VB.audioEndMs(project) : 0;
+    if (audioEnd > VB.sequenceDuration(project) * frameMs) {
+      items.push({ label: "Create Scenes To Audio End", fn: function () {
+        var guard = 0;
+        while (VB.sequenceDuration(app.project) * frameMs <
+               VB.audioEndMs(app.project) && guard++ < 200) {
+          var sid = VB.actorNewId("scene");
+          app.exec({ op: "sceneAdd", id: sid });
+          app.exec({ op: "sceneInstAdd", id: VB.actorNewId("seq"),
+                     scene: sid, duration: 144 });
+        }
+        // trim the tail so the sequence lands ON the audio end
+        var wantF = Math.ceil(VB.audioEndMs(app.project) / frameMs);
+        var seq = VB.sequenceOf(app.project);
+        var last = seq[seq.length - 1];
+        var trim = VB.sequenceDuration(app.project) - wantF;
+        if (trim > 0 && last.duration - trim >= 1) {
+          app.exec({ op: "sceneInstDuration", id: last.id,
+                     frames: last.duration - trim });
+        }
+      } });
+    }
+    app.showMenu(ev.clientX, ev.clientY, items);
+  }
+
+  function seqChipDown(inst, index) {
+    return function (ev) {
+      if (ev.button !== 0) return;
+      seqSel = inst.id;
+      var sc = VB.sceneById(app.project, inst.scene);
+      if (sc) selectSceneIndex(sc.index);
+      refreshSequence();
+      var chip = document.querySelector('#seqbar .seqchip[data-id="' +
+                                        inst.id + '"]');
+      if (!chip) return;
+      chip.setPointerCapture(ev.pointerId);
+      var startX = ev.clientX, moved = false;
+      function onMove(e2) {
+        if (Math.abs(e2.clientX - startX) > 6) {
+          moved = true;
+          chip.classList.add("dragging");
+        }
+      }
+      function onUp(e2) {
+        chip.removeEventListener("pointermove", onMove);
+        chip.removeEventListener("pointerup", onUp);
+        chip.classList.remove("dragging");
+        if (!moved) return;
+        var to = 0; // insertion index among the OTHER chips
+        document.querySelectorAll("#seqbar .seqchip").forEach(function (el) {
+          if (el === chip) return;
+          var r = el.getBoundingClientRect();
+          if (e2.clientX > r.left + r.width / 2) to++;
+        });
+        if (to !== index) {
+          app.exec({ op: "sceneInstMove", id: inst.id, index: to });
+        }
+      }
+      chip.addEventListener("pointermove", onMove);
+      chip.addEventListener("pointerup", onUp);
+    };
+  }
+
+  function refreshSequence() {
+    var bar = document.getElementById("seqbar");
+    if (!bar) return;
+    bar.innerHTML = "";
+    var seq = VB.sequenceOf(app.project);
+    if (seqSel && !VB.sequenceInstById(app.project, seqSel)) seqSel = null;
+    var label = document.createElement("span");
+    label.id = "seq-label";
+    label.textContent = "Sequence";
+    bar.appendChild(label);
+    seq.forEach(function (inst, i) {
+      var sc = VB.sceneById(app.project, inst.scene);
+      var chip = document.createElement("div");
+      chip.className = "seqchip" +
+        (seqSel === inst.id ? " sel" : "") +
+        (sc && sc.index === app.project.cur.scene ? " cur" : "");
+      chip.dataset.id = inst.id;
+      chip.textContent = (inst.locked ? "🔒 " : "") +
+        (sc ? sc.scene.name : "?") + " · " + inst.duration + "f";
+      chip.title = "Click: edit this scene · drag: reorder · right-click: actions";
+      chip.addEventListener("pointerdown", seqChipDown(inst, i));
+      chip.addEventListener("contextmenu", function (ev) {
+        seqMenu(ev, inst);
+      });
+      bar.appendChild(chip);
+    });
+    var add = document.createElement("button");
+    add.id = "seq-add";
+    add.textContent = "＋";
+    add.title = "Create a new scene and add it to the sequence";
+    add.addEventListener("click", function () {
+      var sid = VB.actorNewId("scene");
+      app.exec({ op: "sceneAdd", id: sid });
+      app.exec({ op: "sceneInstAdd", id: VB.actorNewId("seq"), scene: sid,
+                 after: seqSel || undefined });
+    });
+    bar.appendChild(add);
+    var total = document.createElement("span");
+    total.id = "seq-total";
+    var frames = VB.sequenceDuration(app.project);
+    total.textContent = frames + "f · " +
+      (frames / (app.project.fps || 24)).toFixed(1) + "s";
+    bar.appendChild(total);
+  }
 
   // Empty-space drags in the transform tool draw a fresh region band —
   // shaped like the selection tool the user came from.

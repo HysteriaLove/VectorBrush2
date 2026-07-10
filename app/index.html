@@ -380,6 +380,7 @@
   #workspace-stub { display: none; }
   body.ws-stub-mode #propbar,
   body.ws-stub-mode #timebar,
+  body.ws-stub-mode #seqbar,
   body.ws-stub-mode #middle { display: none; }
   body.ws-stub-mode #workspace-stub {
     display: flex; flex: 1;
@@ -394,6 +395,7 @@
      covers the editor chrome */
   body.ws-mount-mode #propbar,
   body.ws-mount-mode #timebar,
+  body.ws-mount-mode #seqbar,
   body.ws-mount-mode #middle { display: none; }
   #brainstorm-board, #writing-view, #pitch-view, #boards-view,
   #audio-view { display: none; }
@@ -749,6 +751,33 @@
   .tlcell.hold { opacity: 0.45; }
   .tlcell.cur { border-color: var(--accent); background: var(--accent); }
 
+  /* the master timeline strip (sequence.js) — scene instances in order */
+  #seqbar {
+    flex: none; height: 26px;
+    display: flex; align-items: center; gap: 4px;
+    padding: 0 10px; overflow-x: auto;
+    background: var(--panel);
+    border-bottom: 1px solid var(--panel-edge);
+    font-size: 11px; color: var(--text);
+    user-select: none;
+  }
+  #seq-label, #seq-total { color: var(--text-dim); flex: none; white-space: nowrap; }
+  .seqchip {
+    flex: none; padding: 2px 10px; border-radius: 3px; cursor: pointer;
+    background: var(--field); border: 1px solid var(--panel-edge);
+    white-space: nowrap; touch-action: none;
+  }
+  .seqchip.cur { border-color: var(--accent); }
+  .seqchip.sel { background: var(--hover); }
+  .seqchip.dragging { opacity: 0.5; }
+  #seq-add {
+    flex: none;
+    background: var(--field); color: var(--text);
+    border: 1px solid var(--panel-edge); border-radius: 3px;
+    height: 20px; min-width: 24px; cursor: pointer; padding: 0 4px;
+  }
+  #seq-add:hover { background: var(--btn-hover); }
+
   #ctxmenu {
     position: absolute; z-index: 20; min-width: 180px;
     background: var(--panel); border: 1px solid var(--panel-edge);
@@ -945,6 +974,7 @@
     <span id="tl-counter">1 / 1</span>
     <div id="tl-frames"></div>
   </div>
+  <div id="seqbar"></div>
 
   <div id="workspace-stub">
     <div>
@@ -1106,6 +1136,7 @@
   <script src="js/lasso.js"></script>
   <script src="js/ttf.js"></script>
   <script src="js/project.js"></script>
+  <script src="js/sequence.js"></script>
   <script src="js/actors.js"></script>
   <script src="js/library.js"></script>
   <script src="js/thumbs.js"></script>

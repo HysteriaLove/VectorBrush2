@@ -50,6 +50,7 @@
 <script src="../js/actors.js"></script>
 <script src="../js/library.js"></script>
 <script src="../js/audio.js"></script>
+<script src="../js/sequence.js"></script>
 <script src="../js/thumbs.js"></script>
 <script src="../js/brainstorm.js"></script>
 <script src="../js/pitch.js"></script>
@@ -3853,6 +3854,108 @@
   } catch (err) {
     fail++;
     log("  AUDIO EXCEPTION: " + (err && err.stack || err), "fail");
+  }
+
+  // =============================== sequence ===================================
+  // The master timeline (sequence.js): scene definitions get stable ids
+  // and the sequence holds INSTANCES — behaviors ported from the
+  // Animation Program V2 reference (duration inheritance via the
+  // clone-source rule, the >=1-instance guard, boundary trims that
+  // keep both sides >=1, locks freezing boundaries), improved with
+  // journaled ops and a direct reorder.
+  log("");
+  log("sequence:");
+  try {
+    var sqe = new VB.Session({ width: 11000, height: 8000 });
+    check("a project is born with one 144-frame instance of Scene 1",
+      sqe.project.scenes[0].id === "scene@0" &&
+      JSON.stringify(sqe.project.sequence) === JSON.stringify(
+        [{ id: "seq@0", scene: "scene@0", duration: 144, locked: false }]));
+
+    sqe.exec({ op: "sceneAdd", id: "sc_b", name: "Bridge" });
+    sqe.exec({ op: "sceneAdd" }); // legacy op without an id
+    check("sceneAdd carries its id; legacy ops get the deterministic fallback",
+      sqe.project.scenes[1].id === "sc_b" &&
+      sqe.project.scenes[2].id === "scene@2" &&
+      sqe.project.cur.scene === 2);
+
+    // no same-scene instance yet -> inherits from the after-instance
+    sqe.exec({ op: "sceneInstAdd", id: "sq_b1", scene: "sc_b" });
+    check("first instance inherits the tail instance's duration",
+      sqe.project.sequence.length === 2 &&
+      sqe.project.sequence[1].duration === 144 &&
+      sqe.project.cur.scene === 1); // the cursor follows the instance
+    sqe.exec({ op: "sceneInstDuration", id: "sq_b1", frames: 48 });
+    // clone-source rule: nearest same-scene instance wins over neighbors
+    sqe.exec({ op: "sceneInstAdd", id: "sq_b2", scene: "sc_b",
+               after: "seq@0" });
+    check("clone source: the nearest same-scene instance sets the duration",
+      sqe.project.sequence[1].id === "sq_b2" &&
+      sqe.project.sequence[1].duration === 48);
+
+    check("sequence math: duration and frame lookup",
+      VB.sequenceDuration(sqe.project) === 144 + 48 + 48 &&
+      VB.sequenceAt(sqe.project, 0).inst.id === "seq@0" &&
+      VB.sequenceAt(sqe.project, 150).inst.id === "sq_b2" &&
+      VB.sequenceAt(sqe.project, 150).start === 144 &&
+      VB.sequenceAt(sqe.project, 99999).inst.id === "sq_b1");
+
+    // boundary trims: END resizes (downstream slides), START steals
+    // from the previous instance and keeps this instance's end fixed
+    sqe.exec({ op: "sceneBoundarySet", inst: "seq@0", edge: "end",
+               frame: 100 });
+    check("end-edge trim resizes the instance",
+      sqe.project.sequence[0].duration === 100);
+    sqe.exec({ op: "sceneBoundarySet", inst: "sq_b2", edge: "start",
+               frame: 80 });
+    check("start-edge trim steals from the previous instance",
+      sqe.project.sequence[0].duration === 80 &&
+      sqe.project.sequence[1].duration === 68); // end stays at 148
+    sqe.exec({ op: "sceneInstLock", id: "sq_b2", on: true });
+    sqe.exec({ op: "sceneBoundarySet", inst: "seq@0", edge: "end",
+               frame: 60 });
+    sqe.exec({ op: "sceneInstDuration", id: "sq_b2", frames: 999 });
+    check("locks freeze boundaries and durations",
+      sqe.project.sequence[0].duration === 80 &&
+      sqe.project.sequence[1].duration === 68);
+    sqe.exec({ op: "sceneInstLock", id: "sq_b2", on: false });
+
+    sqe.exec({ op: "sceneInstMove", id: "sq_b1", index: 0 });
+    check("instances reorder directly",
+      sqe.project.sequence[0].id === "sq_b1" &&
+      sqe.project.sequence[1].id === "seq@0");
+
+    sqe.exec({ op: "sceneRename", scene: "sc_b", name: "Scene 1" });
+    check("rename keeps names unique (reference rule)",
+      VB.sceneById(sqe.project, "sc_b").scene.name === "Scene 1 2");
+
+    // removal: never below one instance; the neighbor takes selection
+    sqe.exec({ op: "sceneInstRemove", id: "sq_b2" });
+    sqe.exec({ op: "sceneInstRemove", id: "sq_b1" });
+    sqe.exec({ op: "sceneInstRemove", id: "seq@0" });
+    check("at least one instance always remains",
+      sqe.project.sequence.length === 1 &&
+      sqe.project.sequence[0].id === "seq@0");
+
+    var sqPlain = function (p) {
+      return JSON.stringify({
+        seq: p.sequence,
+        scenes: p.scenes.map(function (s) { return { id: s.id, name: s.name }; }),
+        cur: p.cur.scene
+      });
+    };
+    var sqRep = await VB.replayJournal(JSON.parse(JSON.stringify(sqe.journal)));
+    check("the sequence replays byte-exact",
+      sqPlain(sqRep.project) === sqPlain(sqe.project));
+    sqe.exec({ op: "undo" });
+    check("journaled undo restores the removed instance",
+      sqe.project.sequence.length === 2);
+    var sqRep2 = await VB.replayJournal(JSON.parse(JSON.stringify(sqe.journal)));
+    check("remove/undo replays byte-exact",
+      sqPlain(sqRep2.project) === sqPlain(sqe.project));
+  } catch (err) {
+    fail++;
+    log("  SEQUENCE EXCEPTION: " + (err && err.stack || err), "fail");
   }
 
   // =========================== streaming skeleton ============================

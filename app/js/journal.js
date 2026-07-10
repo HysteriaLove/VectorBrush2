@@ -102,7 +102,7 @@
   });
   defineOp("sceneAdd", function (c, op) {
     c.history.push(c.project);
-    c.project.addScene(op.name);
+    c.project.addScene(op.name, op.id);
     c.sync();
   });
   defineOp("sceneSelect", function (c, op) {

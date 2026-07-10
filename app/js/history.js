@@ -148,9 +148,10 @@
                    }) };
         })
       },
+      sequence: JSON.parse(JSON.stringify(target.sequence || [])),
       scenes: target.scenes.map(function (sc) {
         return {
-          name: sc.name,
+          id: sc.id, name: sc.name,
           layers: sc.layers.map(function (l) {
             return {
               name: l.name, visible: l.visible, locked: l.locked,
@@ -217,9 +218,10 @@
                  }) };
       })
     };
+    target.sequence = JSON.parse(JSON.stringify(snap.sequence || []));
     target.scenes = snap.scenes.map(function (sc) {
       return {
-        name: sc.name,
+        id: sc.id, name: sc.name,
         layers: sc.layers.map(function (l) {
           return {
             name: l.name, visible: l.visible, locked: l.locked,

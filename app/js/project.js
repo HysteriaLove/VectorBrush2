@@ -27,7 +27,11 @@
     this.frames = [cell];
   }
 
-  function Scene(name, cell) {
+  function Scene(name, cell, id) {
+    // id: stable reference for sequence instances. Callers without one
+    // (legacy journals, file loads) get a deterministic index-derived
+    // id, so replay builds identical structures.
+    this.id = id || null;
     this.name = name;
     this.layers = [new Layer("Layer 1", cell)];
   }
@@ -37,8 +41,13 @@
     this.height = height || 400 * 20;
     this.fps = 24; // playback rate (reference default); journaled via fpsSet
     this.background = { r: 255, g: 255, b: 255, a: 255 };
-    this.scenes = [new Scene("Scene 1", this.newCell())];
+    this.scenes = [new Scene("Scene 1", this.newCell(), "scene@0")];
     this.cur = { scene: 0, layer: 0, frame: 0 };
+    // The master timeline (sequence.js): scene INSTANCES in play order.
+    // A project always has at least one (the reference's new-project
+    // shape: one instance of Scene 1, 144 frames = 6s at 24fps).
+    this.sequence = [{ id: "seq@0", scene: "scene@0",
+                       duration: 144, locked: false }];
     // The GLOBAL 2DMaterial library (Flash's library, not per-layer):
     // crafted material definitions usable on any layer or scene. Cells
     // keep their own fills[] (the SWF wire grammar); painting with a
@@ -336,9 +345,10 @@
     this.cur.layer = Math.max(0, Math.min(layers.length - 1, index));
   };
 
-  Project.prototype.addScene = function (name) {
+  Project.prototype.addScene = function (name, id) {
     this.scenes.push(new Scene(name || "Scene " + (this.scenes.length + 1),
-                               this.newCell()));
+                               this.newCell(),
+                               id || "scene@" + this.scenes.length));
     this.cur.scene = this.scenes.length - 1;
     this.cur.layer = 0;
   };

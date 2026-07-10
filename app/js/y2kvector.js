@@ -668,7 +668,9 @@
       project.scenes = [];
       var nScenes = r.u8();
       for (var si = 0; si < nScenes; si++) {
-        var scene = { name: readStr(r), layers: [] };
+        // index-derived id: deterministic, so sequence instances built
+        // by later journal ops resolve identically in replay
+        var scene = { id: "scene@" + si, name: readStr(r), layers: [] };
         var nLayers = r.u16();
         for (var li = 0; li < nLayers; li++) {
           var lname = readStr(r);
