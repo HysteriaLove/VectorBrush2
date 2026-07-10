@@ -423,7 +423,8 @@
   var view = {
     host: null, app: null, lanes: null, stems: null, timeEl: null,
     playBtn: null, ro: null, board: null,
-    bitems: {},                    // panel id -> board strip item
+    bmain: null, bprev: null, bnext: null,  // the leica viewer slots
+    bcenterId: null, bcenterHash: null,
     pxPerMs: 0.1, panMs: 0,        // 100 px/s default
     sel: null,                     // selected clip id
     drag: null                     // {kind, ...} pointer session
@@ -751,85 +752,113 @@
     }
   }
 
-  // ---- the board strip: panels playing left-to-right --------------------------------
-  // items are RECONCILED by panel id (never rebuilt mid-play); thumbs
-  // ride the shared thumbnail cache + prefetcher, priority = distance
-  // to the playhead — the streaming proxy ladder (empty → thumb)
+  // ---- the board viewer: the playhead's panel LARGE and centered --------------------
+  // a leica focus view (user spec): the current board big in the
+  // middle, its neighbors small and dim at the sides, swapping as the
+  // playhead crosses boundaries. The center renders straight from the
+  // cell (always current, DPR-crisp); the sides ride the shared
+  // thumbnail cache + prefetcher (the streaming proxy ladder).
 
-  function syncBoardStrip() {
-    if (!view.board || !view.app) return;
-    var project = view.app.project;
-    var spans = panelSpans(project);
-    var cur = panelSpanAt(project, rig.masterMs);
-    var want = [];
-    spans.forEach(function (sp) {
-      var item = view.bitems[sp.panel.id];
-      if (!item) {
-        item = { root: document.createElement("div"),
-                 cvs: document.createElement("canvas"),
-                 num: document.createElement("span") };
-        item.root.className = "au-bpanel";
-        item.cvs.width = 128; item.cvs.height = 72;
-        item.num.className = "au-bnum";
-        item.root.appendChild(item.cvs);
-        item.root.appendChild(item.num);
-        (function (pid) {
-          item.root.addEventListener("pointerdown", function (ev) {
-            if (ev.button !== 0) return;
-            var sp2 = null;
-            panelSpans(view.app.project).forEach(function (s) {
-              if (s.panel.id === pid) sp2 = s;
-            });
-            if (!sp2) return;
-            view.app.exec({ op: "boardsSelect", panel: sp2.index });
-            if (!rig.playing) {
-              rig.masterMs = Math.round(sp2.startMs);
-              if (view.timeEl) view.timeEl.textContent = fmtMs(rig.masterMs);
-              syncBoardStrip();
-              renderLanes();
-            }
-          });
-        })(sp.panel.id);
-        view.bitems[sp.panel.id] = item;
-      }
-      item.num.textContent = String(sp.index + 1) + " · " +
-        ((sp.endMs - sp.startMs) / 1000).toFixed(1) + "s";
-      item.root.classList.toggle("cur", sp === cur);
-      var cached = VB.thumbGet &&
-        VB.thumbGet("panel:" + sp.panel.id, sp.panel.cell);
-      if (cached) {
-        item.cvs.getContext("2d").drawImage(cached, 0, 0, 128, 72);
-      } else if (VB.thumbRequest) {
-        // priority: how far this panel sits from the playhead
-        var dist = Math.abs(sp.index - (cur ? cur.index : 0));
-        VB.thumbRequest("panel:" + sp.panel.id, sp.panel.cell,
-                        128, 72, dist).then(function (cv) {
-          if (cv && item.cvs.isConnected) {
-            item.cvs.getContext("2d").drawImage(cv, 0, 0, 128, 72);
+  function drawPanelInto(cvs, panel) {
+    var dpr = window.devicePixelRatio || 1;
+    var w = cvs.clientWidth, h = cvs.clientHeight;
+    if (!w || !h) return;
+    if (cvs.width !== Math.round(w * dpr)) {
+      cvs.width = Math.round(w * dpr);
+      cvs.height = Math.round(h * dpr);
+    }
+    var ctx = cvs.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    if (!panel) return;
+    var cw = panel.cell.width / VB.TWIPS, ch = panel.cell.height / VB.TWIPS;
+    var zoom = Math.min(w / cw, h / ch);
+    VB.render(ctx, panel.cell, {
+      zoom: zoom, panX: (w - cw * zoom) / 2, panY: (h - ch * zoom) / 2,
+      dpr: dpr
+    });
+  }
+
+  function seekToSpan(sp) {
+    if (!sp) return;
+    view.app.exec({ op: "boardsSelect", panel: sp.index });
+    if (!rig.playing) {
+      rig.masterMs = Math.round(sp.startMs);
+      if (view.timeEl) view.timeEl.textContent = fmtMs(rig.masterMs);
+      syncBoardStrip();
+      renderLanes();
+    }
+  }
+
+  function makeViewerSlot(className, offset) {
+    var root = document.createElement("div");
+    root.className = className;
+    var cvs = document.createElement("canvas");
+    root.appendChild(cvs);
+    var num = document.createElement("span");
+    num.className = "au-bnum";
+    root.appendChild(num);
+    root.addEventListener("pointerdown", function (ev) {
+      if (ev.button !== 0) return;
+      var project = view.app.project;
+      var cur = panelSpanAt(project, rig.masterMs);
+      var spans = panelSpans(project);
+      var target = cur ? spans[cur.index + offset] : spans[0];
+      seekToSpan(target);
+    });
+    return { root: root, cvs: cvs, num: num };
+  }
+
+  function sideThumb(slot, sp, curIndex) {
+    slot.root.style.visibility = sp ? "visible" : "hidden";
+    if (!sp) return;
+    if (slot.cvs.width !== 128) { slot.cvs.width = 128; slot.cvs.height = 72; }
+    slot.num.textContent = String(sp.index + 1) + " · " +
+      ((sp.endMs - sp.startMs) / 1000).toFixed(1) + "s";
+    var ctx = slot.cvs.getContext("2d");
+    var cached = VB.thumbGet &&
+      VB.thumbGet("panel:" + sp.panel.id, sp.panel.cell);
+    if (cached) {
+      ctx.clearRect(0, 0, slot.cvs.width, slot.cvs.height);
+      ctx.drawImage(cached, 0, 0, slot.cvs.width, slot.cvs.height);
+    } else {
+      ctx.clearRect(0, 0, slot.cvs.width, slot.cvs.height);
+      if (VB.thumbRequest) {
+        VB.thumbRequest("panel:" + sp.panel.id, sp.panel.cell, 128, 72,
+                        Math.abs(sp.index - curIndex)).then(function (cv) {
+          if (cv && slot.cvs.isConnected) {
+            slot.cvs.getContext("2d")
+              .drawImage(cv, 0, 0, slot.cvs.width, slot.cvs.height);
           }
         });
       }
-      want.push(item.root);
-    });
-    Object.keys(view.bitems).forEach(function (id) {
-      if (!VB.spinePanelById(project, id)) {
-        view.bitems[id].root.remove();
-        delete view.bitems[id];
-      }
-    });
-    var have = Array.prototype.slice.call(view.board.children);
-    var same = have.length === want.length && want.every(function (el, i) {
-      return have[i] === el;
-    });
-    if (!same) want.forEach(function (el) { view.board.appendChild(el); });
-    view.board.classList.toggle("empty", spans.length === 0);
-    // the reel follows the playhead
-    if (cur && rig.playing) {
-      var el = view.bitems[cur.panel.id];
-      if (el && el.root.scrollIntoView) {
-        el.root.scrollIntoView({ block: "nearest", inline: "nearest" });
-      }
     }
+  }
+
+  function syncBoardStrip() {
+    if (!view.board || !view.app || !view.bmain) return;
+    var project = view.app.project;
+    var spans = panelSpans(project);
+    var cur = panelSpanAt(project, rig.masterMs);
+    view.board.classList.toggle("empty", spans.length === 0);
+    if (!cur) {
+      view.bmain.root.style.visibility = "hidden";
+      sideThumb(view.bprev, null, 0);
+      sideThumb(view.bnext, null, 0);
+      return;
+    }
+    view.bmain.root.style.visibility = "visible";
+    view.bmain.num.textContent = "panel " + (cur.index + 1) + " · " +
+      ((cur.endMs - cur.startMs) / 1000).toFixed(1) + "s";
+    // re-render the big center only when the panel or its art changed
+    var hash = VB.pixiHashCell ? VB.pixiHashCell(cur.panel.cell) : 0;
+    if (view.bcenterId !== cur.panel.id || view.bcenterHash !== hash) {
+      view.bcenterId = cur.panel.id;
+      view.bcenterHash = hash;
+      drawPanelInto(view.bmain.cvs, cur.panel);
+    }
+    sideThumb(view.bprev, spans[cur.index - 1] || null, cur.index);
+    sideThumb(view.bnext, spans[cur.index + 1] || null, cur.index);
   }
 
   /** Warm the caches nearest-first (the §5 contract): stems whose
@@ -1088,12 +1117,20 @@
         });
       }));
 
-    // the BOARD STRIP (panels left-to-right) over the SYNC TIMELINE
+    // the BOARD VIEWER (current panel large + centered) over the SYNC
+    // TIMELINE
     view.board = document.createElement("div");
     view.board.id = "au-board";
     view.board.dataset.ph =
       "the storyboard plays here — panels appear as they are written";
-    view.bitems = {};
+    view.bprev = makeViewerSlot("au-bside", -1);
+    view.bmain = makeViewerSlot("au-bmain", 0);
+    view.bnext = makeViewerSlot("au-bside", 1);
+    view.bcenterId = null;
+    view.bcenterHash = null;
+    view.board.appendChild(view.bprev.root);
+    view.board.appendChild(view.bmain.root);
+    view.board.appendChild(view.bnext.root);
     host.appendChild(view.board);
 
     var body = document.createElement("div");
@@ -1311,7 +1348,11 @@
     view.lanes = null;
     view.stems = null;
     view.board = null;
-    view.bitems = {};
+    view.bmain = null;
+    view.bprev = null;
+    view.bnext = null;
+    view.bcenterId = null;
+    view.bcenterHash = null;
     view.timeEl = null;
     view.playBtn = null;
     view.drag = null;

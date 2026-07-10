@@ -653,12 +653,13 @@
     font: 12px Consolas, monospace; color: var(--text-dim);
   }
   #au-hint { color: var(--text-dim); font-size: 11px; margin-left: auto; }
-  /* the board strip: storyboard panels playing left-to-right over the
-     sync timeline — the current panel follows the playhead */
+  /* the board VIEWER: the playhead's panel LARGE and centered over
+     the sync timeline, neighbors small and dim at its sides */
   #au-board {
-    flex: none; height: 104px;
-    display: flex; gap: 8px; align-items: center;
-    padding: 6px 10px; overflow-x: auto;
+    flex: none; height: min(340px, 38vh);
+    display: flex; gap: 18px; align-items: center;
+    justify-content: center;
+    padding: 8px 10px;
     background: var(--panel);
     border-bottom: 1px solid var(--panel-edge);
   }
@@ -666,14 +667,25 @@
     content: attr(data-ph); color: var(--text-dim);
     font-size: 11px; margin: auto;
   }
-  .au-bpanel {
+  #au-board.empty .au-bmain, #au-board.empty .au-bside { display: none; }
+  .au-bmain, .au-bside {
     flex: none; cursor: pointer;
-    display: flex; flex-direction: column; align-items: center; gap: 1px;
-    background: #fdfdfa; border: 1px solid #202327; border-radius: 2px;
-    padding: 2px;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    background: #fdfdfa; border: 1.5px solid #202327; border-radius: 2px;
+    padding: 3px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.14);
   }
-  .au-bpanel.cur { outline: 2px solid var(--accent); }
-  .au-bpanel canvas { display: block; background: #fff; }
+  .au-bmain canvas {
+    display: block; background: #fff;
+    height: calc(min(340px, 38vh) - 40px);
+    aspect-ratio: 16 / 9;
+  }
+  .au-bside { opacity: 0.55; border-width: 1px; box-shadow: none; }
+  .au-bside:hover { opacity: 0.9; }
+  .au-bside canvas {
+    display: block; background: #fff;
+    width: 128px; height: 72px;
+  }
   .au-bnum { font: 9px system-ui, sans-serif; color: #4b4736; }
   #au-body { flex: 1; min-height: 0; display: flex; }
   #au-stems {
