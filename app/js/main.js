@@ -2030,21 +2030,36 @@
   function seqFrameAt(x) { return seqView.pan + x / seqView.pxf; }
   function seqXOf(frame) { return (frame - seqView.pan) * seqView.pxf; }
 
-  /** The master frame under the playhead marker. */
+  /** The playhead frame — ALWAYS the master clock, never derived from
+   *  chip selection (deriving it made the playhead snap to the selected
+   *  instance on every stop). Timelines REPOSITION the clock instead. */
   function seqMasterFrame() {
-    if (seqPlay.playing && seqPlay.frame >= 0) return seqPlay.frame;
-    var hit = seqSel ? VB.sequenceInstById(app.project, seqSel) : null;
-    if (!hit) {
+    var total = Math.max(1, VB.sequenceDuration(app.project));
+    var f = Math.floor((VB.audioNow ? VB.audioNow() : 0) / seqFrameMs());
+    return Math.max(0, Math.min(total - 1, f));
+  }
+
+  /** Journaled editor navigation moves the clock: keep the master on
+   *  the instance it is already inside when that instance shows the
+   *  current scene; otherwise jump to the scene's first instance. */
+  function seqSyncMasterToCur() {
+    var curScene = app.project.scenes[app.project.cur.scene];
+    if (!curScene || !VB.audioSeek) return;
+    var at = VB.sequenceAt(app.project, seqMasterFrame());
+    if (!at || at.inst.scene !== curScene.id) {
       var s = seqStarts();
-      var curScene = app.project.scenes[app.project.cur.scene];
-      for (var i = 0; curScene && i < s.seq.length; i++) {
-        if (s.seq[i].scene === curScene.id) { hit = { inst: s.seq[i], index: i }; break; }
+      at = null;
+      for (var i = 0; i < s.seq.length; i++) {
+        if (s.seq[i].scene === curScene.id) {
+          at = { inst: s.seq[i], start: s.starts[i] };
+          break;
+        }
       }
     }
-    if (!hit) return 0;
-    return VB.sequenceInstStart(app.project, hit.index) +
-      Math.min(app.project.cur.frame,
-               Math.max(1, hit.inst.duration | 0) - 1);
+    if (!at) return;
+    var frame = at.start + Math.min(app.project.cur.frame,
+      Math.max(1, at.inst.duration | 0) - 1);
+    VB.audioSeek(frame * seqFrameMs());
   }
 
   function ensureSeqStrip() {
@@ -2283,6 +2298,12 @@
       seqSel = at.inst.id;
       var sc = VB.sceneById(app.project, at.inst.scene);
       if (sc) selectSceneIndex(sc.index);
+      // clicking an instance repositions the playhead to its start
+      // (the reference's scene_select), journal-pinned
+      if (app.project.cur.frame !== 0) {
+        app.exec({ op: "frameSelect", index: 0 });
+      }
+      VB.audioSeek(at.start * seqFrameMs());
       seqView.drag = { kind: "maybe-move", inst: at.inst,
                        index: at.index, x0: p.x };
       renderSeqStrip();
@@ -2410,11 +2431,11 @@
     // editor navigation re-seeds the shared master clock (never while
     // something plays, and never from other tabs — an Audio-tab scrub
     // must survive edits made over there)
-    if (VB.audioSeek && !(VB.audioIsPlaying && VB.audioIsPlaying()) &&
+    if (!(VB.audioIsPlaying && VB.audioIsPlaying()) &&
         !(typeof seqPlay !== "undefined" && seqPlay.playing) &&
         !document.body.classList.contains("ws-mount-mode") &&
         !document.body.classList.contains("ws-stub-mode")) {
-      VB.audioSeek(seqMasterFrame() * seqFrameMs());
+      seqSyncMasterToCur();
     }
     renderSeqStrip();
   }
@@ -2573,6 +2594,9 @@
     refreshSequence();
     function startAudio() {
       if (!(VB.audioHasClips && VB.audioHasClips(app.project))) return;
+      // past the last clip the reel runs silent — starting the
+      // transport here would clamp to 0 and DRAG the reel back with it
+      if (seqPlay.ms >= VB.audioEndMs(app.project)) return;
       seqPlay.audio = true;
       VB.audioPlay(app.project, Math.round(seqPlay.ms), function (ms) {
         if (seqPlay.playing) seqPlay.ms = ms; // audio drives the clock
