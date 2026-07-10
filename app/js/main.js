@@ -11,6 +11,13 @@
   var canvas = document.getElementById("stage-canvas");
   var ctx = canvas.getContext("2d");
 
+  // pens can drop their pointer between down and capture (Windows Ink,
+  // out-of-range lift) — the NotFoundError must never kill the handler
+  // mid-setup (the composite lesson, applied to every capture here)
+  function capturePtr(el, ev) {
+    try { capturePtr(el, ev); } catch (e) { /* pen */ }
+  }
+
   // The session owns the open project's live state (session.js): store,
   // journal, undo history, op dispatch. `app` is the GUI facade over
   // whichever session is BOUND — tools keep their `app.*` surface, the
@@ -433,7 +440,7 @@
       }
     }
     if (!hit) return false;
-    canvas.setPointerCapture(ev.pointerId);
+    capturePtr(canvas, ev);
     var x0 = hit.x, y0 = hit.y, p0 = p;
     function onMove(e2) {
       var q = clientToTwips(e2);
@@ -463,7 +470,7 @@
     el.addEventListener("pointerdown", function (ev) {
       if (ev.button !== 0) return;
       var started = false, ghost = null;
-      el.setPointerCapture(ev.pointerId);
+      capturePtr(el, ev);
       var x0 = ev.clientX, y0 = ev.clientY;
       function onMove(e2) {
         if (!started &&
@@ -750,7 +757,7 @@
   canvas.addEventListener("pointerdown", function (ev) {
     if (ev.button === 1 || (ev.button === 0 && spaceDown)) {
       panning = { x: ev.clientX, y: ev.clientY };
-      canvas.setPointerCapture(ev.pointerId);
+      capturePtr(canvas, ev);
       ev.preventDefault();
       return;
     }
@@ -778,7 +785,7 @@
         var tp = clientToTwips(ev);
         if (tf.hitsFrame(tp)) {
           activePointerTool = tf;
-          canvas.setPointerCapture(ev.pointerId);
+          capturePtr(canvas, ev);
           tf.onDown(tp, ev);
           ev.preventDefault();
           return;
@@ -787,7 +794,7 @@
       }
       if (tool && tool.onDown) {
         activePointerTool = tool;
-        canvas.setPointerCapture(ev.pointerId);
+        capturePtr(canvas, ev);
         tool.onDown(clientToTwips(ev), ev);
         ev.preventDefault();
       }
@@ -850,6 +857,16 @@
     panning = null;
     if (activePointerTool && activePointerTool.cancel) activePointerTool.cancel();
     activePointerTool = null;
+  });
+
+  // capture lost ABNORMALLY mid-stroke (pen driver hiccup, OS grab):
+  // on a normal release pointerup already cleared the tool, so a tool
+  // still active here means the up never came — cancel, don't wedge
+  canvas.addEventListener("lostpointercapture", function () {
+    if (!activePointerTool) { panning = null; return; }
+    if (activePointerTool.cancel) activePointerTool.cancel();
+    activePointerTool = null;
+    panning = null;
   });
 
   // ---- keyboard ---------------------------------------------------------------
@@ -928,6 +945,18 @@
   });
   window.addEventListener("keyup", function (ev) {
     if (ev.code === "Space") spaceDown = false;
+  });
+  // Space held while the window loses focus (Alt+Tab, notification,
+  // pen-driver popup) drops the keyup in another window — without this
+  // reset spaceDown sticks TRUE and every pen press pans instead of
+  // drawing ("my tablet stopped drawing", user report)
+  window.addEventListener("blur", function () {
+    spaceDown = false;
+    panning = null;
+    if (activePointerTool) {
+      if (activePointerTool.cancel) activePointerTool.cancel();
+      activePointerTool = null;
+    }
   });
 
   // ---- debug toggle -------------------------------------------------------------
@@ -2077,7 +2106,7 @@
       tab.addEventListener("pointerdown", function (ev) {
         if (ev.button !== 0) return;
         ev.preventDefault();
-        tab.setPointerCapture(ev.pointerId);
+        capturePtr(tab, ev);
         var p0 = { x: ev.clientX, y: ev.clientY };
         var moved = false;
         function onMove(e2) {
@@ -2134,7 +2163,7 @@
       strip.addEventListener("pointerdown", function (ev) {
         if (ev.button !== 0) return;
         ev.preventDefault();
-        strip.setPointerCapture(ev.pointerId);
+        capturePtr(strip, ev);
         var x0 = ev.clientX, moved = false;
         function onMove(e2) {
           var dx = side === "left" ? e2.clientX - x0 : x0 - e2.clientX;
@@ -2173,7 +2202,7 @@
         var t = ev.target;
         if (t !== barEl && !(t.classList &&
             t.classList.contains("spacer"))) return;
-        barEl.setPointerCapture(ev.pointerId);
+        capturePtr(barEl, ev);
         var d = state.drawers[which];
         var y0 = ev.clientY;
         var h0 = d.open ? (d.h | 0) : 0;
@@ -2273,7 +2302,7 @@
     if (scratch.canvas) {
       var sDrag = null;
       scratch.canvas.addEventListener("pointerdown", function (ev) {
-        scratch.canvas.setPointerCapture(ev.pointerId);
+        capturePtr(scratch.canvas, ev);
         if (ev.button === 1) {
           ev.preventDefault();
           sDrag = { kind: "pan", x0: ev.clientX, y0: ev.clientY,
@@ -2364,7 +2393,7 @@
         grip.addEventListener("pointerdown", function (ev) {
           if (ev.button !== 0) return;
           ev.preventDefault();
-          grip.setPointerCapture(ev.pointerId);
+          capturePtr(grip, ev);
           el.classList.add("dragging");
           function onMove(e2) {
             var before = null;
@@ -2541,7 +2570,7 @@
         // capture on the GRIP and never reparent the panel mid-drag —
         // moving a captured element's subtree cancels the capture and
         // the panel "sticks" while the mouse runs ahead (user bug)
-        grip.setPointerCapture(ev.pointerId);
+        capturePtr(grip, ev);
         var r0 = p.getBoundingClientRect();
         var dx = ev.clientX - r0.left, dy = ev.clientY - r0.top;
         var moved = false;
@@ -2635,7 +2664,7 @@
       if (!edge) return;
       edge.addEventListener("pointerdown", function (ev) {
         ev.preventDefault();
-        edge.setPointerCapture(ev.pointerId);
+        capturePtr(edge, ev);
         edge.classList.add("dragging");
         var x0 = ev.clientX, w0 = state.racks[side].width || S.RACK_DEFAULT;
         function onMove(e2) {
@@ -3095,13 +3124,13 @@
       var p = local(ev);
       if (ev.button === 1) {
         ev.preventDefault();
-        cvs.setPointerCapture(ev.pointerId);
+        capturePtr(cvs, ev);
         seqView.drag = { kind: "pan", x0: p.x, pan0: seqView.pan };
         return;
       }
       if (ev.button !== 0) return;
       stopSeqPlay();
-      cvs.setPointerCapture(ev.pointerId);
+      capturePtr(cvs, ev);
       if (p.y < SEQ_RULER) { // scrub the master playhead
         seqView.drag = { kind: "scrub" };
         scrubTo(p.x);
@@ -3478,7 +3507,7 @@
     cvs.addEventListener("pointerdown", function (ev) {
       if (ev.button === 1) {
         ev.preventDefault();
-        cvs.setPointerCapture(ev.pointerId);
+        capturePtr(cvs, ev);
         stepView.drag = { kind: "pan", x0: ev.clientX,
                           s0: stepView.scroll };
         return;
@@ -3486,7 +3515,7 @@
       if (ev.button !== 0 && ev.button !== 2) return;
       stopPlay();
       stopSeqPlay();
-      cvs.setPointerCapture(ev.pointerId);
+      capturePtr(cvs, ev);
       var data = stepRows();
       var row = data.rows[rowAt(ev)];
       var f = clampFrame(frameAt(ev));

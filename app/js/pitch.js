@@ -11,6 +11,12 @@
 (function () {
   "use strict";
 
+  // pens can drop their pointer between down and capture (Windows Ink,
+  // out-of-range lift) — the NotFoundError must never kill the handler
+  function capturePtr(el, ev) {
+    try { el.setPointerCapture(ev.pointerId); } catch (e) { /* pen */ }
+  }
+
   var SLIDE_W = 960 * 20, SLIDE_H = 540 * 20; // twips (16:9)
 
   // ---- model + ops -----------------------------------------------------------
@@ -554,7 +560,7 @@
       if (view.drawMode || view.present || ev.button !== 0) return;
       var box = ev.target.closest ? ev.target.closest(".pttext") : null;
       if (!box || box.isContentEditable) return;
-      texts.setPointerCapture(ev.pointerId);
+      capturePtr(texts, ev);
       var slide = currentSlide(app.project);
       var hit = slide && slideTextById(slide, box.dataset.id);
       if (!hit) return;
@@ -588,7 +594,7 @@
     var activeTool = null;
     stage.addEventListener("pointerdown", function (ev) {
       if (!view.drawMode || view.present || ev.button !== 0) return;
-      stage.setPointerCapture(ev.pointerId);
+      capturePtr(stage, ev);
       activeTool = view.app.toolByName(view.app.tool);
       if (activeTool && activeTool.onDown) {
         activeTool.onDown(stageTwips(ev));

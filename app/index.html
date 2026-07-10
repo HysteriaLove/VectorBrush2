@@ -154,7 +154,13 @@
   }
 
   #canvaswrap { flex: 1; position: relative; min-width: 0; }
-  #stage-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #stage-canvas {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    display: block;
+    /* pen drawing surface: without this Windows Ink / touch gestures
+       claim strokes and cancel them mid-drag */
+    touch-action: none;
+  }
   /* y2kshell racks (y2kshell.js — the xRack port): columns of movable
      modules; collapsed = a 32pt tab, drag the tab to rearrange or to
      cross sides, wheel scrolls the column, the inner edge resizes */

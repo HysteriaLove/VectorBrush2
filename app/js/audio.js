@@ -17,6 +17,12 @@
 (function () {
   "use strict";
 
+  // pens can drop their pointer between down and capture (Windows Ink,
+  // out-of-range lift) — the NotFoundError must never kill the handler
+  function capturePtr(el, ev) {
+    try { el.setPointerCapture(ev.pointerId); } catch (e) { /* pen */ }
+  }
+
   var MIN_CLIP_MS = 20;
 
   // ---- model + ops -----------------------------------------------------------
@@ -1059,7 +1065,7 @@
         if (ev.button !== 0 || ev.target === del) return;
         ev.preventDefault();
         view.drag = { kind: "place", asset: asset };
-        row.setPointerCapture(ev.pointerId);
+        capturePtr(row, ev);
       });
       row.addEventListener("pointermove", function (ev) {
         if (!view.drag || view.drag.kind !== "place") return;
@@ -1282,7 +1288,7 @@
     split.addEventListener("pointerdown", function (ev) {
       if (ev.button !== 0) return;
       ev.preventDefault();
-      split.setPointerCapture(ev.pointerId);
+      capturePtr(split, ev);
       var y0 = ev.clientY;
       var h0 = view.board.offsetHeight;
       function onMove(e2) {
@@ -1324,12 +1330,12 @@
       var x = ev.clientX - r.left, y = ev.clientY - r.top;
       if (ev.button === 1) {
         ev.preventDefault();
-        lanes.setPointerCapture(ev.pointerId);
+        capturePtr(lanes, ev);
         view.drag = { kind: "pan", x0: x, pan0: view.panMs };
         return;
       }
       if (ev.button !== 0) return;
-      lanes.setPointerCapture(ev.pointerId);
+      capturePtr(lanes, ev);
       var zone = zoneAt(y);
       if (zone === "panels") {
         // a boundary drag re-times the pair (zone-preserving); any

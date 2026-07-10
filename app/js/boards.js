@@ -16,6 +16,12 @@
 (function () {
   "use strict";
 
+  // pens can drop their pointer between down and capture (Windows Ink,
+  // out-of-range lift) — the NotFoundError must never kill the handler
+  function capturePtr(el, ev) {
+    try { el.setPointerCapture(ev.pointerId); } catch (e) { /* pen */ }
+  }
+
   // ---- model helpers (structure + ops live in spine.js) ---------------------------
   // boards keeps only its SELECTION: the current panel index
 
@@ -216,7 +222,7 @@
       }
       if (!view.drawMode || ev.button !== 0) return;
       retargetDraw();
-      cvs.setPointerCapture(ev.pointerId);
+      capturePtr(cvs, ev);
       view.drawing = true;
       activeTool = app.toolByName(app.tool);
       if (activeTool && activeTool.onDown) {

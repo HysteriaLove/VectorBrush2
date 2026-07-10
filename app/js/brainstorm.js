@@ -23,6 +23,12 @@
 (function () {
   "use strict";
 
+  // pens can drop their pointer between down and capture (Windows Ink,
+  // out-of-range lift) — the NotFoundError must never kill the handler
+  function capturePtr(el, ev) {
+    try { el.setPointerCapture(ev.pointerId); } catch (e) { /* pen */ }
+  }
+
   // ---- model + ops -----------------------------------------------------------
 
   function notesOf(project) {
@@ -509,13 +515,13 @@
       // middle mouse ALWAYS pans
       if (ev.button === 1) {
         ev.preventDefault();
-        board.setPointerCapture(ev.pointerId);
+        capturePtr(board, ev);
         drag = { kind: "pan", p0: { x: ev.clientX, y: ev.clientY },
                  pan0: { x: view.pan.x, y: view.pan.y } };
         return;
       }
       if (ev.button !== 0) return;
-      board.setPointerCapture(ev.pointerId);
+      capturePtr(board, ev);
       // draw mode: route to the real stage tools, in twips
       if (view.drawMode) {
         activeTool = view.app.toolByName(view.app.tool);
