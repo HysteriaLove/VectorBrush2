@@ -3991,6 +3991,20 @@
     var sqRep3 = await VB.replayJournal(JSON.parse(JSON.stringify(sqd.journal)));
     check("boundary drags replay byte-exact",
       sqPlain(sqRep3.project) === sqPlain(sqd.project));
+
+    // the playhead may park ANYWHERE inside an instance: frameSelect
+    // clamps to the scene's longest instance span (frame-hold covers
+    // rendering), not just its drawn frames
+    sqd.exec({ op: "frameSelect", index: 100 });
+    check("the playhead parks mid-instance (span > drawn frames)",
+      sqd.project.cur.frame === 100);
+    sqd.exec({ op: "frameSelect", index: 99999 });
+    check("frameSelect clamps to the instance span",
+      sqd.project.cur.frame === 398);
+    var sqRep4 = await VB.replayJournal(JSON.parse(JSON.stringify(sqd.journal)));
+    check("a mid-instance playhead replays byte-exact",
+      sqRep4.project.cur.frame === 398 &&
+      sqPlain(sqRep4.project) === sqPlain(sqd.project));
   } catch (err) {
     fail++;
     log("  SEQUENCE EXCEPTION: " + (err && err.stack || err), "fail");

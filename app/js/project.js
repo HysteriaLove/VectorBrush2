@@ -274,8 +274,24 @@
     this.cur.frame = Math.min(this.cur.frame, this.frameCount() - 1);
     return true;
   };
+  /** The scene's playable span: its drawn frames, extended to its
+   *  longest sequence instance — the playhead may sit anywhere inside
+   *  an instance (frame-hold shows the last drawn frame), so the
+   *  master timeline can park mid-scene. */
+  Project.prototype.sceneSpan = function () {
+    var span = this.frameCount();
+    if (this.editTarget) return span; // symbol edit: the cell's own frames
+    var sc = this.scenes[this.cur.scene];
+    var id = sc && sc.id;
+    (this.sequence || []).forEach(function (inst) {
+      if (inst.scene === id) {
+        span = Math.max(span, Math.max(1, inst.duration | 0));
+      }
+    });
+    return span;
+  };
   Project.prototype.selectFrame = function (index) {
-    this.cur.frame = Math.max(0, Math.min(this.frameCount() - 1, index));
+    this.cur.frame = Math.max(0, Math.min(this.sceneSpan() - 1, index));
   };
   /** Stage rect for the renderers: the actor canvas in edit mode. */
   Project.prototype.stage = function () {

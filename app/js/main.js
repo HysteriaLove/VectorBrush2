@@ -2298,12 +2298,15 @@
       seqSel = at.inst.id;
       var sc = VB.sceneById(app.project, at.inst.scene);
       if (sc) selectSceneIndex(sc.index);
-      // clicking an instance repositions the playhead to its start
-      // (the reference's scene_select), journal-pinned
-      if (app.project.cur.frame !== 0) {
-        app.exec({ op: "frameSelect", index: 0 });
+      // the playhead parks AT the clicked frame — mid-scene included
+      // (the reference's scene_select carries the clicked frame)
+      var dur = Math.max(1, at.inst.duration | 0);
+      var f = Math.max(at.start, Math.min(at.start + dur - 1,
+        Math.floor(seqFrameAt(p.x))));
+      if (app.project.cur.frame !== f - at.start) {
+        app.exec({ op: "frameSelect", index: f - at.start });
       }
-      VB.audioSeek(at.start * seqFrameMs());
+      VB.audioSeek(f * seqFrameMs());
       seqView.drag = { kind: "maybe-move", inst: at.inst,
                        index: at.index, x0: p.x };
       renderSeqStrip();
@@ -2456,7 +2459,9 @@
 
   function refreshTimeline() {
     var project = app.project;
-    var total = project.frameCount();
+    // the rail spans the scene's longest INSTANCE — hold columns are
+    // clickable, so the playhead can park anywhere inside the scene
+    var total = project.sceneSpan ? project.sceneSpan() : project.frameCount();
     var cur = project.cur.frame || 0;
     var layer = project.activeLayer();
     document.getElementById("tl-counter").textContent =
