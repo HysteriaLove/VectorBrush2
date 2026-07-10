@@ -380,11 +380,21 @@
       }
     }
 
+    var skipped = [];
     for (var i = 0; i < ops.length; i++) {
       skip = !needSnap[i];
       try {
         await applyOp(ctx, ops[i]);
       } catch (err) {
+        if (hooks && hooks.tolerant) {
+          // RECOVERY mode (shell open fallback): ops from a retired
+          // format era must not hold the rest of the project hostage —
+          // skip, collect, keep replaying
+          skipped.push({ index: i, op: ops[i].op,
+                         error: (err && err.message) || String(err) });
+          ctx.sync(); // the op may have died mid-flight
+          continue;
+        }
         // pinpoint the failing op — this message reaches the shell's
         // "Project failed to load" alert
         throw new Error("op #" + (i + 1) + " of " + ops.length + " (" +
@@ -400,7 +410,7 @@
       }
     }
     return { doc: ctx.project.activeCell(), project: ctx.project,
-             history: real };
+             history: real, skipped: skipped };
   }
 
   // Standard integrity sweep used by the replay harness and tests.

@@ -3695,6 +3695,32 @@
     check("replay errors pinpoint the failing op",
       badMsg.indexOf("op #2") >= 0 &&
       badMsg.indexOf("definitely-not-an-op") >= 0, badMsg);
+
+    // RECOVERY: tolerant replay skips ops from retired format eras and
+    // keeps everything else — the shell rewrites the journal from the
+    // survivor list, so it must reproduce the strict replay of the
+    // survivors exactly
+    var tOps = [
+      { op: "new", width: 32000, height: 24000 },
+      { op: "pencil", points: [{ x: 1000, y: 1000 }, { x: 8000, y: 1500 }],
+        style: { width: 20, color: { r: 0, g: 0, b: 0, a: 255 } } },
+      { op: "spineBeatAdd", id: "old_1", text: "retired era" },
+      { op: "pencil", points: [{ x: 1000, y: 5000 }, { x: 8000, y: 5500 }],
+        style: { width: 20, color: { r: 0, g: 0, b: 0, a: 255 } } },
+      { op: "beatAdd", id: "old_2" }
+    ];
+    var tRes = await VB.replayJournal(JSON.parse(JSON.stringify(tOps)),
+                                      { tolerant: true });
+    check("tolerant replay skips dead ops and keeps the art",
+      tRes.skipped.length === 2 && tRes.skipped[0].index === 2 &&
+      tRes.skipped[1].index === 4 && tRes.doc.edges.length === 2,
+      JSON.stringify(tRes.skipped) + " · " + tRes.doc.edges.length + " edges");
+    var tKeep = tOps.filter(function (_, ti) {
+      return ti !== 2 && ti !== 4;
+    });
+    var tClean = await VB.replayJournal(JSON.parse(JSON.stringify(tKeep)));
+    check("survivor journal replays strictly to the same document",
+      JSON.stringify(tClean.doc.edges) === JSON.stringify(tRes.doc.edges));
   } catch (err) {
     fail++;
     log("  REOPEN EXCEPTION: " + (err && err.stack || err), "fail");

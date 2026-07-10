@@ -271,27 +271,70 @@
     }
     var ops = VB.joinJournalSegments(jsons);
     var statusEl = document.getElementById("home-status");
-    var res;
-    try {
-      res = await VB.replayJournal(JSON.parse(JSON.stringify(ops)), {
-        // yields per chunk (the tab stays responsive) and shows the
-        // work — a big journal must read as loading, not a hang
-        onProgress: function (done, total) {
-          if (statusEl) {
-            statusEl.textContent =
-              "Opening — " + done + " / " + total + " ops…";
-          }
+    var hooks = {
+      // yields per chunk (the tab stays responsive) and shows the
+      // work — a big journal must read as loading, not a hang
+      onProgress: function (done, total) {
+        if (statusEl) {
+          statusEl.textContent =
+            "Opening — " + done + " / " + total + " ops…";
         }
-      });
+      }
+    };
+    var res, recovered = null;
+    try {
+      try {
+        res = await VB.replayJournal(JSON.parse(JSON.stringify(ops)), hooks);
+      } catch (strictErr) {
+        // Strict replay refused — journals from a retired format era
+        // carry ops the engine no longer defines. RECOVER: replay
+        // tolerantly (dead ops skip, everything else lands), back the
+        // dropped ops up inside the package, and rewrite the journal
+        // so it replays strictly clean from now on.
+        if (statusEl) statusEl.textContent = "Recovering project…";
+        hooks.tolerant = true;
+        res = await VB.replayJournal(JSON.parse(JSON.stringify(ops)), hooks);
+        recovered = res.skipped;
+        if (!recovered.length) throw strictErr; // not an op-shaped failure
+      }
     } finally {
       if (statusEl) statusEl.textContent = "";
     }
+    var keep = ops;
+    if (recovered) {
+      var deadIdx = {};
+      recovered.forEach(function (s) { deadIdx[s.index] = true; });
+      keep = ops.filter(function (_, i) { return !deadIdx[i]; });
+      await handle.writeUnit(
+        "recovered/dropped-" + Date.now() + ".json",
+        JSON.stringify({
+          note: "ops skipped by open recovery — kept for forensics",
+          dropped: recovered.map(function (s) {
+            return { index: s.index, error: s.error, op: ops[s.index] };
+          })
+        }));
+      var cleanSegs = VB.segmentJournal(keep, SEG_OPS);
+      for (var w = 0; w < cleanSegs.length; w++) {
+        await handle.writeUnit(cleanSegs[w].path, cleanSegs[w].json);
+      }
+      for (var z = cleanSegs.length; z < segPaths.length; z++) {
+        await handle.deleteUnit(
+          "journal/seg-" + String(z + 1).padStart(5, "0") + ".json");
+      }
+      await handle.flushManifest({
+        format: "y2kproj", version: 1, ops: keep.length, saved: Date.now()
+      });
+      alert("Project recovered — " + recovered.length + " op" +
+            (recovered.length === 1 ? "" : "s") +
+            " from an older format were skipped (backed up inside " +
+            "the project). Everything else is intact.");
+    }
     var sess = new VB.Session({});
-    ops.forEach(function (op) { sess.journal.push(op); });
+    keep.forEach(function (op) { sess.journal.push(op); });
     sess.project = res.project;
     var st = persistState(sess);
-    st.flushedOps = ops.length;
-    st.segCount = Math.ceil(ops.length / SEG_OPS);
+    st.flushedOps = keep.length;
+    st.segCount = Math.ceil(keep.length / SEG_OPS);
     // the undo history does not survive reopen — journal the marker so
     // replay clears its rebuilt stack at the same spot (an undo pressed
     // right after opening is a no-op in BOTH live and replay)
