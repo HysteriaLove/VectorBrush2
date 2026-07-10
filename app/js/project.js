@@ -59,6 +59,9 @@
     // Pitch (pitch.js): a sequential slide deck; each slide is a
     // y2kvector cell. Rides the journal.
     this.pitch = { slides: [], cur: 0 };
+    // Boards (boards.js): storyboard beats → panels (y2kvector cells,
+    // durations, attached Story line ids). Rides the journal.
+    this.boards = { beats: [], cur: { beat: 0, panel: 0 } };
     // Actor edit mode (Flash's symbol-edit): when set, scene()/stage()/
     // activeCell() resolve to the targeted actor cell, so every tool,
     // renderer, and journaled art op follows. Set ONLY through the
@@ -150,6 +153,18 @@
         if (slides[si2].id === t.pitchSlide) {
           return { cell: slides[si2].cell, actor: null,
                    label: "pitch ▸ slide " + (si2 + 1) };
+        }
+      }
+      return null;
+    }
+    if (t.boardPanel) {
+      var beats = (this.boards && this.boards.beats) || [];
+      for (var bb = 0; bb < beats.length; bb++) {
+        for (var pp = 0; pp < beats[bb].panels.length; pp++) {
+          if (beats[bb].panels[pp].id === t.boardPanel) {
+            return { cell: beats[bb].panels[pp].cell, actor: null,
+                     label: beats[bb].name + " ▸ panel " + (pp + 1) };
+          }
         }
       }
       return null;

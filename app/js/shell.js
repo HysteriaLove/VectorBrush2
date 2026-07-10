@@ -35,7 +35,9 @@
     pitch: { el: "pitch-view",
              view: function () { return VB.PitchView; } },
     writing: { el: "writing-view",
-               view: function () { return VB.WritingView; } }
+               view: function () { return VB.WritingView; } },
+    storyboards: { el: "boards-view",
+                   view: function () { return VB.BoardsView; } }
   };
 
   // Tab names decided 2026-07-10 (Architecture §2); internal ids stay
@@ -44,8 +46,7 @@
     { id: "brainstorm", label: "Notepad", mount: "brainstorm", note: "" },
     { id: "pitch", label: "Pitch", mount: "pitch", note: "" },
     { id: "writing", label: "Story", mount: "writing", note: "" },
-    { id: "storyboards", label: "Boards",
-      note: "Panels and beats, playable as an animatic — Architecture §6.4." },
+    { id: "storyboards", label: "Boards", mount: "storyboards", note: "" },
     { id: "audio", label: "Audio",
       note: "Stems → edits → the baked master track — Architecture §6.5." },
     { id: "roughs", label: "Roughs", editor: true, note: "" },

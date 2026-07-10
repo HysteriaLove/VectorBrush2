@@ -52,6 +52,7 @@
 <script src="../js/brainstorm.js"></script>
 <script src="../js/pitch.js"></script>
 <script src="../js/writing.js"></script>
+<script src="../js/boards.js"></script>
 <script src="../js/text.js"></script>
 <script src="../js/debug.js"></script>
 <script src="../js/pencil.js"></script>
@@ -3016,6 +3017,81 @@
   } catch (err) {
     fail++;
     log("  VISUAL EXCEPTION: " + (err && err.stack || err), "fail");
+  }
+
+  // ================================ boards ====================================
+  // Storyboards: beats → panels (y2kvector cells, durations, attached
+  // Story line ids). Line flow is two-way — a panel edit of a line IS
+  // the Story blockEdit op. The animatic order/length are pure model.
+  log("");
+  log("boards:");
+  try {
+    var dse = new VB.Session({ width: 11000, height: 8000 });
+    // a Story line to attach
+    dse.exec({ op: "writingDocAdd", id: "bwd" });
+    dse.exec({ op: "blockAdd", doc: "bwd", id: "bline", kind: "line",
+               character: "MIRA", text: "We jump on three." });
+    dse.exec({ op: "beatAdd", id: "bt1" });
+    dse.exec({ op: "beatAdd", id: "bt2", name: "The Jump" });
+    dse.exec({ op: "panelAdd", beat: "bt1", id: "pn1" });
+    dse.exec({ op: "panelAdd", beat: "bt1", id: "pn2" });
+    dse.exec({ op: "panelAdd", beat: "bt2", id: "pn3", duration: 48 });
+    check("beats and panels land in order",
+      dse.project.boards.beats.length === 2 &&
+      dse.project.boards.beats[0].panels.length === 2 &&
+      dse.project.boards.beats[1].name === "The Jump" &&
+      VB.boardsFlatten(dse.project).map(function (e) {
+        return e.panel.id; }).join(",") === "pn1,pn2,pn3" &&
+      VB.boardsTotalFrames(dse.project) === 24 + 24 + 48,
+      VB.boardsTotalFrames(dse.project) + " frames");
+    dse.exec({ op: "panelDuration", id: "pn2", frames: 12 });
+    check("durations clamp and apply",
+      VB.boardsPanelById(dse.project, "pn2").panel.duration === 12 &&
+      VB.boardsTotalFrames(dse.project) === 24 + 12 + 48);
+    dse.exec({ op: "panelLineAttach", panel: "pn1", line: "bline" });
+    dse.exec({ op: "panelLineAttach", panel: "pn1", line: "bline" }); // dedupe
+    check("lines attach once by id",
+      VB.boardsPanelById(dse.project, "pn1").panel.lines.join(",") === "bline");
+    // two-way edit: the panel-side edit is the Story blockEdit op
+    dse.exec({ op: "blockEdit", doc: "bwd", block: "bline",
+               lang: "default", text: "We jump NOW." });
+    check("panel-side line edits change the Story doc",
+      VB.lineTextOf(VB.lineById(dse.project, "bline").block) === "We jump NOW.");
+    dse.exec({ op: "editTargetSet", target: { boardPanel: "pn3" } });
+    check("board panel edit target retargets the active cell",
+      dse.project.activeCell() ===
+      VB.boardsPanelById(dse.project, "pn3").panel.cell &&
+      dse.project.resolveEditCell().label === "The Jump ▸ panel 1");
+    dse.exec({ op: "pencil",
+               points: [{ x: 2000, y: 5000 }, { x: 15000, y: 5400 }],
+               style: { width: 20, color: { r: 0, g: 0, b: 0, a: 255 } } });
+    dse.exec({ op: "editTargetClear" });
+    check("panel ink lands in the panel cell",
+      VB.boardsPanelById(dse.project, "pn3").panel.cell.edges.length > 0 &&
+      VB.boardsPanelById(dse.project, "pn1").panel.cell.edges.length === 0);
+    dse.exec({ op: "panelMove", id: "pn2", index: 0, beat: "bt2" });
+    check("panels move across beats",
+      dse.project.boards.beats[0].panels.length === 1 &&
+      dse.project.boards.beats[1].panels.map(function (p) {
+        return p.id; }).join(",") === "pn2,pn3");
+    var dRep = await VB.replayJournal(JSON.parse(JSON.stringify(dse.journal)));
+    check("boards replay byte-exact",
+      JSON.stringify(dRep.project.boards.beats.map(function (bt) {
+        return [bt.id, bt.name, bt.panels.map(function (p) {
+          return [p.id, p.duration, p.lines, p.cell.edges]; })];
+      })) === JSON.stringify(dse.project.boards.beats.map(function (bt) {
+        return [bt.id, bt.name, bt.panels.map(function (p) {
+          return [p.id, p.duration, p.lines, p.cell.edges]; })];
+      })));
+    dse.exec({ op: "beatRemove", beat: "bt2" });
+    dse.exec({ op: "undo" });
+    check("beat removal undoes with panels, ink, and line refs",
+      dse.project.boards.beats.length === 2 &&
+      VB.boardsPanelById(dse.project, "pn3").panel.cell.edges.length > 0 &&
+      VB.boardsPanelById(dse.project, "pn1").panel.lines.join(",") === "bline");
+  } catch (err) {
+    fail++;
+    log("  BOARDS EXCEPTION: " + (err && err.stack || err), "fail");
   }
 
   // ================================ pitch =====================================

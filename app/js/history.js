@@ -126,6 +126,20 @@
           return { id: s.id, cell: snapshotDoc(s.cell) };
         })
       },
+      // panel.lines arrays are copy-on-write (boards.js contract), so
+      // sharing them by reference is safe; duration mutates in place,
+      // hence the shallow panel copy
+      boards: {
+        cur: JSON.parse(JSON.stringify((target.boards || {}).cur ||
+                                       { beat: 0, panel: 0 })),
+        beats: ((target.boards || {}).beats || []).map(function (bt) {
+          return { id: bt.id, name: bt.name,
+                   panels: bt.panels.map(function (p) {
+                     return { id: p.id, duration: p.duration,
+                              lines: p.lines, cell: snapshotDoc(p.cell) };
+                   }) };
+        })
+      },
       scenes: target.scenes.map(function (sc) {
         return {
           name: sc.name,
@@ -171,6 +185,19 @@
         var cell = new VB.Y2KVectorDocument();
         restoreDoc(cell, s.cell);
         return { id: s.id, cell: cell };
+      })
+    };
+    target.boards = {
+      cur: JSON.parse(JSON.stringify((snap.boards || {}).cur ||
+                                     { beat: 0, panel: 0 })),
+      beats: ((snap.boards || {}).beats || []).map(function (bt) {
+        return { id: bt.id, name: bt.name,
+                 panels: bt.panels.map(function (p) {
+                   var cell = new VB.Y2KVectorDocument();
+                   restoreDoc(cell, p.cell);
+                   return { id: p.id, duration: p.duration,
+                            lines: p.lines, cell: cell };
+                 }) };
       })
     };
     target.scenes = snap.scenes.map(function (sc) {
