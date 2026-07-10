@@ -219,19 +219,26 @@
   #xbar-bottom button:hover { background: var(--btn-hover); }
   #xbar-bottom button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 
-  /* thin tool columns — they disappear off to their side */
+  /* thin tool columns — floating icon clusters, centered against the
+     canvas edge; they disappear off to their side */
   .y2kxcol {
-    flex: none; display: flex; flex-direction: column;
-    background: var(--panel);
+    flex: none; display: flex; flex-direction: column; align-items: center;
+    width: 56px;
+    background: transparent;
     user-select: none;
   }
-  #xcol-left { border-right: 1px solid var(--panel-edge); }
-  #xcol-right { border-left: 1px solid var(--panel-edge); width: 56px; }
-  #xcol-left #tools { border-right: none; }
+  #xcol-left #tools {
+    border-right: none; background: none; width: auto; padding: 0;
+  }
   .y2kxcolbody {
-    flex: 1; min-height: 0; overflow-y: auto;
+    flex: none; max-height: 80%;
+    margin: auto 4px; /* the cluster floats mid-column */
+    overflow-y: auto;
     display: flex; flex-direction: column; align-items: center; gap: 10px;
-    padding: 8px 4px;
+    padding: 10px 5px;
+    background: var(--panel);
+    border: 1px solid var(--panel-edge); border-radius: 10px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.14);
   }
   #xcol-right .ctl { flex-direction: column; gap: 2px; }
   #xcol-right .ctl input[type="number"] { width: 44px; }
@@ -243,6 +250,14 @@
     cursor: pointer; font-size: 9px;
   }
   .y2kxcoltoggle:hover { color: var(--accent); background: var(--hover); }
+
+  /* an empty rack stays visible as a drop target */
+  .y2krackhint {
+    position: absolute; inset: 0; display: none;
+    align-items: center; justify-content: center;
+    color: var(--text-dim); font-size: 11px;
+  }
+  .y2krack.bare .y2krackhint { display: flex; }
 
   /* collapsed racks leave a slim reveal strip at their side */
   .y2krack.closed { display: none; }
@@ -262,16 +277,22 @@
   .y2kdrawer { flex: none; display: flex; flex-direction: column; }
   .y2kdrawer.closed > :not(.y2kdrawerhandle) { display: none !important; }
   .y2kdrawerhandle {
-    flex: none; height: 10px; cursor: pointer;
+    flex: none; height: 13px; cursor: pointer;
     background: var(--panel);
     border-bottom: 1px solid var(--panel-edge);
     display: flex; align-items: center; justify-content: center;
+    gap: 8px;
+    color: var(--text-dim); font-size: 8px; line-height: 1;
+    user-select: none;
   }
-  .y2kdrawerhandle::before {
+  .y2kdrawerhandle::before, .y2kdrawerhandle::after {
     content: ""; width: 44px; height: 3px; border-radius: 2px;
     background: var(--text-dim); opacity: 0.55;
   }
-  .y2kdrawerhandle:hover::before { opacity: 1; background: var(--accent); }
+  .y2kdrawerhandle:hover { color: var(--accent); }
+  .y2kdrawerhandle:hover::before, .y2kdrawerhandle:hover::after {
+    opacity: 1; background: var(--accent);
+  }
   #scenebar {
     display: flex; gap: 4px; padding: 6px;
     border-bottom: 1px solid var(--panel-edge);
@@ -1064,6 +1085,12 @@
   <div id="audio-view"></div>
 
   <div id="middle">
+    <div id="rack-left" class="y2krack">
+      <div class="y2krackedge" data-side="left" title="Drag to resize the rack"></div>
+      <div class="y2krackhint">drag panels here</div>
+    </div>
+    <div class="y2krackreveal" data-side="left"
+         title="Open the left rack">⯈</div>
     <div id="xcol-left" class="y2kxcol">
     <button class="y2kxcoltoggle" data-col="left"
             title="Collapse / expand the tool column">⯇</button>
@@ -1083,11 +1110,6 @@
     </div>
     </div>
     </div>
-    <div id="rack-left" class="y2krack empty">
-      <div class="y2krackedge" data-side="left" title="Drag to resize the rack"></div>
-    </div>
-    <div class="y2krackreveal" data-side="left"
-         title="Open the left rack">⯈</div>
     <div id="canvaswrap">
       <canvas id="stage-canvas"></canvas>
       <div id="editcrumb" class="hidden">
@@ -1096,6 +1118,27 @@
       </div>
       <div id="ctxmenu" class="hidden"></div>
       <div id="toast"></div>
+    </div>
+    <div id="xcol-right" class="y2kxcol">
+      <button class="y2kxcoltoggle" data-col="right"
+              title="Collapse / expand the color column">⯈</button>
+      <div class="y2kxcolbody">
+        <label class="ctl" title="Stroke color">
+          ✎<input type="color" id="stroke-color" value="#000000">
+        </label>
+        <label class="ctl" title="Stroke width (px)">
+          <input type="number" id="stroke-width" value="1" min="0.05" max="10" step="0.25">
+        </label>
+        <label class="ctl" title="Fill color (brush + bucket)">
+          🪣<input type="color" id="fill-color" value="#66ccff">
+        </label>
+        <label class="ctl" title="Brush size (px)">
+          🖌<input type="number" id="brush-size" value="10" min="1" max="100" step="1">
+        </label>
+        <label class="ctl" title="Eraser size (px)">
+          🧽<input type="number" id="eraser-size" value="20" min="2" max="100" step="2">
+        </label>
+      </div>
     </div>
     <div id="rack-right" class="y2krack">
       <div class="y2krackedge" data-side="right" title="Drag to resize the rack"></div>
@@ -1185,27 +1228,6 @@
     </div>
     <div class="y2krackreveal" data-side="right"
          title="Open the right rack">⯇</div>
-    <div id="xcol-right" class="y2kxcol">
-      <button class="y2kxcoltoggle" data-col="right"
-              title="Collapse / expand the color column">⯈</button>
-      <div class="y2kxcolbody">
-        <label class="ctl" title="Stroke color">
-          ✎<input type="color" id="stroke-color" value="#000000">
-        </label>
-        <label class="ctl" title="Stroke width (px)">
-          <input type="number" id="stroke-width" value="1" min="0.05" max="10" step="0.25">
-        </label>
-        <label class="ctl" title="Fill color (brush + bucket)">
-          🪣<input type="color" id="fill-color" value="#66ccff">
-        </label>
-        <label class="ctl" title="Brush size (px)">
-          🖌<input type="number" id="brush-size" value="10" min="1" max="100" step="1">
-        </label>
-        <label class="ctl" title="Eraser size (px)">
-          🧽<input type="number" id="eraser-size" value="20" min="2" max="100" step="2">
-        </label>
-      </div>
-    </div>
     <div id="debugpanel" class="hidden">
       <div id="dbg-est"></div>
       <div id="dbg-edge"></div>

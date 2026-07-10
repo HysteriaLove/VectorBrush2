@@ -1836,15 +1836,15 @@
         var el = racks[side];
         if (!el) return;
         var rack = state.racks[side];
-        var closed = !rack.open || rack.modules.length === 0;
+        var closed = !rack.open; // empty racks stay visible (drop targets)
         el.classList.toggle("closed", closed);
+        el.classList.toggle("bare", rack.modules.length === 0);
         el.classList.remove("empty");
         el.style.width = Math.max(S.RACK_MIN, rack.width || S.RACK_DEFAULT) + "px";
         var reveal = document.querySelector(
           '.y2krackreveal[data-side="' + side + '"]');
         if (reveal) {
-          reveal.classList.toggle("show",
-            closed && rack.modules.length > 0);
+          reveal.classList.toggle("show", closed);
           reveal.textContent = side === "left" ? "⯈" : "⯇";
         }
         S.clampRackScroll(state, side, el.clientHeight || 600);
@@ -1870,7 +1870,14 @@
       });
       ["top", "bottom"].forEach(function (which) {
         var drawer = document.getElementById("drawer-" + which);
-        if (drawer) drawer.classList.toggle("closed", !state.drawers[which].open);
+        if (!drawer) return;
+        var open = state.drawers[which].open;
+        drawer.classList.toggle("closed", !open);
+        var handle = drawer.querySelector(".y2kdrawerhandle");
+        if (handle) { // the chevron states the action, not the state
+          handle.textContent = which === "top"
+            ? (open ? "▲" : "▼") : (open ? "▼" : "▲");
+        }
       });
       persist();
     }
