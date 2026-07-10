@@ -1,12 +1,17 @@
-/* boards.js — the Boards workspace (Architecture §6.4): the deck over
- * the story SPINE's flat PANEL list (spine.js, PreProductionSpine.md,
- * panel-driven revision). One container: the panel — its art cell is
- * drawn here through the journaled editTarget; its text field and
- * dialogue rows read and write the SAME script rows the Story editor
- * renders (op routing through writing.* — one script, two views).
- * Panel numbering is presentation (index + 1). The animatic plays
- * panels in order, each held for its duration at project.fps, with the
- * panel's full story text as subtitles. Thin UI, real model.
+/* boards.js — the Boards workspace (Architecture §6.4): a production
+ * BOARD PAGE over the story spine's flat panel list (spine.js,
+ * PreProductionSpine.md). Each panel is a SELF-CONTAINED CARD in the
+ * page — a header strip (Scene · Panel · Time · Frames, like a paper
+ * board), its own small DRAWABLE frame (the panel's y2kvector cell,
+ * drawn in place with the real stage tools through the journaled
+ * editTarget, safe-area guides included), and a Dialog box holding the
+ * panel's script rows (action + dialogue), op-routed through writing.*
+ * (one script, two views). Scene numbers derive from setting runs.
+ *
+ * Cards are RECONCILED, never rebuilt (keyed by panel id) so pointer
+ * capture and focus survive the docChanged refresh storm — the same
+ * discipline as the pixi cell cache. The animatic swaps the page for
+ * one full stage and plays panels against the audio clock.
  */
 (function () {
   "use strict";
@@ -49,7 +54,7 @@
     return panelsOf(project)[boardsOf(project).cur.panel] || null;
   }
 
-  /** The panel's first action row — what the deck's text field edits. */
+  /** The panel's first action row — what the card's Dialog box edits. */
   function actionRowOf(panel) {
     for (var i = 0; i < panel.rows.length; i++) {
       if (panel.rows[i].kind === "action") return panel.rows[i];
@@ -70,7 +75,7 @@
     return id;
   }
 
-  // ---- workspace view (deck-style, like Pitch) -----------------------------------
+  // ---- workspace view: the board page of panel cards ------------------------------
 
   var DRAW_TOOLS = [
     ["select", "➤", "Select / marquee (V)"],
@@ -88,187 +93,242 @@
   DRAW_TOOLS.forEach(function (t) { DRAW_SET[t[0]] = true; });
 
   var view = {
-    host: null, app: null, stage: null, strip: null, captionEl: null,
-    toolStrip: null, drawBtn: null, durInput: null, ro: null,
-    drawMode: false,
+    host: null, app: null, grid: null, stage: null,
+    toolStrip: null, drawBtn: null, xpanels: [], ro: null,
+    drawMode: false, drawing: false,
+    cards: {}, // panel id -> card (reconciled, never rebuilt)
     animatic: { playing: false, raf: 0, last: 0, ms: 0, at: 0, frame: 0,
                 audio: false }
   };
-
-  function stageMetrics() {
-    var w = view.stage.clientWidth, h = view.stage.clientHeight;
-    var zoom = Math.min(w / (PANEL_W / VB.TWIPS), h / (PANEL_H / VB.TWIPS)) * 0.94;
-    return {
-      zoom: zoom,
-      panX: (w - (PANEL_W / VB.TWIPS) * zoom) / 2,
-      panY: (h - (PANEL_H / VB.TWIPS) * zoom) / 2
-    };
-  }
-
-  function stageTwips(ev) {
-    var rect = view.stage.getBoundingClientRect();
-    var m = stageMetrics();
-    return {
-      x: (ev.clientX - rect.left - m.panX) / m.zoom * VB.TWIPS,
-      y: (ev.clientY - rect.top - m.panY) / m.zoom * VB.TWIPS
-    };
-  }
-
-  function drawPanelToStage(panel, subtitle) {
-    var cvs = view.stage;
-    var w = cvs.clientWidth, h = cvs.clientHeight;
-    if (!w || !h) return;
-    if (cvs.width !== w || cvs.height !== h) { cvs.width = w; cvs.height = h; }
-    var ctx = cvs.getContext("2d");
-    if (!panel) {
-      var theme = getComputedStyle(document.body);
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.fillStyle = theme.getPropertyValue("--bg").trim() || "#e4e6e9";
-      ctx.fillRect(0, 0, w, h);
-      ctx.fillStyle = theme.getPropertyValue("--text-dim").trim() || "#6b7079";
-      ctx.font = "13px system-ui";
-      ctx.textAlign = "center";
-      ctx.fillText("no panels yet — ＋ Panel starts the story",
-                   w / 2, h / 2);
-      return;
-    }
-    var m = stageMetrics();
-    VB.render(ctx, panel.cell, {
-      zoom: m.zoom, panX: m.panX, panY: m.panY, dpr: 1
-    });
-    if (view.drawMode && !view.animatic.playing) {
-      var tool = view.app.toolByName(view.app.tool);
-      if (tool && tool.drawOverlay) {
-        var s = m.zoom / VB.TWIPS;
-        ctx.setTransform(s, 0, 0, s, m.panX, m.panY);
-        try { tool.drawOverlay(ctx); } catch (e) { /* overlay only */ }
-      }
-    }
-    if (subtitle) {
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.font = "16px system-ui";
-      ctx.textAlign = "center";
-      var lines = subtitle.split("\n");
-      var y = h - 16 - (lines.length - 1) * 22;
-      lines.forEach(function (ln) {
-        var tw = ctx.measureText(ln).width;
-        ctx.fillStyle = "#000000b0";
-        ctx.fillRect(w / 2 - tw / 2 - 8, y - 16, tw + 16, 22);
-        ctx.fillStyle = "#fff";
-        ctx.fillText(ln, w / 2, y);
-        y += 22;
-      });
-    }
-  }
-
-  function subtitleFor(panel) {
-    if (!panel) return "";
-    return VB.spinePanelText(view.app.project, panel);
-  }
-
-  function renderStage() {
-    if (!view.stage) return;
-    var panel = currentPanel(view.app.project);
-    drawPanelToStage(panel, view.animatic.playing ? subtitleFor(panel) : "");
-  }
-
-  function isEditingCaption() {
-    return document.activeElement === view.captionEl;
-  }
-
-  // The deck's text field IS the panel's action row — editing it here
-  // writes the script through the owning writing.* ops (op routing)
-  function commitCaption() {
-    if (!view.captionEl) return;
-    var panel = currentPanel(view.app.project);
-    if (!panel) return;
-    var val = view.captionEl.value;
-    var row = actionRowOf(panel);
-    if (row) {
-      if (val !== (row.content || "")) {
-        exec({ op: "blockEdit", block: row.id, content: val });
-      }
-    } else if (val.trim() !== "") {
-      exec({ op: "blockAdd", id: VB.actorNewId("blk"), panel: panel.id,
-             index: 0, kind: "action", content: val });
-    }
-  }
-
-  function refresh() {
-    if (!view.host) return;
-    var project = view.app.project;
-    var current = currentPanel(project);
-
-    view.strip.innerHTML = "";
-    panelsOf(project).forEach(function (panel, i) {
-      var isCur = panel === current;
-      var hasArt = panel.cell.edges.length > 0 ||
-                   panel.cell.texts.length > 0;
-      var cellEl = document.createElement("div");
-      cellEl.className = "ptthumb" + (isCur ? " cur" : "") +
-        (hasArt ? "" : " bdslot"); // undrawn panel = dashed slot
-      var line = VB.spinePanelText(project, panel).split("\n")[0];
-      cellEl.title = "Panel " + (i + 1) + " · " + panel.duration + "f" +
-        (line ? " · " + line : "") + (hasArt ? "" : " · no drawing yet");
-      if (hasArt) {
-        var tc = document.createElement("canvas");
-        tc.width = 96;
-        tc.height = 54;
-        cellEl.appendChild(tc);
-        var cached = VB.thumbGet("panel:" + panel.id, panel.cell);
-        var paint = function (cv) {
-          if (cv && tc.isConnected) tc.getContext("2d").drawImage(cv, 0, 0);
-        };
-        if (cached) paint(cached);
-        else VB.thumbRequest("panel:" + panel.id, panel.cell,
-                             96, 54, i).then(paint);
-      } else {
-        var mark = document.createElement("div");
-        mark.className = "bdslotmark";
-        mark.textContent = String(i + 1);
-        cellEl.appendChild(mark);
-      }
-      var num = document.createElement("span");
-      num.textContent = panel.duration + "f";
-      cellEl.appendChild(num);
-      cellEl.addEventListener("click", function () {
-        stopAnimatic();
-        commitCaption();
-        exec({ op: "boardsSelect", panel: i });
-        if (view.drawMode) retargetDraw();
-      });
-      view.strip.appendChild(cellEl);
-    });
-
-    if (view.captionEl && !isEditingCaption()) {
-      var action = current && actionRowOf(current);
-      view.captionEl.value = action ? (action.content || "") : "";
-      view.captionEl.disabled = !current;
-    }
-    renderLines();
-    if (view.durInput && current &&
-        document.activeElement !== view.durInput) {
-      view.durInput.value = String(current.duration);
-    }
-    if (view.drawBtn) view.drawBtn.classList.toggle("active", view.drawMode);
-    syncToolStrip();
-    renderStage();
-  }
 
   function exec(op) {
     view.app.exec(op);
     refresh();
   }
 
-  // the current panel's dialogue as editable rows — every commit is the
-  // owning writing.* op, so the script editor sees it instantly
-  function renderLines() {
-    if (!view.linesEl) return;
-    if (view.linesEl.contains(document.activeElement)) return;
-    view.linesEl.innerHTML = "";
+  /** Commit any in-progress card edit (blur fires the commit). */
+  function flushCardEdits() {
+    var el = document.activeElement;
+    if (el && view.grid && view.grid.contains(el)) el.blur();
+  }
+
+  function editingInGrid() {
+    var el = document.activeElement;
+    return !!(el && view.grid && view.grid.contains(el) &&
+              (el.isContentEditable || el.tagName === "INPUT" ||
+               el.tagName === "TEXTAREA"));
+  }
+
+  // ---- the card's drawable frame ---------------------------------------------------
+
+  function cardMetrics(panel, cvs) {
+    var w = cvs.clientWidth, h = cvs.clientHeight;
+    var cw = panel.cell.width / VB.TWIPS, ch = panel.cell.height / VB.TWIPS;
+    var zoom = Math.min(w / cw, h / ch);
+    return { zoom: zoom, w: w, h: h,
+             panX: (w - cw * zoom) / 2, panY: (h - ch * zoom) / 2 };
+  }
+
+  function cardTwips(panel, cvs, ev) {
+    var rect = cvs.getBoundingClientRect();
+    var m = cardMetrics(panel, cvs);
+    return {
+      x: (ev.clientX - rect.left - m.panX) / m.zoom * VB.TWIPS,
+      y: (ev.clientY - rect.top - m.panY) / m.zoom * VB.TWIPS
+    };
+  }
+
+  function drawCardFrame(panel, cvs, isCur) {
+    var dpr = window.devicePixelRatio || 1;
+    var w = cvs.clientWidth, h = cvs.clientHeight;
+    if (!w || !h) return;
+    if (cvs.width !== Math.round(w * dpr)) {
+      cvs.width = Math.round(w * dpr);
+      cvs.height = Math.round(h * dpr);
+    }
+    var ctx = cvs.getContext("2d");
+    var m = cardMetrics(panel, cvs);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    VB.render(ctx, panel.cell, {
+      zoom: m.zoom, panX: m.panX, panY: m.panY, dpr: dpr
+    });
+    // safe-area guides (paper-board style): a light inner frame plus
+    // dashed side margins — presentation only, never exported
+    var x0 = m.panX, y0 = m.panY;
+    var fw = w - 2 * m.panX, fh = h - 2 * m.panY;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.strokeStyle = "rgba(120,126,134,0.45)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x0 + fw * 0.05, y0 + fh * 0.05, fw * 0.9, fh * 0.9);
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(x0 + fw * 0.125, y0 + 2);
+    ctx.lineTo(x0 + fw * 0.125, y0 + fh - 2);
+    ctx.moveTo(x0 + fw * 0.875, y0 + 2);
+    ctx.lineTo(x0 + fw * 0.875, y0 + fh - 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // the live tool overlay rides the CURRENT card while drawing
+    if (isCur && view.drawMode && !view.animatic.playing) {
+      var tool = view.app.toolByName(view.app.tool);
+      if (tool && tool.drawOverlay) {
+        var s = m.zoom / VB.TWIPS;
+        ctx.setTransform(dpr * s, 0, 0, dpr * s,
+                         dpr * m.panX, dpr * m.panY);
+        try { tool.drawOverlay(ctx); } catch (e) { /* overlay only */ }
+      }
+    }
+  }
+
+  // ---- card construction + reconcile ------------------------------------------------
+
+  function headField(label) {
+    var box = document.createElement("div");
+    box.className = "bdheadfield";
+    var lab = document.createElement("span");
+    lab.className = "bdheadlab";
+    lab.textContent = label;
+    box.appendChild(lab);
+    var val = document.createElement("span");
+    val.className = "bdheadval";
+    box.appendChild(val);
+    return { box: box, val: val };
+  }
+
+  function createCard(panel) {
+    var app = view.app;
+    var root = document.createElement("div");
+    root.className = "bdcard";
+    root.dataset.panel = panel.id;
+
+    // header strip: Scene · Panel · Time · Frames (the paper form)
+    var head = document.createElement("div");
+    head.className = "bdhead";
+    var fScene = headField("Scene");
+    var fPanel = headField("Panel");
+    var fTime = headField("Time");
+    var fFrames = headField("Frames");
+    fFrames.val.remove();
+    var frames = document.createElement("input");
+    frames.type = "number";
+    frames.min = "1";
+    frames.max = "9999";
+    frames.className = "bdframesin";
+    frames.title = "Hold this panel for N frames (at the project fps)";
+    frames.addEventListener("change", function () {
+      var v = parseInt(frames.value, 10);
+      if (isFinite(v)) exec({ op: "panelDuration", id: panel.id, frames: v });
+    });
+    frames.addEventListener("keydown", function (ev) {
+      ev.stopPropagation();
+    });
+    fFrames.box.appendChild(frames);
+    head.appendChild(fScene.box);
+    head.appendChild(fPanel.box);
+    head.appendChild(fTime.box);
+    head.appendChild(fFrames.box);
+    root.appendChild(head);
+
+    // the self-contained drawable frame
+    var cvs = document.createElement("canvas");
+    cvs.className = "bdframe";
+    root.appendChild(cvs);
+
+    var activeTool = null;
+    cvs.addEventListener("pointerdown", function (ev) {
+      if (view.animatic.playing) { stopAnimatic(); return; }
+      flushCardEdits();
+      var hit = panelById(app.project, panel.id);
+      if (!hit) return;
+      if (boardsOf(app.project).cur.panel !== hit.index) {
+        exec({ op: "boardsSelect", panel: hit.index });
+      }
+      if (!view.drawMode || ev.button !== 0) return;
+      retargetDraw();
+      cvs.setPointerCapture(ev.pointerId);
+      view.drawing = true;
+      activeTool = app.toolByName(app.tool);
+      if (activeTool && activeTool.onDown) {
+        activeTool.onDown(cardTwips(panel, cvs, ev));
+        drawCardFrame(panel, cvs, true);
+      }
+    });
+    cvs.addEventListener("pointermove", function (ev) {
+      if (!activeTool) return;
+      if (activeTool.onMove) activeTool.onMove(cardTwips(panel, cvs, ev));
+      drawCardFrame(panel, cvs, true);
+    });
+    function endStroke(ev, cancel) {
+      if (!activeTool) return;
+      var t = activeTool;
+      activeTool = null;
+      view.drawing = false;
+      if (cancel) { if (t.cancel) t.cancel(); }
+      else if (t.onUp) t.onUp(cardTwips(panel, cvs, ev));
+      refresh();
+    }
+    cvs.addEventListener("pointerup", function (ev) { endStroke(ev, false); });
+    cvs.addEventListener("pointercancel", function (ev) { endStroke(ev, true); });
+    cvs.style.touchAction = "none";
+
+    // the Dialog box: the panel's script rows, edited in place
+    var dialog = document.createElement("div");
+    dialog.className = "bddialog";
+    var dlab = document.createElement("span");
+    dlab.className = "bddialoglab";
+    dlab.textContent = "Dialog";
+    dialog.appendChild(dlab);
+    var action = document.createElement("div");
+    action.className = "bdaction";
+    action.contentEditable = "true";
+    action.dataset.ph = "action…";
+    action.addEventListener("blur", function () {
+      var val = action.innerText.replace(/\n+$/, "");
+      var hit = panelById(app.project, panel.id);
+      if (!hit) return;
+      var row = actionRowOf(hit.panel);
+      if (row) {
+        if (val !== (row.content || "")) {
+          exec({ op: "blockEdit", block: row.id, content: val });
+        }
+      } else if (val.trim() !== "") {
+        exec({ op: "blockAdd", id: VB.actorNewId("blk"), panel: panel.id,
+               index: 0, kind: "action", content: val });
+      }
+    });
+    action.addEventListener("keydown", function (ev) {
+      if (ev.key === "Escape") action.blur();
+      ev.stopPropagation();
+    });
+    dialog.appendChild(action);
+    var lines = document.createElement("div");
+    lines.className = "bdlines";
+    dialog.appendChild(lines);
+    var add = document.createElement("button");
+    add.className = "bdaddline";
+    add.textContent = "＋ dialogue";
+    add.title = "Add a dialogue line to this panel's script";
+    add.addEventListener("click", function () {
+      exec({ op: "blockAdd", id: VB.actorNewId("line"),
+             panel: panel.id, kind: "line", character: "", text: "" });
+      var whos = lines.querySelectorAll(".bdwho");
+      if (whos.length) whos[whos.length - 1].focus();
+    });
+    dialog.appendChild(add);
+    root.appendChild(dialog);
+
+    var card = { root: root, cvs: cvs, frames: frames, action: action,
+                 lines: lines, scene: fScene.val, num: fPanel.val,
+                 time: fTime.val };
+    view.cards[panel.id] = card;
+    return card;
+  }
+
+  function renderCardLines(card, panel) {
     var project = view.app.project;
-    var panel = currentPanel(project);
-    if (!panel) return;
+    if (card.lines.contains(document.activeElement)) return;
+    card.lines.innerHTML = "";
     panel.rows.forEach(function (b) {
       if (b.kind !== "line") return;
       var row = document.createElement("div");
@@ -310,19 +370,63 @@
       row.appendChild(who);
       row.appendChild(say);
       row.appendChild(del);
-      view.linesEl.appendChild(row);
+      card.lines.appendChild(row);
     });
-    var add = document.createElement("button");
-    add.className = "bdaddline";
-    add.textContent = "＋ dialogue";
-    add.title = "Add a dialogue line to this panel's script";
-    add.addEventListener("click", function () {
-      exec({ op: "blockAdd", id: VB.actorNewId("line"),
-             panel: panel.id, kind: "line", character: "", text: "" });
-      var rows = view.linesEl.querySelectorAll(".bdwho");
-      if (rows.length) rows[rows.length - 1].focus();
+  }
+
+  function updateCard(card, panel, index, sceneNo, isCur) {
+    var fps = view.app.project.fps || 24;
+    card.root.classList.toggle("cur", isCur);
+    card.scene.textContent = String(sceneNo);
+    card.num.textContent = String(index + 1);
+    card.time.textContent =
+      (Math.max(1, panel.duration | 0) / fps).toFixed(1) + "s";
+    if (document.activeElement !== card.frames) {
+      card.frames.value = String(panel.duration);
+    }
+    if (document.activeElement !== card.action) {
+      var row = actionRowOf(panel);
+      card.action.innerText = row ? (row.content || "") : "";
+    }
+    renderCardLines(card, panel);
+    drawCardFrame(panel, card.cvs, isCur);
+  }
+
+  function refresh() {
+    if (!view.host || !view.grid) return;
+    if (view.drawing) return; // never rebuild under a live stroke
+    var project = view.app.project;
+    var panels = panelsOf(project);
+    var cur = boardsOf(project).cur.panel;
+    // scene numbers derive from setting runs
+    var runOf = [];
+    VB.spineSceneRuns(project).forEach(function (run, ri) {
+      for (var i = run.from; i <= run.to; i++) runOf[i] = ri + 1;
     });
-    view.linesEl.appendChild(add);
+    // reconcile: create/update in order, only re-append when order drifts
+    var want = [];
+    panels.forEach(function (panel, i) {
+      var card = view.cards[panel.id] || createCard(panel);
+      updateCard(card, panel, i, runOf[i] || 1, i === cur);
+      want.push(card.root);
+    });
+    Object.keys(view.cards).forEach(function (id) {
+      if (!panelById(project, id)) {
+        view.cards[id].root.remove();
+        delete view.cards[id];
+      }
+    });
+    var have = Array.prototype.filter.call(view.grid.children,
+      function (k) { return k.classList.contains("bdcard"); });
+    var same = have.length === want.length && want.every(function (el, i) {
+      return have[i] === el;
+    });
+    if (!same && !editingInGrid()) {
+      want.forEach(function (el) { view.grid.appendChild(el); });
+    }
+    view.grid.classList.toggle("empty", panels.length === 0);
+    if (view.drawBtn) view.drawBtn.classList.toggle("active", view.drawMode);
+    syncToolStrip();
   }
 
   function retargetDraw() {
@@ -356,7 +460,46 @@
     }
   }
 
-  // ---- animatic ----------------------------------------------------------------
+  // ---- animatic (one full stage; the reel swaps the page in/out) -------------------
+
+  function subtitleFor(panel) {
+    if (!panel) return "";
+    return VB.spinePanelText(view.app.project, panel);
+  }
+
+  function drawPanelToStage(panel, subtitle) {
+    var cvs = view.stage;
+    var w = cvs.clientWidth, h = cvs.clientHeight;
+    if (!w || !h) return;
+    if (cvs.width !== w || cvs.height !== h) { cvs.width = w; cvs.height = h; }
+    var ctx = cvs.getContext("2d");
+    if (!panel) return;
+    var cw = panel.cell.width / VB.TWIPS, ch = panel.cell.height / VB.TWIPS;
+    var zoom = Math.min(w / cw, h / ch) * 0.94;
+    var m = { zoom: zoom, panX: (w - cw * zoom) / 2,
+              panY: (h - ch * zoom) / 2 };
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, w, h);
+    VB.render(ctx, panel.cell, {
+      zoom: m.zoom, panX: m.panX, panY: m.panY, dpr: 1
+    });
+    if (subtitle) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.font = "16px system-ui";
+      ctx.textAlign = "center";
+      var lines = subtitle.split("\n");
+      var y = h - 16 - (lines.length - 1) * 22;
+      lines.forEach(function (ln) {
+        var tw = ctx.measureText(ln).width;
+        ctx.fillStyle = "#000000b0";
+        ctx.fillRect(w / 2 - tw / 2 - 8, y - 16, tw + 16, 22);
+        ctx.fillStyle = "#fff";
+        ctx.fillText(ln, w / 2, y);
+        y += 22;
+      });
+    }
+  }
 
   // The reel plays panels against a millisecond clock. When the project
   // has audio clips, the AUDIO is the master clock (drift-free leica
@@ -366,7 +509,7 @@
     var flat = panelsOf(view.app.project);
     if (view.animatic.playing || flat.length === 0) return;
     if (view.drawMode) setDrawMode(false);
-    commitCaption();
+    flushCardEdits();
     var an = view.animatic;
     an.playing = true;
     an.at = 0;
@@ -435,10 +578,13 @@
     refresh();
   }
 
+  // ---- keys, mount, unmount ---------------------------------------------------------
+
   function onKeyDown(ev) {
     if (!view.host) return;
     var tag = ev.target && ev.target.tagName;
     if (tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT") return;
+    if (ev.target && ev.target.isContentEditable) return;
     if (view.animatic.playing &&
         (ev.key === "Escape" || ev.key === " " || ev.key === "Enter")) {
       ev.preventDefault();
@@ -459,7 +605,7 @@
     if (view.drawMode && (ev.key === "Delete" || ev.key === "Backspace")) {
       if (view.app.deleteSelection && view.app.deleteSelection()) {
         ev.preventDefault();
-        renderStage();
+        refresh();
       }
       return;
     }
@@ -486,13 +632,9 @@
       if (toolKeys[k]) {
         view.app.switchTool(toolKeys[k]);
         syncToolStrip();
-        renderStage();
+        refresh();
       }
     }
-  }
-
-  function onViewResize() {
-    renderStage();
   }
 
   function mount(host, app) {
@@ -501,6 +643,7 @@
     view.host = host;
     view.app = app;
     host.innerHTML = "";
+    view.cards = {};
 
     // toolpanels join the floating ISLANDS (the core xRack UI
     // language) and leave with the workspace
@@ -529,7 +672,7 @@
     panelsPanel.appendChild(toolBtn("＋ Panel",
       "New story moment — one panel, one script row",
       function () {
-        commitCaption();
+        flushCardEdits();
         var project = app.project;
         var cur = currentPanel(project);
         var at = cur ? panelById(project, cur.id).index + 1
@@ -566,27 +709,7 @@
       exec({ op: "panelRemove", id: panel.id });
     }));
 
-    var durLabel = document.createElement("label");
-    durLabel.className = "ctl";
-    durLabel.title = "Panel duration in frames (at the project fps)";
-    var durInput = document.createElement("input");
-    durInput.type = "number";
-    durInput.min = "1";
-    durInput.max = "9999";
-    durInput.style.width = "52px";
-    durInput.addEventListener("change", function () {
-      var panel = currentPanel(app.project);
-      var frames = parseInt(durInput.value, 10);
-      if (panel && isFinite(frames)) {
-        exec({ op: "panelDuration", id: panel.id, frames: frames });
-      }
-    });
-    durLabel.appendChild(durInput);
-    durLabel.appendChild(document.createTextNode(" frames"));
-    panelsPanel.appendChild(durLabel);
-    view.durInput = durInput;
-
-    view.drawBtn = toolBtn("✎ Draw", "Draw on the panel with the stage tools",
+    view.drawBtn = toolBtn("✎ Draw", "Draw on panels with the stage tools",
       function () { setDrawMode(!view.drawMode); });
     var drawPanel = xpanel("draw");
     drawPanel.appendChild(view.drawBtn);
@@ -602,118 +725,57 @@
       b.addEventListener("click", function () {
         view.app.switchTool(t[0]);
         syncToolStrip();
-        renderStage();
+        refresh();
       });
       strip.appendChild(b);
     });
     view.toolStrip = strip;
     drawPanel.appendChild(strip);
 
-    xpanel("animatic").appendChild(toolBtn("▶ Animatic", "Play the whole board as an animatic",
+    xpanel("animatic").appendChild(toolBtn("▶ Animatic",
+      "Play the whole board as an animatic",
       function () {
         if (view.animatic.playing) stopAnimatic(); else startAnimatic();
       }));
 
-
-    var body = document.createElement("div");
-    body.id = "bd-body";
+    // the board page (cards) + the animatic stage (swapped by class)
+    var grid = document.createElement("div");
+    grid.id = "bd-grid";
+    grid.dataset.ph = "no panels yet — ＋ Panel starts the story";
+    host.appendChild(grid);
+    view.grid = grid;
     var stage = document.createElement("canvas");
     stage.id = "bd-stage";
-    body.appendChild(stage);
-    host.appendChild(body);
-
-    var caption = document.createElement("textarea");
-    caption.id = "bd-caption";
-    caption.rows = 2;
-    caption.placeholder = "the beat's action text — this IS the script…";
-    caption.addEventListener("blur", commitCaption);
-    caption.addEventListener("keydown", function (ev) { ev.stopPropagation(); });
-    host.appendChild(caption);
-    view.captionEl = caption;
-
-    // the beat's dialogue — real script Lines, edited from the deck
-    // through the owning writing.* ops (op routing)
-    var linesEl = document.createElement("div");
-    linesEl.id = "bd-lines";
-    host.appendChild(linesEl);
-    view.linesEl = linesEl;
-
-    var stripEl = document.createElement("div");
-    stripEl.id = "bd-strip";
-    host.appendChild(stripEl);
+    host.appendChild(stage);
     view.stage = stage;
-    view.strip = stripEl;
-
-    var activeTool = null;
-    stage.addEventListener("pointerdown", function (ev) {
-      if (view.animatic.playing) { stopAnimatic(); return; }
-      if (!view.drawMode || ev.button !== 0) return;
-      stage.setPointerCapture(ev.pointerId);
-      activeTool = view.app.toolByName(view.app.tool);
-      if (activeTool && activeTool.onDown) {
-        activeTool.onDown(stageTwips(ev));
-        renderStage();
-      }
-    });
-    stage.addEventListener("pointermove", function (ev) {
-      if (!activeTool) return;
-      if (activeTool.onMove) {
-        activeTool.onMove(stageTwips(ev));
-        renderStage();
-      }
-    });
-    stage.addEventListener("pointerup", function (ev) {
-      if (!activeTool) return;
-      if (activeTool.onUp) activeTool.onUp(stageTwips(ev));
-      activeTool = null;
-      renderStage();
-    });
-    stage.addEventListener("pointercancel", function () {
-      if (activeTool && activeTool.cancel) activeTool.cancel();
-      activeTool = null;
-    });
-    // right-click a marquee/lasso selection → send it to the library
-    stage.addEventListener("contextmenu", function (ev) {
-      if (!view.drawMode || view.animatic.playing) return;
-      var clip = view.app.currentSelectionClip &&
-                 view.app.currentSelectionClip();
-      if (!clip) return;
-      view.app.showMenu(ev.clientX, ev.clientY, [
-        { label: "Convert to Symbol",
-          fn: view.app.convertSelectionToSymbol }
-      ]);
+    stage.addEventListener("pointerdown", function () {
+      if (view.animatic.playing) stopAnimatic();
     });
 
     window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("resize", onViewResize);
     if (window.ResizeObserver) {
-      view.ro = new ResizeObserver(onViewResize);
-      view.ro.observe(body);
+      view.ro = new ResizeObserver(function () {
+        if (!view.animatic.playing) refresh();
+      });
+      view.ro.observe(host);
     }
     refresh();
   }
 
   function unmount() {
     if (!view.host) return;
+    flushCardEdits();
+    stopAnimatic();
+    if (view.drawMode) setDrawMode(false);
+    window.removeEventListener("keydown", onKeyDown);
+    if (view.ro) { view.ro.disconnect(); view.ro = null; }
     (view.xpanels || []).forEach(function (p) { p.remove(); });
     view.xpanels = [];
-    stopAnimatic();
-    commitCaption();
-    window.removeEventListener("keydown", onKeyDown);
-    window.removeEventListener("resize", onViewResize);
-    if (view.ro) { view.ro.disconnect(); view.ro = null; }
-    var t = view.app && view.app.project.editTarget;
-    if (view.drawMode && t && t.boardPanel) {
-      view.app.exec({ op: "editTargetClear" });
-    }
-    view.drawMode = false;
-    view.host.classList.remove("animatic");
     view.host.innerHTML = "";
     view.host = null;
+    view.grid = null;
     view.stage = null;
-    view.strip = null;
-    view.captionEl = null;
-    view.linesEl = null;
+    view.cards = {};
   }
 
   window.VB = window.VB || {};

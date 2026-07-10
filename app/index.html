@@ -704,81 +704,92 @@
   }
   #bd-hint { color: var(--text-dim); font-size: 11px; margin-left: auto; }
   #bd-toolstrip { display: inline-flex; gap: 2px; margin-left: 4px; }
-  #bd-body { flex: 1; min-height: 0; display: flex; }
-  #bd-stage { flex: 1; width: 100%; height: 100%; touch-action: none; }
-  #bd-caption {
-    flex: none; margin: 0; resize: none;
-    background: var(--field); color: var(--text);
-    border: none; border-top: 1px solid var(--panel-edge);
-    padding: 6px 10px; font: 13px/1.4 system-ui, sans-serif;
-    outline: none;
+
+  /* the BOARD PAGE: self-contained panel cards (paper-board form —
+     header strip, drawable frame with safe guides, Dialog box) */
+  #bd-grid {
+    flex: 1; min-height: 0; overflow-y: auto;
+    display: flex; flex-wrap: wrap; gap: 16px;
+    align-content: flex-start;
+    padding: 18px;
   }
-  #bd-strip {
-    flex: none; height: 74px;
-    display: flex; gap: 6px; align-items: center;
-    padding: 0 10px; overflow-x: auto;
-    background: var(--panel);
-    border-top: 1px solid var(--panel-edge);
+  #bd-grid.empty::before {
+    content: attr(data-ph); color: var(--text-dim); margin: auto;
   }
-  #boards-view.animatic #bd-caption,
-  #boards-view.animatic #bd-strip { display: none; }
-  /* the beat's dialogue — script Lines edited from the deck */
-  #bd-lines {
-    flex: none; display: flex; flex-wrap: wrap; gap: 4px;
-    align-items: center;
-    background: var(--panel);
-    border-top: 1px solid var(--row-edge);
-    font-size: 12px; padding: 4px 10px;
+  .bdcard {
+    width: 400px; flex: none;
+    display: flex; flex-direction: column;
+    background: #fdfdfa; color: #1b1b1b;
+    border: 1.5px solid #202327; border-radius: 2px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.14);
   }
+  .bdcard.cur { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .bdhead {
+    display: flex; border-bottom: 1.5px solid #202327;
+    background: #fff;
+  }
+  .bdheadfield {
+    flex: 1; min-width: 0; padding: 2px 6px 3px;
+    border-right: 1px solid #202327;
+    display: flex; flex-direction: column;
+  }
+  .bdheadfield:last-child { border-right: none; }
+  .bdheadlab {
+    font: 8px/1.4 system-ui, sans-serif; text-transform: capitalize;
+    color: #6b6f76;
+  }
+  .bdheadval { font: 600 14px/1.2 "Segoe Print", "Comic Sans MS", cursive; }
+  .bdframesin {
+    width: 100%; border: none; background: none; outline: none;
+    font: 600 14px/1.2 "Segoe Print", "Comic Sans MS", cursive;
+    color: inherit; padding: 0;
+  }
+  .bdframe {
+    width: 100%; aspect-ratio: 16 / 9; display: block;
+    background: #ffffff; border-bottom: 1.5px solid #202327;
+    touch-action: none;
+  }
+  .bdcard.cur .bdframe { cursor: crosshair; }
+  .bddialog { min-height: 58px; padding: 2px 8px 6px; }
+  .bddialoglab {
+    display: block;
+    font: 8px/1.6 system-ui, sans-serif; color: #6b6f76;
+  }
+  .bdaction {
+    outline: none; min-height: 1.3em; user-select: text;
+    -webkit-user-select: text; white-space: pre-wrap;
+    font: 13px/1.4 "Segoe Print", "Comic Sans MS", cursive;
+  }
+  .bdaction:empty::before { content: attr(data-ph); color: #b0ada0; }
+  .bdlines { margin-top: 2px; }
   .bdline {
     display: flex; align-items: center; gap: 4px;
-    background: var(--field); border: 1px solid var(--panel-edge);
-    border-radius: 3px; padding: 2px 4px;
-    color: var(--text);
+    padding: 1px 0;
   }
   .bdline input {
     background: none; border: none; outline: none;
-    color: var(--text); font: 12px system-ui, sans-serif;
+    border-bottom: 1px dotted #d8d4c6;
+    color: inherit; font: 12px/1.4 "Segoe Print", "Comic Sans MS", cursive;
   }
-  .bdwho { width: 72px; text-transform: uppercase; font-weight: 600; }
-  .bdsay { width: 220px; }
+  .bdwho { width: 70px; text-transform: uppercase; font-weight: 700; }
+  .bdsay { flex: 1; min-width: 0; }
   .bdline button {
-    background: none; border: none; color: var(--text-dim);
+    background: none; border: none; color: #9a988c;
     cursor: pointer; padding: 0 2px;
   }
   .bdaddline {
-    background: none; border: 1px dashed var(--panel-edge);
-    border-radius: 3px; color: var(--text-dim);
-    font-size: 11px; padding: 2px 8px; cursor: pointer;
+    background: none; border: 1px dashed #c9c5b6;
+    border-radius: 3px; color: #9a988c;
+    font-size: 10px; padding: 1px 8px; cursor: pointer; margin-top: 3px;
   }
   .bdaddline:hover { color: var(--accent); border-color: var(--accent); }
-  /* a written-but-undrawn panel: a dashed slot awaiting its drawing */
-  .ptthumb.bdslot {
-    display: flex; align-items: center; justify-content: center;
-    border-style: dashed; color: var(--text-dim);
+
+  /* the animatic swaps the page for one full stage */
+  #bd-stage { display: none; touch-action: none; }
+  #boards-view.animatic #bd-grid { display: none; }
+  #boards-view.animatic #bd-stage {
+    display: block; flex: 1; width: 100%; min-height: 0;
   }
-  .bdslotmark { font-size: 15px; opacity: 0.7; }
-  #bd-beats {
-    flex: none; max-height: 190px; overflow-y: auto;
-    background: var(--panel);
-    border-top: 1px solid var(--panel-edge);
-    padding: 4px 10px;
-  }
-  .bdbeat { margin-bottom: 4px; }
-  .bdbeathead {
-    display: flex; align-items: center; gap: 4px;
-    color: var(--text-dim); font-size: 11px; padding: 2px 0;
-  }
-  .bdbeathead .aname { color: var(--text); }
-  .bdbeathead button {
-    background: var(--field); color: var(--text);
-    border: 1px solid var(--panel-edge); border-radius: 3px;
-    width: 20px; height: 18px; font-size: 10px; cursor: pointer; padding: 0;
-  }
-  .bdpanels { display: flex; gap: 6px; overflow-x: auto; padding: 2px 0 4px; }
-  #boards-view.animatic #bd-tools,
-  #boards-view.animatic #bd-beats,
-  #boards-view.animatic #bd-lines { display: none; }
 
   /* Pitch workspace (pitch.js) — sequential slide deck */
   #pt-tools {
