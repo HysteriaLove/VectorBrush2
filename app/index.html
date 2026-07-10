@@ -10,65 +10,75 @@
      these variables; body.theme-dark below restores the original dark
      palette when a theme toggle lands. */
   :root {
-    --bg: #e4e6e9;
-    --panel: #f2f3f5;
-    --panel-edge: #c6cad0;
-    --text: #24262a;
-    --text-dim: #6b7079;
-    --accent: #2f7fd6;
+    /* a contemporary Tailwind-slate palette (user spec: larger, more
+       contemporary) — surfaces slate-50/100, borders slate-200/300,
+       text slate-800, accent blue-600 */
+    --bg: #f1f5f9;
+    --panel: #f8fafc;
+    --panel-edge: #d7dee7;
+    --text: #1e293b;
+    --text-dim: #64748b;
+    --accent: #2563eb;
     --field: #ffffff;
-    --btn: #e9ebee;
-    --btn-edge: #c2c6cc;
-    --btn-hover: #dde0e4;
-    --btn-active: #cfd3d9;
-    --hover: #cfe0f5;
-    --chrome: #d6d9dd;
+    --btn: #ffffff;
+    --btn-edge: #cbd5e1;
+    --btn-hover: #eef2f7;
+    --btn-active: #e2e8f0;
+    --hover: #dbeafe;
+    --chrome: #e2e8f0;
     --menu: #ffffff;
     --overlay: #ffffffe6;
-    --row-edge: rgba(0,0,0,0.07);
-    --dots: #cdd1d6;
-    --cell-filled: #b9c0c9;
-    --marquee-fill: #2f7fd626;
-    --checker-a: #dfe2e6;
-    --checker-b: #c8ccd2;
-    --ok: #2e8b2e;
-    --watch: #96790f;
-    --warn: #b0761a;
-    --hot: #d03030;
-    --rec: #b023a8;
+    --row-edge: rgba(15,23,42,0.07);
+    --dots: #cbd5e1;
+    --cell-filled: #b6c2d2;
+    --marquee-fill: #2563eb26;
+    --checker-a: #e2e8f0;
+    --checker-b: #cbd5e1;
+    --ok: #16a34a;
+    --watch: #a16207;
+    --warn: #d97706;
+    --hot: #dc2626;
+    --rec: #c026d3;
+    --radius: 8px;
+    --radius-sm: 6px;
+    --shadow-sm: 0 1px 2px rgba(15,23,42,0.06);
+    --shadow-md: 0 4px 12px rgba(15,23,42,0.10);
   }
   body.theme-dark {
-    --bg: #26282c;
-    --panel: #303338;
-    --panel-edge: #1c1e21;
-    --text: #d8dade;
-    --text-dim: #9a9da3;
-    --accent: #4da3ff;
-    --field: #2b2d31;
-    --btn: #3c4046;
-    --btn-edge: #24262a;
-    --btn-hover: #474c53;
-    --btn-active: #2f3237;
-    --hover: #3d5a80;
-    --chrome: #1b1d20;
-    --menu: #16181b;
-    --overlay: #16181be0;
-    --row-edge: rgba(255,255,255,0.04);
-    --dots: #33363b;
-    --cell-filled: #45484e;
-    --marquee-fill: #66ccff22;
-    --checker-a: #2b2d31;
-    --checker-b: #34373c;
-    --ok: #7fbf7f;
-    --watch: #d4c05a;
-    --warn: #e6a23c;
-    --hot: #ff7a7a;
-    --rec: #e24fd8;
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel-edge: #0b1220;
+    --text: #e2e8f0;
+    --text-dim: #94a3b8;
+    --accent: #60a5fa;
+    --field: #172033;
+    --btn: #263349;
+    --btn-edge: #0b1220;
+    --btn-hover: #2f3f59;
+    --btn-active: #1c2739;
+    --hover: #1e3a5f;
+    --chrome: #0b1220;
+    --menu: #0f172a;
+    --overlay: #0f172ae0;
+    --row-edge: rgba(255,255,255,0.05);
+    --dots: #24334b;
+    --cell-filled: #3a4a63;
+    --marquee-fill: #60a5fa22;
+    --checker-a: #172033;
+    --checker-b: #21304a;
+    --ok: #4ade80;
+    --watch: #facc15;
+    --warn: #fb923c;
+    --hot: #f87171;
+    --rec: #e879f9;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.5);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; overflow: hidden; }
   body {
-    font: 13px/1.4 "Segoe UI", system-ui, sans-serif;
+    font: 14px/1.45 "Inter", "Segoe UI Variable", "Segoe UI",
+      system-ui, sans-serif;
     background: var(--bg);
     color: var(--text);
     display: flex;
@@ -77,34 +87,44 @@
   }
 
   .brand {
-    font-weight: 600;
-    letter-spacing: .4px;
-    margin-right: 8px;
+    font-weight: 700;
+    letter-spacing: .3px;
+    margin-right: 10px;
     white-space: nowrap;
   }
   .brand span { color: var(--accent); }
   button {
     font: inherit;
+    font-weight: 500;
     color: var(--text);
     background: var(--btn);
     border: 1px solid var(--btn-edge);
-    border-radius: 4px;
-    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    padding: 6px 14px;
+    min-height: 32px;
     cursor: pointer;
+    box-shadow: var(--shadow-sm);
+    transition: background 0.12s, border-color 0.12s;
   }
   button:hover { background: var(--btn-hover); }
-  button:active { background: var(--btn-active); }
-  button:disabled { opacity: .45; cursor: default; }
+  button:active { background: var(--btn-active); box-shadow: none; }
+  button:disabled { opacity: .45; cursor: default; box-shadow: none; }
   .sep { width: 1px; align-self: stretch; background: var(--panel-edge); margin: 0 4px; }
   .spacer { flex: 1; }
-  .ctl { display: flex; align-items: center; gap: 4px; color: var(--text-dim); font-size: 12px; }
+  .ctl { display: flex; align-items: center; gap: 6px; color: var(--text-dim); font-size: 13px; }
   .ctl input[type="color"] {
-    width: 28px; height: 24px; padding: 0; border: 1px solid var(--btn-edge);
-    border-radius: 4px; background: var(--btn); cursor: pointer;
+    width: 34px; height: 30px; padding: 0; border: 1px solid var(--btn-edge);
+    border-radius: var(--radius-sm); background: var(--btn); cursor: pointer;
   }
   .ctl input[type="number"] {
-    width: 52px; font: inherit; color: var(--text);
-    background: var(--btn); border: 1px solid var(--btn-edge); border-radius: 4px; padding: 3px 6px;
+    width: 60px; font: inherit; color: var(--text);
+    background: var(--field); border: 1px solid var(--btn-edge);
+    border-radius: var(--radius-sm); padding: 5px 8px; min-height: 30px;
+  }
+  select, input[type="text"] {
+    font: inherit; color: var(--text);
+    background: var(--field); border: 1px solid var(--btn-edge);
+    border-radius: var(--radius-sm);
   }
   #islands button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
   #fileinfo { color: var(--text-dim); font-size: 12px; }
@@ -225,28 +245,30 @@
   .y2kxbar { overflow-x: auto; scrollbar-width: none; }
   .y2kxbar::-webkit-scrollbar { display: none; }
   .y2kxpanel {
-    flex: none; display: inline-flex; align-items: center; gap: 6px;
-    padding: 3px 8px 3px 4px;
-    border: 1px solid var(--panel-edge); border-radius: 4px;
-    background: var(--field);
+    flex: none; display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 12px 6px 8px;
+    border: 1px solid var(--panel-edge);
+    border-radius: var(--radius);
+    background: var(--panel);
     cursor: default;
   }
   .y2kxpanel.dragging { opacity: 0.7; }
   .y2kxgrip {
-    color: var(--text-dim); cursor: grab; font-size: 11px;
+    color: var(--text-dim); cursor: grab; font-size: 12px;
     touch-action: none; user-select: none;
   }
   #xbar-bottom {
-    flex: none; display: flex; align-items: center; gap: 8px;
-    padding: 4px 10px;
+    flex: none; display: flex; align-items: center; gap: 10px;
+    padding: 6px 12px;
     background: var(--panel);
     border-top: 1px solid var(--panel-edge);
-    font-size: 12px; color: var(--text);
+    font-size: 13px; color: var(--text);
   }
   #xbar-bottom button {
-    background: var(--field); color: var(--text);
-    border: 1px solid var(--panel-edge); border-radius: 3px;
-    height: 24px; min-width: 26px; cursor: pointer; padding: 0 6px;
+    background: var(--btn); color: var(--text);
+    border: 1px solid var(--btn-edge); border-radius: var(--radius-sm);
+    height: 30px; min-height: 30px; min-width: 32px;
+    cursor: pointer; padding: 0 8px;
   }
   #xbar-bottom button:hover { background: var(--btn-hover); }
   #xbar-bottom button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -513,35 +535,36 @@
   #text-opts input[type=number] { width: 52px; }
   /* workspace bar — the project sections as tabs (Architecture §2) */
   #workspacebar {
-    flex: none; height: 32px;
-    display: flex; align-items: center; gap: 8px;
-    padding: 0 8px;
-    background: var(--chrome);
+    flex: none; height: 44px;
+    display: flex; align-items: center; gap: 10px;
+    padding: 0 12px;
+    background: var(--panel);
     border-bottom: 1px solid var(--panel-edge);
-    font-size: 12px; color: var(--text);
+    font-size: 13px; color: var(--text);
     user-select: none;
+    box-shadow: var(--shadow-sm);
   }
   #workspacebar button {
-    background: var(--field); color: var(--text);
-    border: 1px solid var(--panel-edge); border-radius: 3px;
-    height: 24px; padding: 0 10px; cursor: pointer;
+    background: var(--btn); color: var(--text);
+    border: 1px solid var(--btn-edge); border-radius: var(--radius-sm);
+    height: 30px; min-height: 30px; padding: 0 12px; cursor: pointer;
   }
   #workspacebar button:hover { background: var(--btn-hover); }
   #ws-name {
     color: var(--text-dim); max-width: 160px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  #ws-tabs { flex: 1; display: flex; gap: 2px; overflow-x: auto;
+  #ws-tabs { flex: 1; display: flex; gap: 4px; overflow-x: auto;
              justify-content: center; }
   .wstab {
-    flex: none; padding: 4px 12px; cursor: pointer;
-    color: var(--text-dim); border-radius: 4px 4px 0 0;
-    border: 1px solid transparent; border-bottom: none;
+    flex: none; padding: 6px 14px; cursor: pointer;
+    color: var(--text-dim); border-radius: 999px;
+    font-weight: 500;
+    transition: background 0.12s, color 0.12s;
   }
-  .wstab:hover { color: var(--text); background: var(--bg); }
+  .wstab:hover { color: var(--text); background: var(--btn-active); }
   .wstab.active {
-    color: var(--accent); background: var(--panel);
-    border-color: var(--panel-edge);
+    color: #fff; background: var(--accent);
   }
   /* stub workspaces: future sections mount here; the editor hides */
   #workspace-stub { display: none; }
@@ -558,6 +581,11 @@
   /* mounted workspaces (brainstorm, writing, …): the active container
      covers the editor chrome */
   body.ws-mount-mode #middle { display: none; }
+  /* pre-production sections carry NO production chrome: the playback
+     toolbar + scene/frame timelines hide (Audio has its own sync
+     timeline inside its view) */
+  body.ws-preprod #botdock,
+  body.ws-preprod #dockspace-bottom { display: none; }
   #brainstorm-board, #writing-view, #pitch-view, #boards-view,
   #audio-view, #composite-view { display: none; }
   #brainstorm-board.wsactive, #writing-view.wsactive, #pitch-view.wsactive,
@@ -1188,13 +1216,16 @@
   #seq-strip { flex: 1; min-width: 0; height: 100%; touch-action: none; }
 
   #ctxmenu {
-    position: absolute; z-index: 20; min-width: 180px;
-    background: var(--panel); border: 1px solid var(--panel-edge);
-    border-radius: 4px; box-shadow: 0 6px 18px rgba(0,0,0,0.22);
-    font-size: 12px; color: var(--text); padding: 4px 0;
+    position: absolute; z-index: 20; min-width: 200px;
+    background: var(--menu); border: 1px solid var(--panel-edge);
+    border-radius: var(--radius); box-shadow: var(--shadow-md);
+    font-size: 13px; color: var(--text); padding: 6px;
   }
   #ctxmenu.hidden { display: none; }
-  .ctxitem { padding: 6px 14px; cursor: pointer; }
+  .ctxitem {
+    padding: 8px 12px; cursor: pointer;
+    border-radius: var(--radius-sm);
+  }
   .ctxitem:hover { background: var(--hover); }
   #debugpanel h4 {
     font: 600 11px/1.4 "Segoe UI", sans-serif;
@@ -1226,11 +1257,11 @@
   #statusbar {
     display: flex;
     gap: 18px;
-    padding: 4px 10px;
+    padding: 6px 14px;
     background: var(--panel);
     border-top: 1px solid var(--panel-edge);
     color: var(--text-dim);
-    font-size: 12px;
+    font-size: 12.5px;
     white-space: nowrap;
     overflow: hidden;
   }

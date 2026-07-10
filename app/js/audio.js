@@ -819,7 +819,8 @@
   }
 
   function sideThumb(slot, sp, curIndex) {
-    slot.root.style.visibility = sp ? "visible" : "hidden";
+    // offscreen/absent boards CULL (no reserved gap at the reel ends)
+    slot.root.style.display = sp ? "" : "none";
     if (!sp) return;
     if (slot.cvs.width !== 128) { slot.cvs.width = 128; slot.cvs.height = 72; }
     slot.num.textContent = String(sp.index + 1) + " · " +
@@ -844,12 +845,36 @@
     }
   }
 
+  /** As many side boards as the width affords — the reel fills the
+   *  screen left-to-right and culls offscreen (user spec). */
+  function ensureSideSlots() {
+    var boardW = view.board.clientWidth || 0;
+    var centerW = (view.bmain.cvs.clientWidth || 480) + 60;
+    var perSide = Math.max(1, Math.min(12,
+      Math.floor((boardW - centerW) / 2 / 152)));
+    if (view.bsides.length === perSide * 2) return;
+    view.bsides.forEach(function (s) { s.slot.root.remove(); });
+    view.bsides = [];
+    var o;
+    for (o = -perSide; o <= -1; o++) {
+      var sl = { off: o, slot: makeViewerSlot("au-bside", o) };
+      view.bsides.push(sl);
+      view.board.insertBefore(sl.slot.root, view.bmain.root);
+    }
+    for (o = 1; o <= perSide; o++) {
+      var sr = { off: o, slot: makeViewerSlot("au-bside", o) };
+      view.bsides.push(sr);
+      view.board.appendChild(sr.slot.root);
+    }
+  }
+
   function syncBoardStrip() {
     if (!view.board || !view.app || !view.bmain) return;
     var project = view.app.project;
     var spans = panelSpans(project);
     var cur = panelSpanAt(project, rig.masterMs);
     view.board.classList.toggle("empty", spans.length === 0);
+    ensureSideSlots();
     if (!cur) {
       view.bmain.root.style.visibility = "hidden";
       view.bsides.forEach(function (s) { sideThumb(s.slot, null, 0); });
@@ -1132,23 +1157,13 @@
     view.board.id = "au-board";
     view.board.dataset.ph =
       "the storyboard plays here — panels appear as they are written";
-    // more context around the center (user spec): two boards behind,
-    // three ahead
+    // side slots are created to FILL the width (user spec) — see
+    // ensureSideSlots; the reel culls whatever falls offscreen
     view.bsides = [];
-    [-2, -1, 1, 2, 3].forEach(function (off) {
-      view.bsides.push({ off: off,
-                         slot: makeViewerSlot("au-bside", off) });
-    });
     view.bmain = makeViewerSlot("au-bmain", 0);
     view.bcenterId = null;
     view.bcenterHash = null;
-    view.bsides.forEach(function (s) {
-      if (s.off < 0) view.board.appendChild(s.slot.root);
-    });
     view.board.appendChild(view.bmain.root);
-    view.bsides.forEach(function (s) {
-      if (s.off > 0) view.board.appendChild(s.slot.root);
-    });
     host.appendChild(view.board);
 
     var body = document.createElement("div");
@@ -1336,8 +1351,11 @@
 
     window.addEventListener("keydown", onKeyDown);
     if (window.ResizeObserver) {
-      view.ro = new ResizeObserver(function () { renderLanes(); });
-      view.ro.observe(body);
+      view.ro = new ResizeObserver(function () {
+        syncBoardStrip(); // the reel re-fills the new width
+        renderLanes();
+      });
+      view.ro.observe(host);
     }
     refresh();
   }

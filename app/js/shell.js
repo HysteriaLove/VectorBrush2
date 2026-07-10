@@ -84,6 +84,13 @@
     });
   }
 
+  // pre-production sections carry NO production chrome (user spec):
+  // the scene/frame timelines and the editor-only toolpanels hide —
+  // Audio keeps its own sync timeline inside its view
+  var PREPROD = { brainstorm: 1, pitch: 1, writing: 1,
+                  storyboards: 1, audio: 1 };
+  var EDITOR_PANELS = ["zoom", "debug", "text", "rotate"];
+
   function setSection(id) {
     var sec = sectionById(id) || sectionById("roughs");
     activeSection = sec.id;
@@ -94,6 +101,11 @@
     var mount = sec.mount ? MOUNTS[sec.mount] : null;
     document.body.classList.toggle("ws-stub-mode", !sec.editor && !mount);
     document.body.classList.toggle("ws-mount-mode", !!mount);
+    document.body.classList.toggle("ws-preprod", !!PREPROD[sec.id]);
+    if (app.floatContext) {
+      app.floatContext(PREPROD[sec.id] ? EDITOR_PANELS : []);
+    }
+    if (app.shellRefresh) app.shellRefresh();
     if (!sec.editor && !mount) {
       document.getElementById("ws-stub-title").textContent = sec.label;
       document.getElementById("ws-stub-note").textContent = sec.note;

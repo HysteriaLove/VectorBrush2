@@ -2154,6 +2154,7 @@
       }, { passive: false });
     }
     app.shellState = state; // the timeline views read step.cellW
+    app.shellRefresh = function () { applyShell(); };
 
     // ---- the shared scratchpad --------------------------------------------------
     // The drawer is another VIEW of the Sketchbook's shared vector cell
@@ -2406,7 +2407,7 @@
         var x = x0;
         S.floatRow(state, which).forEach(function (n) {
           var el = panelEls[n];
-          if (!el) return;
+          if (!el || floatHidden[n]) return;
           var w = el.offsetWidth || 100, h = el.offsetHeight || 26;
           if (line.length && x + w > maxW) {
             lines.push({ items: line, h: lineH });
@@ -2440,10 +2441,25 @@
         (rowH.bottom ? rowH.bottom + 12 : 0) + "px");
     }
 
+    // panels the CURRENT WORKSPACE has no use for (pre-production
+    // views hide the editor-only tools — user spec); hidden panels
+    // keep their seats in the state
+    var floatHidden = {};
+
+    app.floatContext = function (hidden) {
+      floatHidden = {};
+      (hidden || []).forEach(function (n) { floatHidden[n] = true; });
+      Object.keys(panelEls).forEach(function (n) {
+        panelEls[n].style.display = floatHidden[n] ? "none" : "";
+      });
+      layoutFloats();
+    };
+
     function adoptPanel(p) {
       var name = p.dataset.panel;
       if (!name || !floatHost) return;
       panelEls[name] = p;
+      p.style.display = floatHidden[name] ? "none" : "";
       // new panels attach to the top bar (the resting toolbar look)
       if (!S.floatGet(state, name)) S.floatDock(state, name, "top");
       if (p.parentElement !== floatHost) floatHost.appendChild(p);
@@ -3652,7 +3668,10 @@
   VB.audioSpaceIntercept = VB.audioSpaceIntercept || [];
   VB.audioSpaceIntercept.push(function () {
     if (seqPlay.playing) { stopSeqPlay(); return true; }
+    // pre-production views have no production timeline — Space falls
+    // through to the raw audio transport there
     if (!document.body.classList.contains("ws-stub-mode") &&
+        !document.body.classList.contains("ws-preprod") &&
         !app.project.editTarget) {
       startSeqPlay();
       return true;
