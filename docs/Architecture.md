@@ -434,6 +434,10 @@ actually built. The DECIDED/PROPOSED markers below respect that.)
 
 ### 6.3 Story (writing)
 
+- The pre-production data design — the story SPINE (slugs → beats →
+  blocks/lines shared with Boards), the ontology ladder, timing
+  ownership, and promotion/drift semantics — is pinned in
+  [PreProductionSpine.md](PreProductionSpine.md) (DESIGN 2026-07-10).
 - Documents (script, outline, loose notes) made of blocks; dialogue
   blocks own **Line objects**: `line_id → { character?, per-language
   text, revision }`.
@@ -468,7 +472,11 @@ actually built. The DECIDED/PROPOSED markers below respect that.)
 - FLAGGED TRICKY (user): board arrangement, categorization, and ordering
   UX has real unknowns — expect this section's information architecture
   (grid vs corkboard vs timeline-first, beat nesting depth) to be worked
-  out during development, not up front.
+  out during development, not up front. The DATA side is now pinned:
+  beats are the story⟷boards interchange unit on the shared spine
+  ([PreProductionSpine.md](PreProductionSpine.md)) — writing a new beat
+  materializes a board frame and vice-versa, while within-beat edits
+  never cross.
 
 ### 6.5 Audio
 
