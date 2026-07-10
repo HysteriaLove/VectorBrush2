@@ -1,16 +1,15 @@
-/* boards.js — the Boards workspace (Architecture §6.4, thin slice):
- * storyboard PANELS grouped into BEATS, playable as an animatic.
+/* boards.js — the Boards workspace (Architecture §6.4): storyboard
+ * PANELS, deck-style like Pitch (user decision 2026-07-10) with a text
+ * entry field at the bottom — the panel's caption, which the animatic
+ * shows as its subtitle.
  *
- * A panel is a y2kvector cell (drawn with the real stage tools through
- * the journaled editTarget), a duration in frames, and attached Story
- * LINE ids. Line flow is two-way (Architecture §6.4): panels attach
- * existing lines by id, and editing a line from a panel is the same
- * blockEdit op the Story workspace uses — one source of truth.
- *
- * The animatic plays panels in beat order, each held for its duration
- * at project.fps, with attached lines as subtitles — the project's
- * first end-to-end preview and the timing seed for Roughs later.
- * Thin UI, real model.
+ * The model keeps BEATS as the grouping container (the deck UI feeds a
+ * default beat for now; beat arrangement UX returns later), and panels
+ * keep attached Story line ids (dormant until the dialogue-id system
+ * lands). A panel is a y2kvector cell drawn with the real stage tools
+ * through the journaled editTarget, a duration in frames, a caption,
+ * and line refs. The animatic plays panels in order, each held for its
+ * duration at project.fps. Thin UI, real model.
  */
 (function () {
   "use strict";
@@ -129,6 +128,7 @@
     hit.beat.panels.splice(at, 0, {
       id: op.id, cell: newPanelCell(),
       duration: op.duration || DEFAULT_DURATION,
+      caption: op.caption || "",
       lines: []
     });
     boardsOf(c.project).cur = { beat: hit.index, panel: at };
@@ -165,17 +165,27 @@
     c.sync();
   });
 
+  /** The panel's text — the entry field at the bottom of the deck;
+   *  the animatic shows it as the subtitle. */
+  VB.defineOp("panelCaption", function (c, op) {
+    var hit = panelById(c.project, op.id);
+    if (!hit) return;
+    c.history.push(c.project);
+    hit.panel.caption = op.text;
+    c.sync();
+  });
+
   VB.defineOp("panelLineAttach", function (c, op) {
     var hit = panelById(c.project, op.panel);
-    if (!hit || hit.panel.lines.indexOf(op.line) >= 0) return;
+    if (!hit || (hit.panel.lines || []).indexOf(op.line) >= 0) return;
     c.history.push(c.project);
-    hit.panel.lines = hit.panel.lines.concat([op.line]); // copy-on-write
+    hit.panel.lines = (hit.panel.lines || []).concat([op.line]); // copy-on-write
     c.sync();
   });
 
   VB.defineOp("panelLineDetach", function (c, op) {
     var hit = panelById(c.project, op.panel);
-    if (!hit || hit.panel.lines.indexOf(op.line) < 0) return;
+    if (!hit || (hit.panel.lines || []).indexOf(op.line) < 0) return;
     c.history.push(c.project);
     hit.panel.lines = hit.panel.lines.filter(function (l) {
       return l !== op.line;
@@ -196,7 +206,7 @@
     return beat ? (beat.panels[boards.cur.panel] || null) : null;
   }
 
-  // ---- workspace view -----------------------------------------------------------
+  // ---- workspace view (deck-style, like Pitch) -----------------------------------
 
   var DRAW_TOOLS = [
     ["pencil", "✎", "Pencil (P)"],
@@ -211,8 +221,8 @@
   DRAW_TOOLS.forEach(function (t) { DRAW_SET[t[0]] = true; });
 
   var view = {
-    host: null, app: null, stage: null, beatsEl: null, linesEl: null,
-    toolStrip: null, drawBtn: null, durInput: null, lineSelect: null,
+    host: null, app: null, stage: null, strip: null, captionEl: null,
+    toolStrip: null, drawBtn: null, durInput: null, ro: null,
     drawMode: false,
     animatic: { playing: false, raf: 0, last: 0, acc: 0, at: 0, frame: 0 }
   };
@@ -249,7 +259,7 @@
       ctx.fillStyle = "#888";
       ctx.font = "13px system-ui";
       ctx.textAlign = "center";
-      ctx.fillText("No panels yet — add a beat, then a panel.", w / 2, h / 2);
+      ctx.fillText("No panels yet — add one.", w / 2, h / 2);
       return;
     }
     var m = stageMetrics();
@@ -282,7 +292,9 @@
   }
 
   function subtitleFor(panel) {
-    if (!panel || !panel.lines.length) return "";
+    if (!panel) return "";
+    if (panel.caption) return panel.caption;
+    if (!panel.lines || !panel.lines.length) return "";
     return panel.lines.map(function (lineId) {
       var hit = VB.lineById(view.app.project, lineId);
       if (!hit) return "";
@@ -294,149 +306,67 @@
   function renderStage() {
     if (!view.stage) return;
     var panel = currentPanel(view.app.project);
-    drawPanelToStage(panel, subtitleFor(panel));
+    drawPanelToStage(panel, view.animatic.playing ? subtitleFor(panel) : "");
+  }
+
+  function isEditingCaption() {
+    return document.activeElement === view.captionEl;
+  }
+
+  function commitCaption() {
+    var panel = currentPanel(view.app.project);
+    if (!panel || !view.captionEl) return;
+    var val = view.captionEl.value;
+    if (val !== (panel.caption || "")) {
+      exec({ op: "panelCaption", id: panel.id, text: val });
+    }
   }
 
   function refresh() {
     if (!view.host) return;
     var project = view.app.project;
     var boards = boardsOf(project);
+    var flat = flattenPanels(project);
+    var current = currentPanel(project);
 
-    view.beatsEl.innerHTML = "";
-    boards.beats.forEach(function (beat, bi) {
-      var row = document.createElement("div");
-      row.className = "bdbeat";
-      var head = document.createElement("div");
-      head.className = "bdbeathead";
-      var nm = document.createElement("span");
-      nm.className = "aname";
-      nm.textContent = beat.name;
-      nm.title = "Double-click to rename";
-      nm.addEventListener("dblclick", function () {
-        var n = prompt("Beat name", beat.name);
-        if (n && n !== beat.name) {
-          exec({ op: "beatRename", beat: beat.id, name: n });
-        }
-      });
-      head.appendChild(nm);
-      function headBtn(label, title, fn) {
-        var b = document.createElement("button");
-        b.textContent = label;
-        b.title = title;
-        b.addEventListener("click", fn);
-        return b;
-      }
-      head.appendChild(headBtn("＋", "Add a panel to this beat", function () {
-        exec({ op: "panelAdd", beat: beat.id, id: VB.actorNewId("panel") });
+    view.strip.innerHTML = "";
+    flat.forEach(function (entry, i) {
+      var panel = entry.panel;
+      var isCur = panel === current;
+      var cellEl = document.createElement("div");
+      cellEl.className = "ptthumb" + (isCur ? " cur" : "");
+      cellEl.title = "Panel " + (i + 1) + " · " + panel.duration + "f" +
+        (panel.caption ? " · " + panel.caption.split("\n")[0] : "");
+      var tc = document.createElement("canvas");
+      tc.width = 96;
+      tc.height = 54;
+      cellEl.appendChild(tc);
+      var cached = VB.thumbGet("panel:" + panel.id, panel.cell);
+      var paint = function (cv) {
+        if (cv && tc.isConnected) tc.getContext("2d").drawImage(cv, 0, 0);
+      };
+      if (cached) paint(cached);
+      else VB.thumbRequest("panel:" + panel.id, panel.cell, 96, 54, i).then(paint);
+      var num = document.createElement("span");
+      num.textContent = panel.duration + "f";
+      cellEl.appendChild(num);
+      cellEl.addEventListener("click", function () {
+        stopAnimatic();
+        commitCaption();
+        var hit = panelById(project, panel.id);
+        exec({ op: "boardsSelect", beat: hit.beatIndex, panel: hit.index });
         if (view.drawMode) retargetDraw();
-      }));
-      head.appendChild(headBtn("◀", "Move beat earlier", function () {
-        exec({ op: "beatMove", beat: beat.id, index: bi - 1 });
-      }));
-      head.appendChild(headBtn("▶", "Move beat later", function () {
-        exec({ op: "beatMove", beat: beat.id, index: bi + 1 });
-      }));
-      head.appendChild(headBtn("✕", "Delete beat (and its panels)", function () {
-        if (!confirm('Delete "' + beat.name + '" and its panels?')) return;
-        if (view.drawMode) setDrawMode(false);
-        exec({ op: "beatRemove", beat: beat.id });
-      }));
-      row.appendChild(head);
-      var strip = document.createElement("div");
-      strip.className = "bdpanels";
-      beat.panels.forEach(function (panel, pi) {
-        var cellEl = document.createElement("div");
-        cellEl.className = "ptthumb" +
-          (bi === boards.cur.beat && pi === boards.cur.panel ? " cur" : "");
-        cellEl.title = beat.name + " · panel " + (pi + 1) + " · " +
-          panel.duration + "f" + (panel.lines.length ?
-          " · " + panel.lines.length + " line(s)" : "");
-        var tc = document.createElement("canvas");
-        tc.width = 96;
-        tc.height = 54;
-        cellEl.appendChild(tc);
-        var cached = VB.thumbGet("panel:" + panel.id, panel.cell);
-        if (cached) {
-          tc.getContext("2d").drawImage(cached, 0, 0);
-        } else {
-          VB.thumbRequest("panel:" + panel.id, panel.cell, 96, 54, pi)
-            .then(function (cv) {
-              if (cv && tc.isConnected) tc.getContext("2d").drawImage(cv, 0, 0);
-            });
-        }
-        var num = document.createElement("span");
-        num.textContent = panel.duration + "f";
-        cellEl.appendChild(num);
-        cellEl.addEventListener("click", function () {
-          stopAnimatic();
-          exec({ op: "boardsSelect", beat: bi, panel: pi });
-          if (view.drawMode) retargetDraw();
-        });
-        strip.appendChild(cellEl);
       });
-      row.appendChild(strip);
-      view.beatsEl.appendChild(row);
+      view.strip.appendChild(cellEl);
     });
 
-    // attached lines of the current panel + the attach picker
-    var panel = currentPanel(project);
-    view.linesEl.innerHTML = "";
-    if (panel) {
-      panel.lines.forEach(function (lineId) {
-        var hit = VB.lineById(project, lineId);
-        var chip = document.createElement("div");
-        chip.className = "bdline" + (hit ? "" : " missing");
-        var txt = document.createElement("span");
-        txt.className = "aname";
-        txt.textContent = hit
-          ? (hit.block.character ? hit.block.character + ": " : "") +
-            VB.lineTextOf(hit.block)
-          : "(missing line " + lineId + ")";
-        txt.title = "Double-click to edit the line (edits the Story doc)";
-        txt.addEventListener("dblclick", function () {
-          if (!hit) return;
-          var next = prompt("Line text (edits the Story document)",
-                            VB.lineTextOf(hit.block));
-          if (next !== null && next !== VB.lineTextOf(hit.block)) {
-            exec({ op: "blockEdit", doc: hit.doc.id, block: hit.block.id,
-                   lang: "default", text: next });
-          }
-        });
-        chip.appendChild(txt);
-        var del = document.createElement("button");
-        del.textContent = "✕";
-        del.title = "Detach line";
-        del.addEventListener("click", function () {
-          exec({ op: "panelLineDetach", panel: panel.id, line: lineId });
-        });
-        chip.appendChild(del);
-        view.linesEl.appendChild(chip);
-      });
+    if (view.captionEl && !isEditingCaption()) {
+      view.captionEl.value = current ? (current.caption || "") : "";
+      view.captionEl.disabled = !current;
     }
-    // picker options: every line in the project
-    var sel = view.lineSelect;
-    sel.innerHTML = "";
-    var lines = [];
-    (project.writing && project.writing.docs || []).forEach(function (doc) {
-      doc.blocks.forEach(function (b) {
-        if (b.kind === "line") lines.push(b);
-      });
-    });
-    var opt0 = document.createElement("option");
-    opt0.value = "";
-    opt0.textContent = lines.length ? "attach a line…" : "no lines in Story yet";
-    sel.appendChild(opt0);
-    lines.forEach(function (b) {
-      var opt = document.createElement("option");
-      opt.value = b.id;
-      var t = (b.character ? b.character + ": " : "") + VB.lineTextOf(b);
-      opt.textContent = t.length > 48 ? t.slice(0, 45) + "…" : t;
-      sel.appendChild(opt);
-    });
-
-    if (view.durInput && panel &&
+    if (view.durInput && current &&
         document.activeElement !== view.durInput) {
-      view.durInput.value = String(panel.duration);
+      view.durInput.value = String(current.duration);
     }
     if (view.drawBtn) view.drawBtn.classList.toggle("active", view.drawMode);
     syncToolStrip();
@@ -446,6 +376,17 @@
   function exec(op) {
     view.app.exec(op);
     refresh();
+  }
+
+  /** The deck UI keeps a default beat under the hood; beat arrangement
+   *  UX comes back later. */
+  function ensureBeat() {
+    var boards = boardsOf(view.app.project);
+    if (!boards.beats.length) {
+      view.app.exec({ op: "beatAdd", id: VB.actorNewId("beat"), name: "Board" });
+    }
+    return boardsOf(view.app.project).beats[
+      boardsOf(view.app.project).cur.beat];
   }
 
   function retargetDraw() {
@@ -485,6 +426,7 @@
     var flat = flattenPanels(view.app.project);
     if (view.animatic.playing || flat.length === 0) return;
     if (view.drawMode) setDrawMode(false);
+    commitCaption();
     var an = view.animatic;
     an.playing = true;
     an.at = 0;
@@ -492,6 +434,7 @@
     an.last = performance.now();
     an.acc = 0;
     view.host.classList.add("animatic");
+    drawPanelToStage(flat[0].panel, subtitleFor(flat[0].panel));
     function tick(now) {
       if (!an.playing) return;
       an.acc += now - an.last;
@@ -561,6 +504,23 @@
       if (view.app.doRedo) view.app.doRedo();
       return;
     }
+    var flat = flattenPanels(view.app.project);
+    if (ev.key === "ArrowRight" && !view.drawMode && flat.length) {
+      var cur = flat.indexOf(flat.filter(function (e) {
+        return e.panel === currentPanel(view.app.project); })[0]);
+      var next = flat[Math.min(flat.length - 1, cur + 1)];
+      var hitN = panelById(view.app.project, next.panel.id);
+      exec({ op: "boardsSelect", beat: hitN.beatIndex, panel: hitN.index });
+      return;
+    }
+    if (ev.key === "ArrowLeft" && !view.drawMode && flat.length) {
+      var cur2 = flat.indexOf(flat.filter(function (e) {
+        return e.panel === currentPanel(view.app.project); })[0]);
+      var prev = flat[Math.max(0, cur2 - 1)];
+      var hitP = panelById(view.app.project, prev.panel.id);
+      exec({ op: "boardsSelect", beat: hitP.beatIndex, panel: hitP.index });
+      return;
+    }
     if (ev.key === "Escape" && view.drawMode) {
       setDrawMode(false);
       return;
@@ -575,6 +535,10 @@
         renderStage();
       }
     }
+  }
+
+  function onViewResize() {
+    renderStage();
   }
 
   function mount(host, app) {
@@ -593,22 +557,24 @@
       b.addEventListener("click", fn);
       return b;
     }
-    bar.appendChild(toolBtn("＋ Beat", "Add a beat (a group of panels)",
+    bar.appendChild(toolBtn("＋ Panel", "Add a panel after the current one",
       function () {
-        exec({ op: "beatAdd", id: VB.actorNewId("beat") });
-      }));
-    bar.appendChild(toolBtn("＋ Panel", "Add a panel to the current beat",
-      function () {
-        var boards = boardsOf(app.project);
-        var beat = boards.beats[boards.cur.beat];
-        if (!beat) {
-          exec({ op: "beatAdd", id: VB.actorNewId("beat") });
-          beat = boardsOf(app.project).beats[boardsOf(app.project).cur.beat];
-        }
+        commitCaption();
+        var beat = ensureBeat();
         exec({ op: "panelAdd", beat: beat.id, id: VB.actorNewId("panel"),
-               index: boards.cur.panel + 1 });
+               index: boardsOf(app.project).cur.panel + 1 });
         if (view.drawMode) retargetDraw();
       }));
+    bar.appendChild(toolBtn("⇤", "Move panel earlier", function () {
+      var panel = currentPanel(app.project);
+      var hit = panel && panelById(app.project, panel.id);
+      if (hit) exec({ op: "panelMove", id: panel.id, index: hit.index - 1 });
+    }));
+    bar.appendChild(toolBtn("⇥", "Move panel later", function () {
+      var panel = currentPanel(app.project);
+      var hit = panel && panelById(app.project, panel.id);
+      if (hit) exec({ op: "panelMove", id: panel.id, index: hit.index + 1 });
+    }));
     bar.appendChild(toolBtn("🗑", "Remove the current panel", function () {
       var panel = currentPanel(app.project);
       if (!panel) return;
@@ -636,19 +602,6 @@
     durLabel.appendChild(document.createTextNode(" frames"));
     bar.appendChild(durLabel);
     view.durInput = durInput;
-
-    var lineSelect = document.createElement("select");
-    lineSelect.id = "bd-linesel";
-    bar.appendChild(lineSelect);
-    view.lineSelect = lineSelect;
-    bar.appendChild(toolBtn("💬 Attach", "Attach the picked Story line to this panel",
-      function () {
-        var panel = currentPanel(app.project);
-        if (panel && lineSelect.value) {
-          exec({ op: "panelLineAttach", panel: panel.id,
-                 line: lineSelect.value });
-        }
-      }));
 
     view.drawBtn = toolBtn("✎ Draw", "Draw on the panel with the stage tools",
       function () { setDrawMode(!view.drawMode); });
@@ -679,7 +632,7 @@
 
     var hint = document.createElement("span");
     hint.id = "bd-hint";
-    hint.textContent = "panels hold for their duration · lines attach from Story · double-click a line chip to edit it";
+    hint.textContent = "←/→ change panels · the text below plays as the panel's subtitle";
     bar.appendChild(hint);
     host.appendChild(bar);
 
@@ -688,16 +641,22 @@
     var stage = document.createElement("canvas");
     stage.id = "bd-stage";
     body.appendChild(stage);
-    var lines = document.createElement("div");
-    lines.id = "bd-lines";
-    body.appendChild(lines);
     host.appendChild(body);
-    var beats = document.createElement("div");
-    beats.id = "bd-beats";
-    host.appendChild(beats);
+
+    var caption = document.createElement("textarea");
+    caption.id = "bd-caption";
+    caption.rows = 2;
+    caption.placeholder = "panel text — action, dialogue, timing notes…";
+    caption.addEventListener("blur", commitCaption);
+    caption.addEventListener("keydown", function (ev) { ev.stopPropagation(); });
+    host.appendChild(caption);
+    view.captionEl = caption;
+
+    var stripEl = document.createElement("div");
+    stripEl.id = "bd-strip";
+    host.appendChild(stripEl);
     view.stage = stage;
-    view.beatsEl = beats;
-    view.linesEl = lines;
+    view.strip = stripEl;
 
     var activeTool = null;
     stage.addEventListener("pointerdown", function (ev) {
@@ -729,15 +688,21 @@
     });
 
     window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("resize", renderStage);
+    window.addEventListener("resize", onViewResize);
+    if (window.ResizeObserver) {
+      view.ro = new ResizeObserver(onViewResize);
+      view.ro.observe(body);
+    }
     refresh();
   }
 
   function unmount() {
     if (!view.host) return;
     stopAnimatic();
+    commitCaption();
     window.removeEventListener("keydown", onKeyDown);
-    window.removeEventListener("resize", renderStage);
+    window.removeEventListener("resize", onViewResize);
+    if (view.ro) { view.ro.disconnect(); view.ro = null; }
     var t = view.app && view.app.project.editTarget;
     if (view.drawMode && t && t.boardPanel) {
       view.app.exec({ op: "editTargetClear" });
@@ -747,8 +712,8 @@
     view.host.innerHTML = "";
     view.host = null;
     view.stage = null;
-    view.beatsEl = null;
-    view.linesEl = null;
+    view.strip = null;
+    view.captionEl = null;
   }
 
   window.VB = window.VB || {};

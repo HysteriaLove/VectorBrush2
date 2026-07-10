@@ -77,7 +77,7 @@ App
 │  ├─ Test Exports   — scratch renders, auto-pruned shelf
 │  └─ Finished Exports — curated deliverables
 └─ Project workspace (one open project)
-   ├─ Notepad │ Pitch │ Story │ Boards │ Audio
+   ├─ Sketchbook │ Pitch │ Story │ Boards │ Audio
    ├─ Roughs │ Actors │ Composite │ Grading
    └─ Export
 ```
@@ -91,7 +91,7 @@ App
   with a name and a lock. Both record WHICH journal revision they were
   rendered from, so any export can be reproduced or diffed later.
 - Section navigation inside a project is a persistent rail (the ten
-  sections in production order — tab names: Notepad, Pitch, Story,
+  sections in production order — tab names: Sketchbook, Pitch, Story,
   Boards, Audio, Roughs, Actors, Composite, Grading, Export; decided
   2026-07-10). Sections lazy-load: opening a project
   loads the manifest + the section you enter, nothing else (§5).
@@ -112,7 +112,7 @@ The reference prototype validates the shape (Managment.py `Project`):
 ```
 Project
 ├─ meta            — title, fps, language list, cover, ids
-├─ notes           — Notepad canvas (infinite, NoteObjects)
+├─ notes           — Sketchbook canvas (infinite, NoteObjects)
 ├─ pitch           — sequential pitch slides (y2kvector cells)
 ├─ writing         — documents → dialogue Lines (line-id, per-language text)
 ├─ boards          — storyboard panels, grouped by beat, timed
@@ -329,7 +329,7 @@ of this (multiplatform principle, §1.5).
 review: fine as sketched, details will be understood when each is
 actually built. The DECIDED/PROPOSED markers below respect that.)
 
-### 6.1 Notepad (brainstorm)
+### 6.1 Sketchbook (brainstorm)
 
 - Infinite canvas; content = placed objects: images, text notes, sketch
   patches (small y2kvector docs), and **NoteObjects**.

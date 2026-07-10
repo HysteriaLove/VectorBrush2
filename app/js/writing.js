@@ -158,17 +158,14 @@
 
   // ---- workspace view (DOM; mounted by the shell) -------------------------------
 
-  var view = { host: null, app: null, docId: null, docsEl: null, editorEl: null };
+  var view = { host: null, app: null, editorEl: null };
 
+  // ONE document, ever (user decision 2026-07-10): the project has a
+  // single story; it is created lazily on the first committed edit.
   function activeDoc() {
     if (!view.app) return null;
-    var doc = view.docId ? docById(view.app.project, view.docId) : null;
-    if (!doc) {
-      var docs = writingOf(view.app.project).docs;
-      doc = docs.length ? docs[0] : null;
-      view.docId = doc ? doc.id : null;
-    }
-    return doc;
+    var docs = writingOf(view.app.project).docs;
+    return docs.length ? docs[0] : null;
   }
 
   function isEditing() {
@@ -182,78 +179,35 @@
     refresh();
   }
 
-  function addDoc() {
-    exec({ op: "writingDocAdd", id: VB.actorNewId("wdoc") });
-    var docs = writingOf(view.app.project).docs;
-    view.docId = docs[docs.length - 1].id;
-    refresh();
-  }
-
   function commitBody() {
     var body = view.editorEl && view.editorEl.querySelector(".wrbody");
-    var doc = activeDoc();
-    if (!body || !doc) return;
+    if (!body) return;
     var val = body.innerText.replace(/\n$/, "");
-    if (val !== (doc.text || "")) {
+    var doc = activeDoc();
+    if (!doc) {
+      if (val.trim() === "") return; // nothing typed, nothing created
+      view.app.exec({ op: "writingDocAdd", id: VB.actorNewId("wdoc"),
+                      name: "Story" });
+      doc = activeDoc();
+    }
+    if (doc && val !== (doc.text || "")) {
       exec({ op: "writingDocEdit", doc: doc.id, text: val });
     }
   }
 
   function refresh() {
     if (!view.host || isEditing()) return;
-    var project = view.app.project;
-    var docs = writingOf(project).docs;
     var doc = activeDoc();
-
-    view.docsEl.innerHTML = "";
-    docs.forEach(function (d) {
-      var row = document.createElement("div");
-      row.className = "wrdoc" + (doc && d.id === doc.id ? " active" : "");
-      var nm = document.createElement("span");
-      nm.className = "aname";
-      nm.textContent = d.name;
-      nm.title = "Double-click to rename";
-      nm.addEventListener("dblclick", function () {
-        var n = prompt("Document name", d.name);
-        if (n && n !== d.name) {
-          exec({ op: "writingDocRename", doc: d.id, name: n });
-        }
-      });
-      row.appendChild(nm);
-      var del = document.createElement("button");
-      del.textContent = "✕";
-      del.title = "Delete document";
-      del.addEventListener("click", function (ev) {
-        ev.stopPropagation();
-        if (!confirm('Delete "' + d.name + '"?')) return;
-        if (view.docId === d.id) view.docId = null;
-        exec({ op: "writingDocRemove", doc: d.id });
-      });
-      row.appendChild(del);
-      row.addEventListener("click", function () {
-        view.docId = d.id;
-        refresh();
-      });
-      view.docsEl.appendChild(row);
-    });
-
     view.editorEl.innerHTML = "";
-    if (!doc) {
-      var empty = document.createElement("div");
-      empty.className = "wrempty";
-      empty.textContent = "No documents yet — create one.";
-      view.editorEl.appendChild(empty);
-      return;
-    }
-    // ONE infinite document (user decision): a single flowing editable
-    // page, Google-Docs style. The body commits as one op on blur.
+    // ONE infinite document: a single flowing editable page, Google-Docs
+    // style. The body commits as one op per editing session (blur).
     var page = document.createElement("div");
     page.className = "wrpage";
     var body = document.createElement("div");
     body.className = "wredit wrbody wrtext";
     body.contentEditable = "true";
-    body.innerText = doc.text || "";
-    body.dataset.ph = "write…";
+    body.innerText = doc ? (doc.text || "") : "";
+    body.dataset.ph = "write the story…";
     body.addEventListener("blur", commitBody);
     body.addEventListener("keydown", function (ev) {
       if (ev.key === "Escape") body.blur();
@@ -299,23 +253,18 @@
       b.addEventListener("click", fn);
       return b;
     }
-    bar.appendChild(toolBtn("＋ Document", "New writing document", addDoc));
     var hint = document.createElement("span");
     hint.id = "wr-hint";
-    hint.textContent = "one flowing document — dialogue ids get assigned to text later";
+    hint.textContent = "the story — one flowing document; dialogue ids get assigned to text later";
     bar.appendChild(hint);
     host.appendChild(bar);
 
     var body = document.createElement("div");
     body.id = "wr-body";
-    var docsEl = document.createElement("div");
-    docsEl.id = "wr-docs";
     var editorEl = document.createElement("div");
     editorEl.id = "wr-editor";
-    body.appendChild(docsEl);
     body.appendChild(editorEl);
     host.appendChild(body);
-    view.docsEl = docsEl;
     view.editorEl = editorEl;
 
     window.addEventListener("keydown", onKeyDown);
@@ -328,7 +277,6 @@
     window.removeEventListener("keydown", onKeyDown);
     view.host.innerHTML = "";
     view.host = null;
-    view.docsEl = null;
     view.editorEl = null;
   }
 

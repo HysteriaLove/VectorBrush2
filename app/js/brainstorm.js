@@ -663,11 +663,19 @@
     });
 
     window.addEventListener("keydown", onKeyDown);
+    // the ink canvas sizes from its container: re-render when the
+    // container settles or resizes (tab-in happens before layout — the
+    // half-drawn-canvas bug)
+    if (window.ResizeObserver) {
+      view.ro = new ResizeObserver(function () { renderInk(); });
+      view.ro.observe(board);
+    }
     refresh();
   }
 
   function unmount() {
     if (!view.host) return;
+    if (view.ro) { view.ro.disconnect(); view.ro = null; }
     window.removeEventListener("keydown", onKeyDown);
     // never leave the journal pointed at the board's canvas
     var t = view.app && view.app.project.editTarget;

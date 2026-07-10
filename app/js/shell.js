@@ -43,7 +43,7 @@
   // Tab names decided 2026-07-10 (Architecture §2); internal ids stay
   // stable so routes and packages never break on a rename.
   var SECTIONS = [
-    { id: "brainstorm", label: "Notepad", mount: "brainstorm", note: "" },
+    { id: "brainstorm", label: "Sketchbook", mount: "brainstorm", note: "" },
     { id: "pitch", label: "Pitch", mount: "pitch", note: "" },
     { id: "writing", label: "Story", mount: "writing", note: "" },
     { id: "storyboards", label: "Boards", mount: "storyboards", note: "" },

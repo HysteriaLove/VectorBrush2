@@ -137,6 +137,7 @@
           return { id: bt.id, name: bt.name,
                    panels: bt.panels.map(function (p) {
                      return { id: p.id, duration: p.duration,
+                              caption: p.caption || "",
                               lines: p.lines, cell: snapshotDoc(p.cell) };
                    }) };
         })
@@ -198,6 +199,7 @@
                    var cell = new VB.Y2KVectorDocument();
                    restoreDoc(cell, p.cell);
                    return { id: p.id, duration: p.duration,
+                            caption: p.caption || "",
                             lines: p.lines, cell: cell };
                  }) };
       })

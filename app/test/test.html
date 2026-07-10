@@ -3048,6 +3048,11 @@
     check("durations clamp and apply",
       VB.boardsPanelById(dse.project, "pn2").panel.duration === 12 &&
       VB.boardsTotalFrames(dse.project) === 24 + 12 + 48);
+    dse.exec({ op: "panelCaption", id: "pn1",
+               text: "Mira leans over the edge." });
+    check("panel captions journal (the deck's bottom text field)",
+      VB.boardsPanelById(dse.project, "pn1").panel.caption ===
+      "Mira leans over the edge.");
     dse.exec({ op: "panelLineAttach", panel: "pn1", line: "bline" });
     dse.exec({ op: "panelLineAttach", panel: "pn1", line: "bline" }); // dedupe
     check("lines attach once by id",
@@ -3078,10 +3083,10 @@
     check("boards replay byte-exact",
       JSON.stringify(dRep.project.boards.beats.map(function (bt) {
         return [bt.id, bt.name, bt.panels.map(function (p) {
-          return [p.id, p.duration, p.lines, p.cell.edges]; })];
+          return [p.id, p.duration, p.caption, p.lines, p.cell.edges]; })];
       })) === JSON.stringify(dse.project.boards.beats.map(function (bt) {
         return [bt.id, bt.name, bt.panels.map(function (p) {
-          return [p.id, p.duration, p.lines, p.cell.edges]; })];
+          return [p.id, p.duration, p.caption, p.lines, p.cell.edges]; })];
       })));
     dse.exec({ op: "beatRemove", beat: "bt2" });
     dse.exec({ op: "undo" });

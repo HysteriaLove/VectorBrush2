@@ -592,6 +592,13 @@
 
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("resize", onViewResize);
+    // the stage canvas must re-fit whenever its CONTAINER settles or
+    // resizes (tab-in happens before layout; the window listener alone
+    // let the bitmap stretch — the aspect-ratio bug)
+    if (window.ResizeObserver) {
+      view.ro = new ResizeObserver(onViewResize);
+      view.ro.observe(body);
+    }
     refresh();
   }
 
@@ -604,6 +611,7 @@
     if (!view.host) return;
     window.removeEventListener("keydown", onKeyDown);
     window.removeEventListener("resize", onViewResize);
+    if (view.ro) { view.ro.disconnect(); view.ro = null; }
     var t = view.app && view.app.project.editTarget;
     if (view.drawMode && t && t.pitchSlide) {
       view.app.exec({ op: "editTargetClear" });
