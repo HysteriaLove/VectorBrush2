@@ -1,10 +1,11 @@
-/* writing.js — the Writing workspace (Architecture §6.2, thin slice):
- * documents made of blocks, where dialogue LINE blocks are the app-wide
- * language backbone. A Line's id is the stable reference everything
- * downstream uses (storyboard panels attach line ids; subtitles and
- * lip-sync resolve them later) and its text is a per-language map —
- * switching project language later is a re-resolution, never a data
- * change.
+/* writing.js — the Writing workspace (Architecture §6.3): free-form
+ * documents (the one-body Story editor) PLUS the script atoms — typed
+ * BLOCKS living on the story spine's beats (spine.js,
+ * PreProductionSpine.md). Dialogue LINE blocks are the app-wide
+ * language backbone: a Line's id is the stable reference everything
+ * downstream uses (frames show line chips; subtitles and lip-sync
+ * resolve them later) and its text is a per-language map — switching
+ * project language later is a re-resolution, never a data change.
  *
  * Thin means thin UI, never thin model: every mutation is a journaled
  * op with ids carried in the op; docs and blocks replay byte-exact and
@@ -30,23 +31,13 @@
     return null;
   }
 
-  function blockById(doc, id) {
-    for (var i = 0; i < doc.blocks.length; i++) {
-      if (doc.blocks[i].id === id) return { block: doc.blocks[i], index: i };
-    }
-    return null;
-  }
-
-  /** A dialogue Line anywhere in the project: { doc, block, index }. */
+  /** A dialogue Line anywhere on the story spine:
+   *  { beat, block, index }. Blocks live on spine beats (spine.js) —
+   *  the script is the beats' block stacks, rendered as prose here and
+   *  as frame text in Boards. */
   function lineById(project, id) {
-    var docs = writingOf(project).docs;
-    for (var d = 0; d < docs.length; d++) {
-      var hit = blockById(docs[d], id);
-      if (hit && hit.block.kind === "line") {
-        return { doc: docs[d], block: hit.block, index: hit.index };
-      }
-    }
-    return null;
+    var hit = VB.spineBeatOfBlock(project, id);
+    return hit && hit.block.kind === "line" ? hit : null;
   }
 
   function lineText(block, lang) {
@@ -97,32 +88,34 @@
     }
   });
 
-  // kind "text": { content } · kind "line": { character, text: {lang: str} }
+  // Blocks are the script atoms and live on SPINE BEATS (spine.js):
+  // kind "action"/"note": { content } · kind "line": { character,
+  // text: {lang: str} }. Story owns the content; Boards edits it
+  // through these same ops (op routing — one script, rendered twice).
   VB.defineOp("blockAdd", function (c, op) {
-    var doc = docById(c.project, op.doc);
-    if (!doc) return;
+    var hit = VB.spineBeatById(c.project, op.beat);
+    if (!hit) return;
     c.history.push(c.project);
     var block = op.kind === "line"
       ? { id: op.id, kind: "line",
           character: op.character || "",
           text: {} }
-      : { id: op.id, kind: "text", content: op.content || "" };
+      : { id: op.id, kind: op.kind === "note" ? "note" : "action",
+          content: op.content || "" };
     if (op.kind === "line") block.text[LANG] = op.text || "";
-    var at = op.index === undefined ? doc.blocks.length
-      : Math.max(0, Math.min(doc.blocks.length, op.index));
-    doc.blocks.splice(at, 0, block);
+    var blocks = hit.beat.blocks;
+    var at = op.index === undefined ? blocks.length
+      : Math.max(0, Math.min(blocks.length, op.index));
+    blocks.splice(at, 0, block);
     c.sync();
   });
 
   VB.defineOp("blockEdit", function (c, op) {
-    var doc = docById(c.project, op.doc);
-    var hit = doc && blockById(doc, op.block);
+    var hit = VB.spineBeatOfBlock(c.project, op.block);
     if (!hit) return;
     c.history.push(c.project);
     var b = hit.block;
-    if (b.kind === "text") {
-      if (op.content !== undefined) b.content = op.content;
-    } else {
+    if (b.kind === "line") {
       if (op.character !== undefined) b.character = op.character;
       if (op.text !== undefined) {
         // per-language, copy-on-write (history shares the old map)
@@ -131,28 +124,31 @@
         next[op.lang || LANG] = op.text;
         b.text = next;
       }
+    } else if (op.content !== undefined) {
+      b.content = op.content;
     }
     c.sync();
   });
 
+  // within a beat or across beats (the writer restructuring a moment)
   VB.defineOp("blockMove", function (c, op) {
-    var doc = docById(c.project, op.doc);
-    var hit = doc && blockById(doc, op.block);
+    var hit = VB.spineBeatOfBlock(c.project, op.block);
     if (!hit) return;
-    var to = Math.max(0, Math.min(doc.blocks.length - 1, op.index));
-    if (to === hit.index) return;
+    var dest = op.beat ? VB.spineBeatById(c.project, op.beat) : null;
+    var beat = dest ? dest.beat : hit.beat;
+    if (!beat) return;
     c.history.push(c.project);
-    doc.blocks.splice(hit.index, 1);
-    doc.blocks.splice(to, 0, hit.block);
+    hit.beat.blocks.splice(hit.index, 1);
+    var to = Math.max(0, Math.min(beat.blocks.length, op.index | 0));
+    beat.blocks.splice(to, 0, hit.block);
     c.sync();
   });
 
   VB.defineOp("blockRemove", function (c, op) {
-    var doc = docById(c.project, op.doc);
-    var hit = doc && blockById(doc, op.block);
+    var hit = VB.spineBeatOfBlock(c.project, op.block);
     if (!hit) return;
     c.history.push(c.project);
-    doc.blocks.splice(hit.index, 1);
+    hit.beat.blocks.splice(hit.index, 1);
     c.sync();
   });
 

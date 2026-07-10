@@ -71,9 +71,13 @@
     // Pitch (pitch.js): a sequential slide deck; each slide is a
     // y2kvector cell. Rides the journal.
     this.pitch = { slides: [], cur: 0 };
-    // Boards (boards.js): storyboard beats → panels (y2kvector cells,
-    // durations, attached Story line ids). Rides the journal.
-    this.boards = { beats: [], cur: { beat: 0, panel: 0 } };
+    // The pre-production STORY SPINE (spine.js, PreProductionSpine.md):
+    // slugs → beats → { blocks (Story-owned), panels (Boards-owned) }.
+    // The beat is the story⟷boards interchange unit. Rides the journal.
+    this.spine = { scenes: [] };
+    // Boards (boards.js): the deck view's selection over the spine's
+    // flattened beats. Panel content lives ON the spine beats.
+    this.boards = { cur: { beat: 0, panel: 0 } };
     // The object LIBRARY (library.js): symbols (converted selections)
     // and backgrounds — global containers for instantiation later.
     this.library = [];
@@ -187,12 +191,17 @@
       return null;
     }
     if (t.boardPanel) {
-      var beats = (this.boards && this.boards.beats) || [];
-      for (var bb = 0; bb < beats.length; bb++) {
-        for (var pp = 0; pp < beats[bb].panels.length; pp++) {
-          if (beats[bb].panels[pp].id === t.boardPanel) {
-            return { cell: beats[bb].panels[pp].cell, actor: null,
-                     label: beats[bb].name + " ▸ panel " + (pp + 1) };
+      // panels live on the story spine's beats (spine.js)
+      var scenes2 = (this.spine && this.spine.scenes) || [];
+      for (var ss = 0; ss < scenes2.length; ss++) {
+        var beats = scenes2[ss].beats;
+        for (var bb = 0; bb < beats.length; bb++) {
+          for (var pp = 0; pp < beats[bb].panels.length; pp++) {
+            if (beats[bb].panels[pp].id === t.boardPanel) {
+              return { cell: beats[bb].panels[pp].cell, actor: null,
+                       label: (beats[bb].title || scenes2[ss].title ||
+                               "beat") + " ▸ panel " + (pp + 1) };
+            }
           }
         }
       }

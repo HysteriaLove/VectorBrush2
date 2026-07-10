@@ -1,15 +1,13 @@
 /* boards.js — the Boards workspace (Architecture §6.4): storyboard
- * PANELS, deck-style like Pitch (user decision 2026-07-10) with a text
- * entry field at the bottom — the panel's caption, which the animatic
- * shows as its subtitle.
- *
- * The model keeps BEATS as the grouping container (the deck UI feeds a
- * default beat for now; beat arrangement UX returns later), and panels
- * keep attached Story line ids (dormant until the dialogue-id system
- * lands). A panel is a y2kvector cell drawn with the real stage tools
- * through the journaled editTarget, a duration in frames, a caption,
- * and line refs. The animatic plays panels in order, each held for its
- * duration at project.fps. Thin UI, real model.
+ * PANELS over the story SPINE (spine.js, PreProductionSpine.md).
+ * Beats live on the spine — Boards owns each beat's PANEL group (a
+ * panel = a y2kvector cell drawn with the real stage tools through the
+ * journaled editTarget + a duration in frames). The deck's text field
+ * is NOT a boards field: it reads and writes the beat's action block
+ * through the owning writing.* ops (one script, rendered twice), and
+ * the animatic subtitles show the beat's full story text — action
+ * lines plus dialogue. The animatic plays panels in order, each held
+ * for its duration at project.fps. Thin UI, real model.
  */
 (function () {
   "use strict";
@@ -18,22 +16,21 @@
   var DEFAULT_DURATION = 24; // frames
 
   // ---- model + ops -----------------------------------------------------------
+  // structure = spine beats (flattened across slugs for the deck);
+  // boards keeps only its SELECTION over that flat list
 
   function boardsOf(project) {
-    project.boards = project.boards || { beats: [], cur: { beat: 0, panel: 0 } };
+    project.boards = project.boards || { cur: { beat: 0, panel: 0 } };
     return project.boards;
   }
 
-  function beatById(project, id) {
-    var beats = boardsOf(project).beats;
-    for (var i = 0; i < beats.length; i++) {
-      if (beats[i].id === id) return { beat: beats[i], index: i };
-    }
-    return null;
+  /** The deck's beat list: every spine beat in story order. */
+  function beatsOf(project) {
+    return VB.spineFlatBeats(project).map(function (e) { return e.beat; });
   }
 
   function panelById(project, id) {
-    var beats = boardsOf(project).beats;
+    var beats = beatsOf(project);
     for (var b = 0; b < beats.length; b++) {
       for (var p = 0; p < beats[b].panels.length; p++) {
         if (beats[b].panels[p].id === id) {
@@ -48,7 +45,7 @@
   /** Panels in playback order with their beat. */
   function flattenPanels(project) {
     var out = [];
-    boardsOf(project).beats.forEach(function (beat) {
+    beatsOf(project).forEach(function (beat) {
       beat.panels.forEach(function (panel) {
         out.push({ beat: beat, panel: panel });
       });
@@ -71,75 +68,33 @@
 
   function clampCur(project) {
     var boards = boardsOf(project);
-    boards.cur.beat = Math.max(0, Math.min(boards.beats.length - 1, boards.cur.beat));
-    var beat = boards.beats[boards.cur.beat];
+    var beats = beatsOf(project);
+    boards.cur.beat = Math.max(0, Math.min(beats.length - 1, boards.cur.beat));
+    var beat = beats[boards.cur.beat];
     boards.cur.panel = beat
       ? Math.max(0, Math.min(beat.panels.length - 1, boards.cur.panel)) : 0;
   }
 
-  VB.defineOp("beatAdd", function (c, op) {
-    c.history.push(c.project);
-    var boards = boardsOf(c.project);
-    boards.beats.push({
-      id: op.id,
-      name: op.name || "Beat " + String(boards.beats.length + 1).padStart(2, "0"),
-      panels: []
-    });
-    boards.cur = { beat: boards.beats.length - 1, panel: 0 };
-    c.sync();
-  });
-
-  VB.defineOp("beatRename", function (c, op) {
-    var hit = beatById(c.project, op.beat);
-    if (!hit) return;
-    c.history.push(c.project);
-    hit.beat.name = op.name;
-    c.sync();
-  });
-
-  VB.defineOp("beatMove", function (c, op) {
-    var hit = beatById(c.project, op.beat);
-    if (!hit) return;
-    var beats = boardsOf(c.project).beats;
-    var to = Math.max(0, Math.min(beats.length - 1, op.index));
-    if (to === hit.index) return;
-    c.history.push(c.project);
-    beats.splice(hit.index, 1);
-    beats.splice(to, 0, hit.beat);
-    clampCur(c.project);
-    c.sync();
-  });
-
-  VB.defineOp("beatRemove", function (c, op) {
-    var hit = beatById(c.project, op.beat);
-    if (!hit) return;
-    c.history.push(c.project);
-    boardsOf(c.project).beats.splice(hit.index, 1);
-    clampCur(c.project);
-    c.sync();
-  });
-
   VB.defineOp("panelAdd", function (c, op) {
-    var hit = beatById(c.project, op.beat);
+    var hit = VB.spineBeatById(c.project, op.beat);
     if (!hit) return;
     c.history.push(c.project);
     var at = op.index === undefined ? hit.beat.panels.length
       : Math.max(0, Math.min(hit.beat.panels.length, op.index));
     hit.beat.panels.splice(at, 0, {
       id: op.id, cell: newPanelCell(),
-      duration: op.duration || DEFAULT_DURATION,
-      caption: op.caption || "",
-      lines: []
+      duration: op.duration || DEFAULT_DURATION
     });
-    boardsOf(c.project).cur = { beat: hit.index, panel: at };
+    var flat = beatsOf(c.project);
+    boardsOf(c.project).cur = { beat: flat.indexOf(hit.beat), panel: at };
     c.sync();
   });
 
   VB.defineOp("panelMove", function (c, op) {
     var hit = panelById(c.project, op.id);
     if (!hit) return;
-    var destBeat = op.beat ? beatById(c.project, op.beat) : null;
-    var target = destBeat ? destBeat.beat : hit.beat;
+    var dest = op.beat ? VB.spineBeatById(c.project, op.beat) : null;
+    var target = dest ? dest.beat : hit.beat;
     c.history.push(c.project);
     hit.beat.panels.splice(hit.index, 1);
     var to = Math.max(0, Math.min(target.panels.length, op.index));
@@ -165,34 +120,6 @@
     c.sync();
   });
 
-  /** The panel's text — the entry field at the bottom of the deck;
-   *  the animatic shows it as the subtitle. */
-  VB.defineOp("panelCaption", function (c, op) {
-    var hit = panelById(c.project, op.id);
-    if (!hit) return;
-    c.history.push(c.project);
-    hit.panel.caption = op.text;
-    c.sync();
-  });
-
-  VB.defineOp("panelLineAttach", function (c, op) {
-    var hit = panelById(c.project, op.panel);
-    if (!hit || (hit.panel.lines || []).indexOf(op.line) >= 0) return;
-    c.history.push(c.project);
-    hit.panel.lines = (hit.panel.lines || []).concat([op.line]); // copy-on-write
-    c.sync();
-  });
-
-  VB.defineOp("panelLineDetach", function (c, op) {
-    var hit = panelById(c.project, op.panel);
-    if (!hit || (hit.panel.lines || []).indexOf(op.line) < 0) return;
-    c.history.push(c.project);
-    hit.panel.lines = hit.panel.lines.filter(function (l) {
-      return l !== op.line;
-    });
-    c.sync();
-  });
-
   VB.defineOp("boardsSelect", function (c, op) {
     var boards = boardsOf(c.project);
     boards.cur = { beat: op.beat | 0, panel: op.panel | 0 };
@@ -202,8 +129,22 @@
 
   function currentPanel(project) {
     var boards = boardsOf(project);
-    var beat = boards.beats[boards.cur.beat];
+    var beat = beatsOf(project)[boards.cur.beat];
     return beat ? (beat.panels[boards.cur.panel] || null) : null;
+  }
+
+  /** The beat a panel narrates — the spine entry, or null. */
+  function beatOfCurrent(project) {
+    var panel = currentPanel(project);
+    return panel ? VB.spineBeatOfPanel(project, panel.id) : null;
+  }
+
+  /** The beat's first action block — what the deck's text field edits. */
+  function actionBlockOf(beat) {
+    for (var i = 0; i < beat.blocks.length; i++) {
+      if (beat.blocks[i].kind === "action") return beat.blocks[i];
+    }
+    return null;
   }
 
   // ---- workspace view (deck-style, like Pitch) -----------------------------------
@@ -298,14 +239,8 @@
 
   function subtitleFor(panel) {
     if (!panel) return "";
-    if (panel.caption) return panel.caption;
-    if (!panel.lines || !panel.lines.length) return "";
-    return panel.lines.map(function (lineId) {
-      var hit = VB.lineById(view.app.project, lineId);
-      if (!hit) return "";
-      var who = hit.block.character ? hit.block.character + ": " : "";
-      return who + VB.lineTextOf(hit.block);
-    }).filter(Boolean).join("\n");
+    var hit = VB.spineBeatOfPanel(view.app.project, panel.id);
+    return hit ? VB.spineBeatText(hit.beat) : "";
   }
 
   function renderStage() {
@@ -318,19 +253,27 @@
     return document.activeElement === view.captionEl;
   }
 
+  // The deck's text field IS the beat's action block — editing it here
+  // writes the script through the owning writing.* ops (op routing)
   function commitCaption() {
-    var panel = currentPanel(view.app.project);
-    if (!panel || !view.captionEl) return;
+    if (!view.captionEl) return;
+    var hit = beatOfCurrent(view.app.project);
+    if (!hit) return;
     var val = view.captionEl.value;
-    if (val !== (panel.caption || "")) {
-      exec({ op: "panelCaption", id: panel.id, text: val });
+    var block = actionBlockOf(hit.beat);
+    if (block) {
+      if (val !== (block.content || "")) {
+        exec({ op: "blockEdit", block: block.id, content: val });
+      }
+    } else if (val.trim() !== "") {
+      exec({ op: "blockAdd", id: VB.actorNewId("blk"), beat: hit.beat.id,
+             index: 0, kind: "action", content: val });
     }
   }
 
   function refresh() {
     if (!view.host) return;
     var project = view.app.project;
-    var boards = boardsOf(project);
     var flat = flattenPanels(project);
     var current = currentPanel(project);
 
@@ -340,8 +283,9 @@
       var isCur = panel === current;
       var cellEl = document.createElement("div");
       cellEl.className = "ptthumb" + (isCur ? " cur" : "");
+      var beatLine = VB.spineBeatText(entry.beat).split("\n")[0];
       cellEl.title = "Panel " + (i + 1) + " · " + panel.duration + "f" +
-        (panel.caption ? " · " + panel.caption.split("\n")[0] : "");
+        (beatLine ? " · " + beatLine : "");
       var tc = document.createElement("canvas");
       tc.width = 96;
       tc.height = 54;
@@ -366,7 +310,9 @@
     });
 
     if (view.captionEl && !isEditingCaption()) {
-      view.captionEl.value = current ? (current.caption || "") : "";
+      var curBeat = beatOfCurrent(project);
+      var action = curBeat && actionBlockOf(curBeat.beat);
+      view.captionEl.value = action ? (action.content || "") : "";
       view.captionEl.disabled = !current;
     }
     if (view.durInput && current &&
@@ -383,15 +329,22 @@
     refresh();
   }
 
-  /** The deck UI keeps a default beat under the hood; beat arrangement
-   *  UX comes back later. */
+  /** The deck feeds the current spine beat, minting a slug + beat when
+   *  the spine is empty (a boards-first author's first frame — the
+   *  membrane's "artist adds a panel in a gap" rule, degenerate case).
+   *  Full beat arrangement UX lands with the interchange slice. */
   function ensureBeat() {
-    var boards = boardsOf(view.app.project);
-    if (!boards.beats.length) {
-      view.app.exec({ op: "beatAdd", id: VB.actorNewId("beat"), name: "Board" });
+    var project = view.app.project;
+    if (!VB.spineOf(project).scenes.length) {
+      view.app.exec({ op: "spineSceneAdd", id: VB.actorNewId("slug") });
     }
-    return boardsOf(view.app.project).beats[
-      boardsOf(view.app.project).cur.beat];
+    if (!beatsOf(project).length) {
+      view.app.exec({ op: "spineBeatAdd", id: VB.actorNewId("beat"),
+                      scene: VB.spineOf(project).scenes[0].id });
+    }
+    var beats = beatsOf(project);
+    return beats[Math.max(0, Math.min(beats.length - 1,
+                                      boardsOf(project).cur.beat))];
   }
 
   function retargetDraw() {
@@ -689,7 +642,7 @@
     var caption = document.createElement("textarea");
     caption.id = "bd-caption";
     caption.rows = 2;
-    caption.placeholder = "panel text — action, dialogue, timing notes…";
+    caption.placeholder = "the beat's action text — this IS the script…";
     caption.addEventListener("blur", commitCaption);
     caption.addEventListener("keydown", function (ev) { ev.stopPropagation(); });
     host.appendChild(caption);

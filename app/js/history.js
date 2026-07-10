@@ -133,19 +133,27 @@
                    texts: JSON.parse(JSON.stringify(s.texts || [])) };
         })
       },
-      // panel.lines arrays are copy-on-write (boards.js contract), so
-      // sharing them by reference is safe; duration mutates in place,
-      // hence the shallow panel copy
       boards: {
         cur: JSON.parse(JSON.stringify((target.boards || {}).cur ||
-                                       { beat: 0, panel: 0 })),
-        beats: ((target.boards || {}).beats || []).map(function (bt) {
-          return { id: bt.id, name: bt.name,
-                   panels: bt.panels.map(function (p) {
-                     return { id: p.id, duration: p.duration,
-                              caption: p.caption || "",
-                              lines: p.lines, cell: snapshotDoc(p.cell) };
-                   }) };
+                                       { beat: 0, panel: 0 }))
+      },
+      // the story spine (spine.js): slugs → beats → blocks + panels.
+      // Block text maps are copy-on-write (writing.js contract) but the
+      // block LIST and block objects mutate in place, so deep-copy them;
+      // panel cells are y2kvector documents.
+      spine: {
+        scenes: (((target.spine || {}).scenes) || []).map(function (sc) {
+          return {
+            id: sc.id, title: sc.title,
+            beats: sc.beats.map(function (bt) {
+              return { id: bt.id, title: bt.title,
+                       blocks: JSON.parse(JSON.stringify(bt.blocks)),
+                       panels: bt.panels.map(function (p) {
+                         return { id: p.id, duration: p.duration,
+                                  cell: snapshotDoc(p.cell) };
+                       }) };
+            })
+          };
         })
       },
       sequence: JSON.parse(JSON.stringify(target.sequence || [])),
@@ -208,16 +216,23 @@
     };
     target.boards = {
       cur: JSON.parse(JSON.stringify((snap.boards || {}).cur ||
-                                     { beat: 0, panel: 0 })),
-      beats: ((snap.boards || {}).beats || []).map(function (bt) {
-        return { id: bt.id, name: bt.name,
-                 panels: bt.panels.map(function (p) {
-                   var cell = new VB.Y2KVectorDocument();
-                   restoreDoc(cell, p.cell);
-                   return { id: p.id, duration: p.duration,
-                            caption: p.caption || "",
-                            lines: p.lines, cell: cell };
-                 }) };
+                                     { beat: 0, panel: 0 }))
+    };
+    target.spine = {
+      scenes: (((snap.spine || {}).scenes) || []).map(function (sc) {
+        return {
+          id: sc.id, title: sc.title,
+          beats: sc.beats.map(function (bt) {
+            return { id: bt.id, title: bt.title,
+                     blocks: JSON.parse(JSON.stringify(bt.blocks)),
+                     panels: bt.panels.map(function (p) {
+                       var cell = new VB.Y2KVectorDocument();
+                       restoreDoc(cell, p.cell);
+                       return { id: p.id, duration: p.duration,
+                                cell: cell };
+                     }) };
+          })
+        };
       })
     };
     target.sequence = JSON.parse(JSON.stringify(snap.sequence || []));

@@ -1,6 +1,10 @@
 # VectorBrush2 — The Pre-Production Spine (ontology ladder)
 
-Status: DESIGN (2026-07-10). How Story, Boards, Audio, and Roughs share
+Status: DESIGN (2026-07-10) — the spine model + op family (§3) LANDED
+as slice 2 (spine.js; blocks/panels re-seated on beats); the
+interchange UI (beat rail, spine-bound deck) is the next slice.
+
+How Story, Boards, Audio, and Roughs share
 data without sync hell, and the interchange units that let writing in
 the text editor create storyboard panels and vice-versa. Companion to
 [Architecture.md](Architecture.md) §6.3–§6.6 and
