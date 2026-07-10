@@ -51,6 +51,7 @@
 <script src="../js/library.js"></script>
 <script src="../js/audio.js"></script>
 <script src="../js/sequence.js"></script>
+<script src="../js/y2kshell.js"></script>
 <script src="../js/thumbs.js"></script>
 <script src="../js/brainstorm.js"></script>
 <script src="../js/pitch.js"></script>
@@ -4008,6 +4009,90 @@
   } catch (err) {
     fail++;
     log("  SEQUENCE EXCEPTION: " + (err && err.stack || err), "fail");
+  }
+
+  // =============================== y2kshell ===================================
+  // The unified workspace shell's geometry engine (y2kshell.js — the
+  // xRack port): pure module/toolbar/drawer physics, no DOM. Island
+  // pushes, cross-side moves, snap settles, and scroll/width clamps
+  // must be deterministic — the DOM merely renders this state.
+  log("");
+  log("y2kshell:");
+  try {
+    var Sh = VB.Y2KShell;
+    var sh = Sh.defaults();
+    Sh.addModule(sh, "right", { id: "a", h: 100 });
+    Sh.addModule(sh, "right", { id: "b", h: 100 });
+    Sh.addModule(sh, "right", { id: "c", h: 100 });
+    check("modules stack under each other on add",
+      sh.racks.right.modules[0].y === 0 &&
+      sh.racks.right.modules[1].y === 100 &&
+      sh.racks.right.modules[2].y === 200 &&
+      Sh.rackContentHeight(sh, "right") === 300);
+
+    Sh.toggleModule(sh, "b");
+    check("collapsed modules are a tab",
+      Sh.moduleHeight(Sh.moduleById(sh, "b").mod) === Sh.TAB_H);
+    Sh.toggleModule(sh, "b");
+
+    // island push: dragging a into b pushes b, which pushes c
+    var starts = { a: 0, b: 100, c: 200 };
+    Sh.dragModule(sh, "a", "right", starts, 150, 1);
+    var byId = function (id) { return Sh.moduleById(sh, id).mod; };
+    check("dragging pushes colliding neighbors as an island",
+      byId("a").y === 150 && byId("b").y === 250 && byId("c").y === 350);
+    // pushing against the top jams instead of overlapping
+    Sh.dragModule(sh, "c", "right", { a: 0, b: 100, c: 200 }, 50, -1);
+    check("a jammed column never overlaps or goes above zero",
+      byId("a").y === 0 && byId("b").y === 100 && byId("c").y === 200);
+
+    // settle: small gaps snap shut, order comes from y
+    byId("c").y = 208; // 8 above b's bottom edge — inside SNAP range
+    Sh.endModuleDrag(sh, "right");
+    check("drop settle snaps small gaps shut",
+      byId("c").y === 200, byId("c").y + "");
+
+    // cross-side move opens the other rack
+    Sh.dragModule(sh, "a", "left", { a: byId("a").y }, 40, 1);
+    check("dragging across the midline changes racks",
+      Sh.moduleById(sh, "a").side === "left" &&
+      sh.racks.left.width === Sh.RACK_DEFAULT &&
+      sh.racks.right.modules.length === 2);
+
+    // width + scroll clamps
+    Sh.setRackWidth(sh, "right", 9999, 1200);
+    check("rack width clamps against the shell",
+      sh.racks.right.width <= Sh.RACK_MAX);
+    Sh.setRackWidth(sh, "right", 30, 1200);
+    check("dropping under half-min collapses the rack",
+      sh.racks.right.width === 0);
+    Sh.setRackWidth(sh, "right", Sh.RACK_DEFAULT, 1200);
+    sh.racks.right.scroll = 9999;
+    Sh.clampRackScroll(sh, "right", 100);
+    check("column scroll clamps to the content",
+      sh.racks.right.scroll <=
+      Sh.rackContentHeight(sh, "right") - 100 + Sh.CELL);
+
+    // toolbars: the same physics sideways
+    Sh.addPanel(sh, "top", { id: "p1", w: 128 });
+    Sh.addPanel(sh, "top", { id: "p2", w: 128 });
+    Sh.dragPanel(sh, "top", "p1", { p1: 0, p2: 128 }, 60, 1);
+    var p2 = sh.toolbars.top.panels[1];
+    check("toolbar panels push sideways as an island",
+      sh.toolbars.top.panels[0].x === 60 && p2.x === 188);
+    Sh.endPanelDrag(sh, "top");
+    check("toolbar drop settles without overlap",
+      p2.x >= sh.toolbars.top.panels[0].x + 128);
+
+    // persistence roundtrip (view state, never the journal)
+    var sh2 = Sh.restore(Sh.serialize(sh));
+    check("shell state roundtrips",
+      Sh.serialize(sh2) === Sh.serialize(sh));
+    check("garbage restores to defaults",
+      Sh.restore("{oops").racks.right.width === Sh.RACK_DEFAULT);
+  } catch (err) {
+    fail++;
+    log("  Y2KSHELL EXCEPTION: " + (err && err.stack || err), "fail");
   }
 
   // =========================== streaming skeleton ============================

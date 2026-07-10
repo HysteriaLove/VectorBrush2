@@ -1793,72 +1793,176 @@
     refreshMaterials();
   };
 
-  // ---- resizable side panel ------------------------------------------------------
-  // Drag the grip between the canvas and the layers/materials column;
-  // the canvas ResizeObserver keeps the stage sized. Width persists.
+  // ---- y2kshell wiring (Phase A — the unified workspace frame) ------------------
+  // The engine (y2kshell.js) owns the geometry; this block binds it to
+  // the DOM: rack columns of movable modules replacing the old fixed
+  // side panel, and collapsible drawers around the properties bar and
+  // the sequencing stack. Shell state persists per user — never in the
+  // journal.
   (function () {
-    var grip = document.getElementById("panelgrip");
-    var panel = document.getElementById("layerspanel");
-    var saved = parseInt(localStorage.getItem("vb-panel-width"), 10);
-    if (isFinite(saved)) panel.style.width = Math.max(140, Math.min(520, saved)) + "px";
-    var drag = null;
-    grip.addEventListener("pointerdown", function (ev) {
-      drag = { x: ev.clientX, w: panel.getBoundingClientRect().width };
-      grip.classList.add("dragging");
-      grip.setPointerCapture(ev.pointerId);
-      ev.preventDefault();
+    var S = VB.Y2KShell;
+    var state = S.restore(localStorage.getItem("vb-y2kshell") || "");
+    var MOD_H = { layers: 320, materials: 380, library: 340 };
+    var racks = {
+      left: document.getElementById("rack-left"),
+      right: document.getElementById("rack-right")
+    };
+    var moduleDom = {};
+    document.querySelectorAll(".y2kmod").forEach(function (el) {
+      moduleDom[el.dataset.mod] = el;
     });
-    grip.addEventListener("pointermove", function (ev) {
-      if (!drag) return;
-      var w = Math.max(140, Math.min(520, drag.w + (drag.x - ev.clientX)));
-      panel.style.width = w + "px";
+    // reconcile persisted state with the modules that actually exist
+    ["left", "right"].forEach(function (side) {
+      state.racks[side].modules = state.racks[side].modules.filter(
+        function (m) { return !!moduleDom[m.id]; });
     });
-    function endDrag() {
-      if (!drag) return;
-      drag = null;
-      grip.classList.remove("dragging");
-      localStorage.setItem("vb-panel-width",
-        String(Math.round(panel.getBoundingClientRect().width)));
-    }
-    grip.addEventListener("pointerup", endDrag);
-    grip.addEventListener("pointercancel", endDrag);
-  })();
+    Object.keys(moduleDom).forEach(function (id) {
+      if (!S.moduleById(state, id)) {
+        S.addModule(state, "right", { id: id, h: MOD_H[id] || 300 });
+      } else {
+        S.moduleById(state, id).mod.h = MOD_H[id] || 300;
+      }
+    });
 
-  // ---- resizable panel sections ------------------------------------------------
-  // Every list in the side column has a grip UNDER it (ns-resize): drag
-  // sets the list's height, persisted like the panel width. The column
-  // itself scrolls, so oversized sections never hide their neighbors.
-  function sectionGrip(gripId, listId, defaultH) {
-    var grip = document.getElementById(gripId);
-    var list = document.getElementById(listId);
-    var key = "vb-h-" + listId;
-    function clamp(h) { return Math.max(50, Math.min(500, h)); }
-    var saved = parseInt(localStorage.getItem(key), 10);
-    list.style.height = clamp(isFinite(saved) ? saved : defaultH) + "px";
-    var drag = null;
-    grip.addEventListener("pointerdown", function (ev) {
-      drag = { y: ev.clientY, h: list.getBoundingClientRect().height };
-      grip.classList.add("dragging");
-      grip.setPointerCapture(ev.pointerId);
-      ev.preventDefault();
-    });
-    grip.addEventListener("pointermove", function (ev) {
-      if (!drag) return;
-      list.style.height = clamp(drag.h + ev.clientY - drag.y) + "px";
-    });
-    function endSectionDrag() {
-      if (!drag) return;
-      drag = null;
-      grip.classList.remove("dragging");
-      localStorage.setItem(key,
-        String(Math.round(list.getBoundingClientRect().height)));
+    function persist() {
+      try { localStorage.setItem("vb-y2kshell", S.serialize(state)); }
+      catch (e) { /* storage may be unavailable */ }
     }
-    grip.addEventListener("pointerup", endSectionDrag);
-    grip.addEventListener("pointercancel", endSectionDrag);
-  }
-  sectionGrip("grip-layers", "layerlist", 150);
-  sectionGrip("grip-mats", "matlist", 150);
-  sectionGrip("grip-actors", "actorlist", 170);
+
+    function applyShell() {
+      ["left", "right"].forEach(function (side) {
+        var el = racks[side];
+        if (!el) return;
+        var rack = state.racks[side];
+        el.classList.toggle("empty", rack.modules.length === 0);
+        if (rack.modules.length) {
+          el.style.width = Math.max(S.RACK_MIN, rack.width || S.RACK_DEFAULT) + "px";
+        }
+        S.clampRackScroll(state, side, el.clientHeight || 600);
+        rack.modules.forEach(function (m) {
+          var dom = moduleDom[m.id];
+          if (!dom) return;
+          if (dom.parentElement !== el) el.appendChild(dom);
+          dom.style.top = Math.round(m.y - rack.scroll) + "px";
+          dom.style.height = S.moduleHeight(m) + "px";
+          dom.classList.toggle("collapsed", !m.expanded);
+        });
+      });
+      ["top", "bottom"].forEach(function (which) {
+        var drawer = document.getElementById("drawer-" + which);
+        if (drawer) drawer.classList.toggle("closed", !state.drawers[which].open);
+      });
+      persist();
+    }
+
+    // module tab: click toggles, drag rearranges (and crosses sides)
+    Object.keys(moduleDom).forEach(function (id) {
+      var tab = moduleDom[id].querySelector(".y2kmodtab");
+      tab.addEventListener("pointerdown", function (ev) {
+        if (ev.button !== 0) return;
+        ev.preventDefault();
+        tab.setPointerCapture(ev.pointerId);
+        var hit = S.moduleById(state, id);
+        var side0 = hit.side;
+        var startY = hit.mod.y;
+        var starts = {};
+        state.racks[side0].modules.forEach(function (m) { starts[m.id] = m.y; });
+        var p0 = { x: ev.clientX, y: ev.clientY };
+        var moved = false, lastY = ev.clientY;
+        function onMove(e2) {
+          var dy = e2.clientY - p0.y;
+          if (!moved && Math.abs(dy) < 5 && Math.abs(e2.clientX - p0.x) < 5) return;
+          moved = true;
+          moduleDom[id].classList.add("dragging");
+          // crossing the canvas midline moves the module to the other rack
+          var mid = racks.left && racks.right
+            ? (racks.right.getBoundingClientRect().left +
+               (racks.left.getBoundingClientRect().right || 0)) / 2
+            : 0;
+          var side = e2.clientX < mid ? "left" : "right";
+          var cur = S.moduleById(state, id);
+          if (cur.side !== side) {
+            starts = {};
+            state.racks[side].modules.forEach(function (m) { starts[m.id] = m.y; });
+            starts[id] = startY;
+          }
+          S.dragModule(state, id, side, starts, startY + dy,
+                       e2.clientY - lastY >= 0 ? 1 : -1);
+          lastY = e2.clientY;
+          applyShell();
+        }
+        function onUp() {
+          tab.removeEventListener("pointermove", onMove);
+          tab.removeEventListener("pointerup", onUp);
+          tab.removeEventListener("pointercancel", onUp);
+          moduleDom[id].classList.remove("dragging");
+          if (!moved) {
+            S.toggleModule(state, id); // plain click: collapse / expand
+          } else {
+            S.endModuleDrag(state, S.moduleById(state, id).side);
+          }
+          applyShell();
+        }
+        tab.addEventListener("pointermove", onMove);
+        tab.addEventListener("pointerup", onUp);
+        tab.addEventListener("pointercancel", onUp);
+      });
+    });
+
+    // rack column wheel scroll + edge resize
+    ["left", "right"].forEach(function (side) {
+      var el = racks[side];
+      if (!el) return;
+      el.addEventListener("wheel", function (ev) {
+        ev.preventDefault();
+        state.racks[side].scroll += ev.deltaY;
+        applyShell();
+      }, { passive: false });
+      var edge = el.querySelector(".y2krackedge");
+      if (!edge) return;
+      edge.addEventListener("pointerdown", function (ev) {
+        ev.preventDefault();
+        edge.setPointerCapture(ev.pointerId);
+        edge.classList.add("dragging");
+        var x0 = ev.clientX, w0 = state.racks[side].width || S.RACK_DEFAULT;
+        function onMove(e2) {
+          var dx = e2.clientX - x0;
+          var w = side === "right" ? w0 - dx : w0 + dx;
+          var mid = document.getElementById("middle");
+          S.setRackWidth(state, side, w, mid ? mid.clientWidth : undefined);
+          applyShell();
+          requestRender();
+        }
+        function onUp() {
+          edge.removeEventListener("pointermove", onMove);
+          edge.removeEventListener("pointerup", onUp);
+          edge.removeEventListener("pointercancel", onUp);
+          edge.classList.remove("dragging");
+          persist();
+        }
+        edge.addEventListener("pointermove", onMove);
+        edge.addEventListener("pointerup", onUp);
+        edge.addEventListener("pointercancel", onUp);
+      });
+    });
+
+    // drawer handles
+    document.querySelectorAll(".y2kdrawerhandle").forEach(function (handle) {
+      handle.addEventListener("click", function () {
+        var which = handle.dataset.drawer;
+        state.drawers[which].open = !state.drawers[which].open;
+        applyShell();
+        requestRender();
+      });
+    });
+
+    if (window.ResizeObserver) {
+      var ro = new ResizeObserver(function () { applyShell(); });
+      if (racks.right) ro.observe(racks.right);
+      if (racks.left) ro.observe(racks.left);
+    }
+    applyShell();
+  })();
 
   document.getElementById("btn-layer-add").addEventListener("click", function () {
     flushSelections();

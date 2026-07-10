@@ -142,40 +142,68 @@
 
   #canvaswrap { flex: 1; position: relative; min-width: 0; }
   #stage-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-  #layerspanel {
-    width: 168px; /* resizable via the grip; min/max enforced in JS */
-    flex: none;
+  /* y2kshell racks (y2kshell.js — the xRack port): columns of movable
+     modules; collapsed = a 32pt tab, drag the tab to rearrange or to
+     cross sides, wheel scrolls the column, the inner edge resizes */
+  .y2krack {
+    flex: none; position: relative; overflow: hidden;
+    width: 240px;
     background: var(--panel);
-    border-left: 1px solid var(--panel-edge);
-    display: flex; flex-direction: column;
     font-size: 12px;
     user-select: none;
+  }
+  #rack-right { border-left: 1px solid var(--panel-edge); }
+  #rack-left { border-right: 1px solid var(--panel-edge); }
+  .y2krack.empty { width: 0 !important; border: none; }
+  .y2krackedge {
+    position: absolute; top: 0; bottom: 0; width: 8px; z-index: 12;
+    cursor: ew-resize;
+  }
+  #rack-right .y2krackedge { left: 0; }
+  #rack-left .y2krackedge { right: 0; }
+  .y2krackedge:hover, .y2krackedge.dragging { background: var(--hover); }
+  .y2kmod {
+    position: absolute; left: 0; right: 0;
+    display: flex; flex-direction: column;
+    background: var(--panel);
+    border-bottom: 1px solid var(--panel-edge);
+    overflow: hidden;
+  }
+  .y2kmod.dragging { opacity: 0.85; z-index: 10; box-shadow: 0 4px 14px rgba(0,0,0,0.25); }
+  .y2kmodtab {
+    flex: none; height: 32px;
+    display: flex; align-items: center; gap: 6px;
+    padding: 0 8px;
+    background: var(--chrome);
+    border-top: 1px solid var(--panel-edge);
+    border-bottom: 1px solid var(--panel-edge);
+    color: var(--text); font-weight: 600; font-size: 11px;
+    cursor: grab; touch-action: none;
+  }
+  .y2kmodgrip { color: var(--text-dim); font-size: 12px; }
+  .y2kmod.collapsed .y2kmodbody { display: none; }
+  .y2kmodbody {
+    flex: 1; min-height: 0;
+    display: flex; flex-direction: column;
     overflow-y: auto;
   }
-  #panelgrip {
-    flex: none; width: 8px; cursor: ew-resize;
+  #layerlist, #matlist, #actorlist { flex: 1; min-height: 40px; }
+
+  /* y2kshell drawers: the properties bar and the sequencing stack
+     collapse behind slim handles */
+  .y2kdrawer { flex: none; display: flex; flex-direction: column; }
+  .y2kdrawer.closed > :not(.y2kdrawerhandle) { display: none !important; }
+  .y2kdrawerhandle {
+    flex: none; height: 10px; cursor: pointer;
     background: var(--panel);
-    border-left: 1px solid var(--panel-edge);
-    display: flex; align-items: center; justify-content: center;
-  }
-  #panelgrip::before {
-    content: ""; width: 2px; height: 34px; border-radius: 2px;
-    background: var(--text-dim); opacity: 0.5;
-  }
-  #panelgrip:hover, #panelgrip.dragging { background: var(--hover); }
-  /* section grips: drag to resize the list above (heights persist) */
-  .vgrip {
-    flex: none; height: 7px; cursor: ns-resize;
-    background: var(--panel);
-    border-top: 1px solid var(--panel-edge);
     border-bottom: 1px solid var(--panel-edge);
     display: flex; align-items: center; justify-content: center;
   }
-  .vgrip::before {
-    content: ""; height: 2px; width: 34px; border-radius: 2px;
-    background: var(--text-dim); opacity: 0.5;
+  .y2kdrawerhandle::before {
+    content: ""; width: 44px; height: 3px; border-radius: 2px;
+    background: var(--text-dim); opacity: 0.55;
   }
-  .vgrip:hover, .vgrip.dragging { background: var(--hover); }
+  .y2kdrawerhandle:hover::before { opacity: 1; background: var(--accent); }
   #scenebar {
     display: flex; gap: 4px; padding: 6px;
     border-bottom: 1px solid var(--panel-edge);
@@ -187,13 +215,13 @@
     color: var(--text-dim);
   }
   #layerhead .spacer { flex: 1; }
-  #layerspanel button {
+  .y2kmodbody button {
     background: var(--field); color: var(--text);
     border: 1px solid var(--panel-edge); border-radius: 3px;
     width: 22px; height: 20px; font-size: 11px; line-height: 1;
     cursor: pointer; padding: 0;
   }
-  #layerspanel button:hover { background: var(--btn-hover); }
+  .y2kmodbody button:hover { background: var(--btn-hover); }
   #layerlist { flex: none; overflow-y: auto; } /* height via its grip */
   .layerrow {
     display: flex; align-items: center; gap: 4px;
@@ -378,9 +406,8 @@
   }
   /* stub workspaces: future sections mount here; the editor hides */
   #workspace-stub { display: none; }
-  body.ws-stub-mode #propbar,
-  body.ws-stub-mode #timebar,
-  body.ws-stub-mode #seqbar,
+  body.ws-stub-mode #drawer-top,
+  body.ws-stub-mode #drawer-bottom,
   body.ws-stub-mode #middle { display: none; }
   body.ws-stub-mode #workspace-stub {
     display: flex; flex: 1;
@@ -393,9 +420,8 @@
 
   /* mounted workspaces (brainstorm, writing, …): the active container
      covers the editor chrome */
-  body.ws-mount-mode #propbar,
-  body.ws-mount-mode #timebar,
-  body.ws-mount-mode #seqbar,
+  body.ws-mount-mode #drawer-top,
+  body.ws-mount-mode #drawer-bottom,
   body.ws-mount-mode #middle { display: none; }
   #brainstorm-board, #writing-view, #pitch-view, #boards-view,
   #audio-view { display: none; }
@@ -927,6 +953,7 @@
     <div id="fileinfo">no file loaded</div>
   </div>
 
+  <div id="drawer-top" class="y2kdrawer">
   <div id="propbar">
     <span id="text-opts" class="inactive">
       <label class="ctl" title="Font family">
@@ -956,6 +983,9 @@
       ⟳<input type="number" id="sel-rotation" value="0" step="1" style="width:56px" disabled>°
     </label>
   </div>
+  <div class="y2kdrawerhandle" data-drawer="top"
+       title="Collapse / expand the properties drawer"></div>
+  </div>
 
   <div id="workspace-stub">
     <div>
@@ -984,6 +1014,9 @@
       <button data-tool="bucket" title="Paint bucket (K)">🪣</button>
       <button data-tool="eraser" title="Eraser (E)">🧽</button>
     </div>
+    <div id="rack-left" class="y2krack empty">
+      <div class="y2krackedge" data-side="left" title="Drag to resize the rack"></div>
+    </div>
     <div id="canvaswrap">
       <canvas id="stage-canvas"></canvas>
       <div id="editcrumb" class="hidden">
@@ -993,8 +1026,12 @@
       <div id="ctxmenu" class="hidden"></div>
       <div id="toast"></div>
     </div>
-    <div id="panelgrip" title="Drag to resize the panel"></div>
-    <div id="layerspanel">
+    <div id="rack-right" class="y2krack">
+      <div class="y2krackedge" data-side="right" title="Drag to resize the rack"></div>
+      <div class="y2kmod" data-mod="layers">
+        <div class="y2kmodtab" title="Drag to rearrange · click to collapse">
+          <span class="y2kmodgrip">⠿</span>Scenes &amp; Layers</div>
+        <div class="y2kmodbody">
       <div id="scenebar">
         <select id="scene-select" title="Scene"></select>
         <button id="btn-scene-add" title="Add scene">+</button>
@@ -1008,7 +1045,12 @@
         <button id="btn-layer-down" title="Move layer down">▼</button>
       </div>
       <div id="layerlist"></div>
-      <div class="vgrip" id="grip-layers" title="Drag to resize the layer list"></div>
+        </div>
+      </div>
+      <div class="y2kmod" data-mod="materials">
+        <div class="y2kmodtab" title="Drag to rearrange · click to collapse">
+          <span class="y2kmodgrip">⠿</span>Materials</div>
+        <div class="y2kmodbody">
       <div id="mathead">
         <span>Materials</span>
         <span class="spacer"></span>
@@ -1016,7 +1058,6 @@
         <span id="mat-gpu" title="WebGPU availability for gpu-class materials"></span>
       </div>
       <div id="matlist"></div>
-      <div class="vgrip" id="grip-mats" title="Drag to resize the material list"></div>
       <div id="matedit" class="hidden">
         <label>Type
           <select id="mat-type"></select>
@@ -1052,6 +1093,12 @@
         </div>
         <div id="mat-profile"></div>
       </div>
+        </div>
+      </div>
+      <div class="y2kmod" data-mod="library">
+        <div class="y2kmodtab" title="Drag to rearrange · click to collapse">
+          <span class="y2kmodgrip">⠿</span>Library</div>
+        <div class="y2kmodbody">
       <div id="actorhead">
         <span>Library</span>
         <span class="spacer"></span>
@@ -1062,7 +1109,8 @@
                style="display:none">
       </div>
       <div id="actorlist"></div>
-      <div class="vgrip" id="grip-actors" title="Drag to resize the actor list"></div>
+        </div>
+      </div>
     </div>
     <div id="debugpanel" class="hidden">
       <div id="dbg-est"></div>
@@ -1072,6 +1120,9 @@
     </div>
   </div>
 
+  <div id="drawer-bottom" class="y2kdrawer">
+  <div class="y2kdrawerhandle" data-drawer="bottom"
+       title="Collapse / expand the sequencing drawer"></div>
   <div id="seqbar"></div>
 
   <div id="timebar">
@@ -1085,6 +1136,7 @@
     </label>
     <span id="tl-counter">1 / 1</span>
     <div id="tl-frames"></div>
+  </div>
   </div>
 
   <div id="statusbar">
@@ -1133,6 +1185,7 @@
   <script src="js/ttf.js"></script>
   <script src="js/project.js"></script>
   <script src="js/sequence.js"></script>
+  <script src="js/y2kshell.js"></script>
   <script src="js/actors.js"></script>
   <script src="js/library.js"></script>
   <script src="js/thumbs.js"></script>
