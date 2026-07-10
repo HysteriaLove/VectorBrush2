@@ -807,12 +807,20 @@
   function seekToSpan(sp) {
     if (!sp) return;
     view.app.exec({ op: "boardsSelect", panel: sp.index });
-    if (!rig.playing) {
-      rig.masterMs = Math.round(sp.startMs);
-      if (view.timeEl) view.timeEl.textContent = fmtMs(rig.masterMs);
-      syncBoardStrip();
-      renderLanes();
+    // land safely INSIDE the span: boundaries sit on fractional ms
+    // (frames × 1000/fps), and rounding DOWN parked the playhead a
+    // hair before the boundary — still in the previous panel, so the
+    // center never advanced (user bug). Ceil is always ≥ the start
+    // and a frame is ~42ms, so it can never overshoot the span.
+    rig.masterMs = Math.ceil(sp.startMs);
+    if (view.timeEl) view.timeEl.textContent = fmtMs(rig.masterMs);
+    if (rig.playing) {
+      // clicking a board WHILE PLAYING jumps the transport there
+      stopPlayback();
+      togglePlay();
     }
+    syncBoardStrip();
+    renderLanes();
   }
 
   function makeViewerSlot(className, offset) {
