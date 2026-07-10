@@ -133,10 +133,11 @@
     return beat ? (beat.panels[boards.cur.panel] || null) : null;
   }
 
-  /** The beat a panel narrates — the spine entry, or null. */
+  /** The deck's current BEAT (selection is beat-indexed, so a written
+   *  but unboarded beat — an empty slot — is selectable too). */
   function beatOfCurrent(project) {
-    var panel = currentPanel(project);
-    return panel ? VB.spineBeatOfPanel(project, panel.id) : null;
+    var beat = beatsOf(project)[boardsOf(project).cur.beat];
+    return beat ? VB.spineBeatById(project, beat.id) : null;
   }
 
   /** The beat's first action block — what the deck's text field edits. */
@@ -205,7 +206,9 @@
       ctx.fillStyle = theme.getPropertyValue("--text-dim").trim() || "#6b7079";
       ctx.font = "13px system-ui";
       ctx.textAlign = "center";
-      ctx.fillText("No panels yet — add one.", w / 2, h / 2);
+      ctx.fillText(beatOfCurrent(view.app.project)
+        ? "no frame here yet — ＋ Panel boards this beat"
+        : "no beats yet — ＋ Beat starts the story", w / 2, h / 2);
       return;
     }
     var m = stageMetrics();
@@ -274,47 +277,70 @@
   function refresh() {
     if (!view.host) return;
     var project = view.app.project;
-    var flat = flattenPanels(project);
     var current = currentPanel(project);
 
     view.strip.innerHTML = "";
-    flat.forEach(function (entry, i) {
-      var panel = entry.panel;
-      var isCur = panel === current;
-      var cellEl = document.createElement("div");
-      cellEl.className = "ptthumb" + (isCur ? " cur" : "");
-      var beatLine = VB.spineBeatText(entry.beat).split("\n")[0];
-      cellEl.title = "Panel " + (i + 1) + " · " + panel.duration + "f" +
-        (beatLine ? " · " + beatLine : "");
-      var tc = document.createElement("canvas");
-      tc.width = 96;
-      tc.height = 54;
-      cellEl.appendChild(tc);
-      var cached = VB.thumbGet("panel:" + panel.id, panel.cell);
-      var paint = function (cv) {
-        if (cv && tc.isConnected) tc.getContext("2d").drawImage(cv, 0, 0);
-      };
-      if (cached) paint(cached);
-      else VB.thumbRequest("panel:" + panel.id, panel.cell, 96, 54, i).then(paint);
-      var num = document.createElement("span");
-      num.textContent = panel.duration + "f";
-      cellEl.appendChild(num);
-      cellEl.addEventListener("click", function () {
-        stopAnimatic();
-        commitCaption();
-        var hit = panelById(project, panel.id);
-        exec({ op: "boardsSelect", beat: hit.beatIndex, panel: hit.index });
-        if (view.drawMode) retargetDraw();
+    var beats = beatsOf(project);
+    var curBeatIdx = boardsOf(project).cur.beat;
+    var count = 0;
+    beats.forEach(function (beat, bi) {
+      if (!beat.panels.length) {
+        // a written-but-unboarded beat: an EMPTY SLOT (the membrane's
+        // placeholder — the writer made it, the artist fills it)
+        var slot = document.createElement("div");
+        slot.className = "ptthumb bdslot" +
+          (bi === curBeatIdx ? " cur" : "");
+        var slotLine = VB.spineBeatText(beat).split("\n")[0];
+        slot.title = slotLine ? slotLine + " — no frame yet"
+                              : "empty beat — no frame yet";
+        slot.textContent = "▢";
+        slot.addEventListener("click", function () {
+          stopAnimatic();
+          commitCaption();
+          exec({ op: "boardsSelect", beat: bi, panel: 0 });
+        });
+        view.strip.appendChild(slot);
+        return;
+      }
+      beat.panels.forEach(function (panel, pi) {
+        var i = count++;
+        var isCur = panel === current;
+        var cellEl = document.createElement("div");
+        cellEl.className = "ptthumb" + (isCur ? " cur" : "");
+        var beatLine = VB.spineBeatText(beat).split("\n")[0];
+        cellEl.title = "Panel " + (i + 1) + " · " + panel.duration + "f" +
+          (beatLine ? " · " + beatLine : "");
+        var tc = document.createElement("canvas");
+        tc.width = 96;
+        tc.height = 54;
+        cellEl.appendChild(tc);
+        var cached = VB.thumbGet("panel:" + panel.id, panel.cell);
+        var paint = function (cv) {
+          if (cv && tc.isConnected) tc.getContext("2d").drawImage(cv, 0, 0);
+        };
+        if (cached) paint(cached);
+        else VB.thumbRequest("panel:" + panel.id, panel.cell,
+                             96, 54, i).then(paint);
+        var num = document.createElement("span");
+        num.textContent = panel.duration + "f";
+        cellEl.appendChild(num);
+        cellEl.addEventListener("click", function () {
+          stopAnimatic();
+          commitCaption();
+          exec({ op: "boardsSelect", beat: bi, panel: pi });
+          if (view.drawMode) retargetDraw();
+        });
+        view.strip.appendChild(cellEl);
       });
-      view.strip.appendChild(cellEl);
     });
 
     if (view.captionEl && !isEditingCaption()) {
       var curBeat = beatOfCurrent(project);
       var action = curBeat && actionBlockOf(curBeat.beat);
       view.captionEl.value = action ? (action.content || "") : "";
-      view.captionEl.disabled = !current;
+      view.captionEl.disabled = !curBeat; // text belongs to the BEAT
     }
+    renderLines();
     if (view.durInput && current &&
         document.activeElement !== view.durInput) {
       view.durInput.value = String(current.duration);
@@ -327,6 +353,67 @@
   function exec(op) {
     view.app.exec(op);
     refresh();
+  }
+
+  // the current beat's dialogue as editable rows — every commit is the
+  // owning writing.* op, so the script editor sees it instantly
+  function renderLines() {
+    if (!view.linesEl) return;
+    if (view.linesEl.contains(document.activeElement)) return;
+    view.linesEl.innerHTML = "";
+    var hit = beatOfCurrent(view.app.project);
+    if (!hit) return;
+    hit.beat.blocks.forEach(function (b) {
+      if (b.kind !== "line") return;
+      var row = document.createElement("div");
+      row.className = "bdline";
+      var who = document.createElement("input");
+      who.value = b.character || "";
+      who.placeholder = "WHO";
+      who.className = "bdwho";
+      who.addEventListener("blur", function () {
+        var v = who.value.trim();
+        if (v !== (b.character || "")) {
+          exec({ op: "blockEdit", block: b.id, character: v });
+        }
+      });
+      var say = document.createElement("input");
+      say.value = VB.lineTextOf(b);
+      say.placeholder = "dialogue…";
+      say.className = "bdsay";
+      say.addEventListener("blur", function () {
+        if (say.value !== VB.lineTextOf(b)) {
+          exec({ op: "blockEdit", block: b.id, text: say.value });
+        }
+      });
+      [who, say].forEach(function (inp) {
+        inp.addEventListener("keydown", function (ev) {
+          if (ev.key === "Enter" || ev.key === "Escape") inp.blur();
+          ev.stopPropagation();
+        });
+      });
+      var del = document.createElement("button");
+      del.textContent = "✕";
+      del.title = "Remove this line from the script";
+      del.addEventListener("click", function () {
+        exec({ op: "blockRemove", block: b.id });
+      });
+      row.appendChild(who);
+      row.appendChild(say);
+      row.appendChild(del);
+      view.linesEl.appendChild(row);
+    });
+    var add = document.createElement("button");
+    add.className = "bdaddline";
+    add.textContent = "＋ dialogue";
+    add.title = "Add a dialogue line to this beat's script";
+    add.addEventListener("click", function () {
+      exec({ op: "blockAdd", id: VB.actorNewId("line"),
+             beat: hit.beat.id, kind: "line", character: "", text: "" });
+      var rows = view.linesEl.querySelectorAll(".bdwho");
+      if (rows.length) rows[rows.length - 1].focus();
+    });
+    view.linesEl.appendChild(add);
   }
 
   /** The deck feeds the current spine beat, minting a slug + beat when
@@ -557,7 +644,28 @@
       b.addEventListener("click", fn);
       return b;
     }
-    panelsPanel.appendChild(toolBtn("＋ Panel", "Add a panel after the current one",
+    panelsPanel.appendChild(toolBtn("＋ Beat",
+      "New story moment — a new frame AND a new script beat",
+      function () {
+        commitCaption();
+        var base = ensureBeat();
+        var project = app.project;
+        if (!base.panels.length) {
+          // an empty beat is an empty SLOT (a written-but-unboarded
+          // moment): the first frame fills it, no new beat
+          exec({ op: "panelAdd", beat: base.id,
+                 id: VB.actorNewId("panel") });
+        } else {
+          var hit = VB.spineBeatById(project, base.id);
+          var bid = VB.actorNewId("beat");
+          app.exec({ op: "spineBeatAdd", id: bid, scene: hit.scene.id,
+                     index: hit.index + 1 });
+          exec({ op: "panelAdd", beat: bid, id: VB.actorNewId("panel") });
+        }
+        if (view.drawMode) retargetDraw();
+      }));
+    panelsPanel.appendChild(toolBtn("＋ Panel",
+      "More coverage of the CURRENT beat (no script change)",
       function () {
         commitCaption();
         var beat = ensureBeat();
@@ -648,6 +756,13 @@
     host.appendChild(caption);
     view.captionEl = caption;
 
+    // the beat's dialogue — real script Lines, edited from the deck
+    // through the owning writing.* ops (op routing)
+    var linesEl = document.createElement("div");
+    linesEl.id = "bd-lines";
+    host.appendChild(linesEl);
+    view.linesEl = linesEl;
+
     var stripEl = document.createElement("div");
     stripEl.id = "bd-strip";
     host.appendChild(stripEl);
@@ -723,6 +838,7 @@
     view.stage = null;
     view.strip = null;
     view.captionEl = null;
+    view.linesEl = null;
   }
 
   window.VB = window.VB || {};

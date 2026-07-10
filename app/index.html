@@ -566,6 +566,10 @@
   #brainstorm-board.wsactive, #writing-view.wsactive, #pitch-view.wsactive,
   #boards-view.wsactive, #audio-view.wsactive, #composite-view.wsactive {
     display: flex; flex: 1; flex-direction: column; min-height: 0;
+    /* the bottom dock's drawer slides OVER content; mounted views have
+       bottom-anchored bars, so the overlap becomes padding (applyShell
+       keeps the variable in sync with the drawer pull) */
+    padding-bottom: var(--botdock-overlap, 0px);
   }
 
   /* Composite workspace (composite.js — three.js stage) */
@@ -718,23 +722,40 @@
   }
   #boards-view.animatic #bd-caption,
   #boards-view.animatic #bd-strip { display: none; }
+  /* the beat's dialogue — script Lines edited from the deck */
   #bd-lines {
-    flex: none; width: 220px; overflow-y: auto;
+    flex: none; display: flex; flex-wrap: wrap; gap: 4px;
+    align-items: center;
     background: var(--panel);
-    border-left: 1px solid var(--panel-edge);
-    font-size: 12px; padding: 6px;
+    border-top: 1px solid var(--row-edge);
+    font-size: 12px; padding: 4px 10px;
   }
   .bdline {
-    display: flex; align-items: flex-start; gap: 4px;
+    display: flex; align-items: center; gap: 4px;
     background: var(--field); border: 1px solid var(--panel-edge);
-    border-radius: 3px; padding: 4px 6px; margin-bottom: 4px;
+    border-radius: 3px; padding: 2px 4px;
     color: var(--text);
   }
-  .bdline.missing { color: var(--warn); }
-  .bdline .aname { flex: 1; white-space: pre-wrap; word-break: break-word; }
+  .bdline input {
+    background: none; border: none; outline: none;
+    color: var(--text); font: 12px system-ui, sans-serif;
+  }
+  .bdwho { width: 72px; text-transform: uppercase; font-weight: 600; }
+  .bdsay { width: 220px; }
   .bdline button {
     background: none; border: none; color: var(--text-dim);
     cursor: pointer; padding: 0 2px;
+  }
+  .bdaddline {
+    background: none; border: 1px dashed var(--panel-edge);
+    border-radius: 3px; color: var(--text-dim);
+    font-size: 11px; padding: 2px 8px; cursor: pointer;
+  }
+  .bdaddline:hover { color: var(--accent); border-color: var(--accent); }
+  /* a written-but-unboarded beat: an empty slot awaiting its frame */
+  .ptthumb.bdslot {
+    display: flex; align-items: center; justify-content: center;
+    border-style: dashed; color: var(--text-dim); font-size: 18px;
   }
   #bd-beats {
     flex: none; max-height: 190px; overflow-y: auto;
@@ -925,6 +946,39 @@
   .wrbody { min-height: 360px; white-space: pre-wrap; }
   .wredit:empty::before { content: attr(data-ph); color: #9a988c; }
   .wrtext { font: 14px/1.5 Georgia, "Times New Roman", serif; }
+  /* the SCRIPT editor: the spine rendered as prose — slugs → beats;
+     the rail marks each beat's Boards frames (the interchange seam) */
+  .wrscript { font: 14px/1.5 Georgia, "Times New Roman", serif; }
+  .wrslug {
+    font: 700 13px/1.5 system-ui, sans-serif; letter-spacing: 0.08em;
+    text-transform: uppercase; color: #1b1b1b;
+    margin: 18px 0 8px; padding-bottom: 2px;
+    border-bottom: 1px solid #d8d4c6;
+  }
+  .wrslug:first-child { margin-top: 0; }
+  .wrbeat { display: flex; gap: 10px; margin-bottom: 6px; }
+  .wrrail {
+    flex: none; width: 30px; text-align: right;
+    font: 10px/1.9 system-ui, sans-serif; color: #9a988c;
+    cursor: default; user-select: none;
+  }
+  .wrbeat:hover .wrrail { color: #4a6fa5; }
+  .wrbeatbody { flex: 1; min-width: 0; }
+  .wraction { white-space: pre-wrap; }
+  .wrline { padding: 2px 44px 0; }
+  .wrsay { font: 14px/1.45 Georgia, "Times New Roman", serif; margin: 0 28px; }
+  .wrnote {
+    font: italic 12px/1.5 Georgia, serif; color: #7a7666;
+    margin: 2px 0;
+  }
+  .wradd {
+    background: none; border: 1px dashed #c9c5b6; border-radius: 3px;
+    color: #9a988c; font-size: 11px; padding: 2px 10px;
+    cursor: pointer; margin: 2px 0 10px 40px;
+  }
+  .wradd:hover { color: #4a6fa5; border-color: #4a6fa5; background: none; }
+  .wraddscene { display: block; margin: 14px auto 0; }
+  .wrhint { color: #9a988c; text-align: center; padding: 24px 0 8px; }
   .wr-line { padding: 0 44px; }
   .wrchar {
     text-align: center; font: 700 12px/1.5 system-ui, sans-serif;

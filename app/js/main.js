@@ -1996,6 +1996,13 @@
       var dsBot = document.getElementById("dockspace-bottom");
       var xb = document.getElementById("xbar-bottom");
       if (dsBot && xb) dsBot.style.height = xb.offsetHeight + "px";
+      // the drawer slides OVER the canvas (pannable — fine), but
+      // mounted workspace views have bottom-anchored bars: give them
+      // the dock's overlap as padding so nothing hides under it
+      if (botdock && xb) {
+        document.body.style.setProperty("--botdock-overlap",
+          Math.max(0, botdock.offsetHeight - xb.offsetHeight) + "px");
+      }
       layoutFloats();
       persist();
     }
