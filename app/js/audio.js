@@ -902,7 +902,9 @@
     slot.root.style.display = sp ? "" : "none";
     if (!sp) return;
     // 4:3 — the boards' half-stage shape
-    if (slot.cvs.width !== 128) { slot.cvs.width = 128; slot.cvs.height = 96; }
+    if (slot.cvs.width !== 128 || slot.cvs.height !== 96) {
+      slot.cvs.width = 128; slot.cvs.height = 96;
+    }
     slot.num.textContent = String(sp.index + 1) + " · " +
       ((sp.endMs - sp.startMs) / 1000).toFixed(1) + "s";
     var ctx = slot.cvs.getContext("2d");
@@ -947,6 +949,30 @@
     }
   }
 
+  /** The center card fits the BOARD AREA: dragging the splitter (a
+   *  taller timeline = a shorter viewer) shrinks the card so the whole
+   *  form — 4:3 drawing + dialogue — stays inside (user spec). Width
+   *  follows the height budget; the canvas redraws when it moves. */
+  function sizeCenterCard(cur) {
+    var c = view.bmain;
+    if (!c || !view.board) return;
+    var dlg = c.root.lastElementChild;
+    // the card may be CLIPPED right now (max-height) — measure the
+    // dialog by its natural scrollHeight, capped so a long dialogue
+    // scrolls instead of crushing the drawing
+    var chrome = Math.max(0,
+      c.root.offsetHeight - c.cvs.offsetHeight - dlg.offsetHeight);
+    var want = Math.min(dlg.scrollHeight, 120);
+    var free = view.board.clientHeight - 20 - chrome - want;
+    var w = Math.min(520, window.innerWidth * 0.38,
+                     Math.max(200, free * 4 / 3));
+    var px = Math.round(w) + "px";
+    if (c.root.style.width !== px) {
+      c.root.style.width = px;
+      drawPanelInto(c.cvs, cur ? cur.panel : null);
+    }
+  }
+
   function syncBoardStrip(force) {
     if (!view.board || !view.app || !view.bmain) return;
     var project = view.app.project;
@@ -961,6 +987,7 @@
     }
     view.bmain.root.style.visibility = "visible";
     updateCenterCard(cur, force);
+    sizeCenterCard(cur);
     view.bsides.forEach(function (s) {
       sideThumb(s.slot, spans[cur.index + s.off] || null, cur.index);
     });

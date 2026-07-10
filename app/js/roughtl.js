@@ -244,6 +244,12 @@
     if (view.app.requestRender) view.app.requestRender();
   }
 
+  // pens/synthetic pointers can be gone by the time we capture —
+  // dropping capture must not kill the handler (composite lesson)
+  function capture(el, ev) {
+    try { el.setPointerCapture(ev.pointerId); } catch (e) { /* pen */ }
+  }
+
   function wire() {
     var cvs = view.cvs;
     cvs.addEventListener("pointerdown", function (ev) {
@@ -251,13 +257,13 @@
       var x = ev.clientX - r.left;
       if (ev.button === 1) {
         ev.preventDefault();
-        cvs.setPointerCapture(ev.pointerId);
+        capture(cvs, ev);
         view.drag = { kind: "pan", x0: x, pan0: view.panMs };
         return;
       }
       if (ev.button !== 0) return;
       if (view.app.stopPlayback) view.app.stopPlayback();
-      cvs.setPointerCapture(ev.pointerId);
+      capture(cvs, ev);
       scrubTo(msOf(x));
       view.drag = { kind: "seek" };
     });
