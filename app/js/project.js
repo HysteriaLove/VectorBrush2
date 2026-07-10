@@ -62,6 +62,9 @@
     // Boards (boards.js): storyboard beats → panels (y2kvector cells,
     // durations, attached Story line ids). Rides the journal.
     this.boards = { beats: [], cur: { beat: 0, panel: 0 } };
+    // The object LIBRARY (library.js): symbols (converted selections)
+    // and backgrounds — global containers for instantiation later.
+    this.library = [];
     // Actor edit mode (Flash's symbol-edit): when set, scene()/stage()/
     // activeCell() resolve to the targeted actor cell, so every tool,
     // renderer, and journaled art op follows. Set ONLY through the
@@ -153,6 +156,16 @@
         if (slides[si2].id === t.pitchSlide) {
           return { cell: slides[si2].cell, actor: null,
                    label: "pitch ▸ slide " + (si2 + 1) };
+        }
+      }
+      return null;
+    }
+    if (t.librarySymbol) {
+      var lib = this.library || [];
+      for (var li2 = 0; li2 < lib.length; li2++) {
+        if (lib[li2].id === t.librarySymbol) {
+          return { cell: lib[li2].cell, actor: null,
+                   label: "library ▸ " + lib[li2].name };
         }
       }
       return null;

@@ -128,6 +128,9 @@
   // ---- board view (DOM; mounted by the shell into its workspace tab) -----------
 
   var DRAW_TOOLS = [
+    ["select", "➤", "Select / marquee (V)"],
+    ["lasso", "➰", "Lasso (L)"],
+    ["transform", "▣", "Free Transform (Q)"],
     ["pencil", "✎", "Pencil (P)"],
     ["line", "╱", "Line (N)"],
     ["oval", "◯", "Oval (O)"],
@@ -365,6 +368,13 @@
       if (view.app.doRedo) view.app.doRedo();
       return;
     }
+    if ((ev.key === "Delete" || ev.key === "Backspace") && view.drawMode) {
+      if (view.app.deleteSelection && view.app.deleteSelection()) {
+        ev.preventDefault();
+        renderInk();
+      }
+      return;
+    }
     if ((ev.key === "Delete" || ev.key === "Backspace") && !view.drawMode) {
       var ids = selectedIds();
       if (ids.length) {
@@ -380,7 +390,8 @@
       return;
     }
     if (view.drawMode && !ev.ctrlKey && !ev.altKey) {
-      var toolKeys = { p: "pencil", n: "line", o: "oval", r: "rect",
+      var toolKeys = { v: "select", l: "lasso", q: "transform",
+                       p: "pencil", n: "line", o: "oval", r: "rect",
                        b: "brush", k: "bucket", e: "eraser" };
       var k = ev.key.toLowerCase();
       if (toolKeys[k]) {
@@ -540,6 +551,18 @@
         drag = { kind: "marquee", s0: screenPoint(ev), p0: p };
         if (!ev.shiftKey) { view.selected = {}; refresh(); }
       }
+    });
+
+    // right-click a marquee/lasso selection → send it to the library
+    board.addEventListener("contextmenu", function (ev) {
+      if (!view.drawMode) return;
+      var clip = view.app.currentSelectionClip &&
+                 view.app.currentSelectionClip();
+      if (!clip) return;
+      view.app.showMenu(ev.clientX, ev.clientY, [
+        { label: "Convert to Symbol",
+          fn: view.app.convertSelectionToSymbol }
+      ]);
     });
 
     board.addEventListener("pointermove", function (ev) {

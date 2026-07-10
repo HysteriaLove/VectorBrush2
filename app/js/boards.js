@@ -209,6 +209,9 @@
   // ---- workspace view (deck-style, like Pitch) -----------------------------------
 
   var DRAW_TOOLS = [
+    ["select", "➤", "Select / marquee (V)"],
+    ["lasso", "➰", "Lasso (L)"],
+    ["transform", "▣", "Free Transform (Q)"],
     ["pencil", "✎", "Pencil (P)"],
     ["line", "╱", "Line (N)"],
     ["oval", "◯", "Oval (O)"],
@@ -504,6 +507,13 @@
       if (view.app.doRedo) view.app.doRedo();
       return;
     }
+    if (view.drawMode && (ev.key === "Delete" || ev.key === "Backspace")) {
+      if (view.app.deleteSelection && view.app.deleteSelection()) {
+        ev.preventDefault();
+        renderStage();
+      }
+      return;
+    }
     var flat = flattenPanels(view.app.project);
     if (ev.key === "ArrowRight" && !view.drawMode && flat.length) {
       var cur = flat.indexOf(flat.filter(function (e) {
@@ -526,7 +536,8 @@
       return;
     }
     if (view.drawMode && !ev.ctrlKey && !ev.altKey) {
-      var toolKeys = { p: "pencil", n: "line", o: "oval", r: "rect",
+      var toolKeys = { v: "select", l: "lasso", q: "transform",
+                       p: "pencil", n: "line", o: "oval", r: "rect",
                        b: "brush", k: "bucket", e: "eraser" };
       var k = ev.key.toLowerCase();
       if (toolKeys[k]) {
@@ -685,6 +696,17 @@
     stage.addEventListener("pointercancel", function () {
       if (activeTool && activeTool.cancel) activeTool.cancel();
       activeTool = null;
+    });
+    // right-click a marquee/lasso selection → send it to the library
+    stage.addEventListener("contextmenu", function (ev) {
+      if (!view.drawMode || view.animatic.playing) return;
+      var clip = view.app.currentSelectionClip &&
+                 view.app.currentSelectionClip();
+      if (!clip) return;
+      view.app.showMenu(ev.clientX, ev.clientY, [
+        { label: "Convert to Symbol",
+          fn: view.app.convertSelectionToSymbol }
+      ]);
     });
 
     window.addEventListener("keydown", onKeyDown);

@@ -873,6 +873,25 @@
     return tools.select;
   }
 
+  /** The current selection as a self-contained clip (shape selections
+   *  only) — what "Convert to Symbol" consumes. */
+  app.currentSelectionClip = function () {
+    var src = selectionSource();
+    var payload = src.copySelection ? src.copySelection() : null;
+    return payload && payload.kind === "shape" ? payload.clip : null;
+  };
+
+  app.deleteSelection = function () { return deleteSelection(); };
+
+  /** Right-click → the library (library.js): the selection's clip
+   *  materializes into a global symbol; the art stays in place. */
+  app.convertSelectionToSymbol = function () {
+    var clip = app.currentSelectionClip();
+    if (!clip) { setMsg("select something first (marquee / lasso)"); return; }
+    app.exec({ op: "symbolCreate", id: VB.actorNewId("sym"), clip: clip });
+    setMsg("symbol added to the library");
+  };
+
   function copySelection() {
     var src = selectionSource();
     var payload = src.copySelection ? src.copySelection() : null;
@@ -2124,6 +2143,38 @@
         list.appendChild(pr);
       });
     });
+    // library objects: symbols (converted selections) and backgrounds
+    (app.project.library || []).forEach(function (entry) {
+      var row = document.createElement("div");
+      var editing = t && t.librarySymbol === entry.id;
+      row.className = "actrow" + (editing ? " active" : "");
+      row.title = entry.kind + " — click to edit its art";
+      row.appendChild(thumbCanvas("lib:" + entry.id, entry.cell));
+      var nm = document.createElement("span");
+      nm.className = "aname";
+      nm.textContent = (entry.kind === "background" ? "🖼 " : "◆ ") + entry.name;
+      nm.title = "Double-click to rename";
+      nm.addEventListener("dblclick", function (ev) {
+        ev.stopPropagation();
+        var n = prompt("Name", entry.name);
+        if (n && n !== entry.name) {
+          app.exec({ op: "symbolRename", id: entry.id, name: n });
+        }
+      });
+      row.appendChild(nm);
+      row.appendChild(actorPanelBtn("✕", "Delete from the library", function () {
+        if (!confirm('Delete "' + entry.name + '" from the library?')) return;
+        if (editing) app.exec({ op: "editTargetClear" });
+        app.exec({ op: "symbolRemove", id: entry.id });
+      }));
+      row.addEventListener("click", function () {
+        if (editing) return;
+        app.exec({ op: "editTargetSet",
+                   target: { librarySymbol: entry.id } });
+        fitView();
+      });
+      list.appendChild(row);
+    });
   }
 
   // Layer/scene structure ops make no sense inside an actor cell; the
@@ -2147,6 +2198,12 @@
   document.getElementById("btn-actor-add").addEventListener("click", function () {
     app.exec({ op: "actorAdd", id: VB.actorNewId("actor"),
                poseId: VB.actorNewId("pose") });
+  });
+
+  document.getElementById("btn-bg-add").addEventListener("click", function () {
+    app.exec({ op: "symbolCreate", id: VB.actorNewId("bg"),
+               kind: "background" });
+    setMsg("background added to the library — click it to paint");
   });
 
   var actorImportInput = document.getElementById("actor-import-file");
@@ -2178,6 +2235,47 @@
     if (tag === "INPUT" || tag === "TEXTAREA" ||
         (el && el.isContentEditable)) return;
     ev.preventDefault();
+  });
+
+  // ---- app context menu ----------------------------------------------------------
+  // One floating menu for every right-click action in the app; any
+  // pointer-down elsewhere dismisses it.
+  var appMenuEl = null;
+  app.hideMenu = function () {
+    if (appMenuEl && appMenuEl.parentElement) {
+      appMenuEl.parentElement.removeChild(appMenuEl);
+    }
+    appMenuEl = null;
+  };
+  app.showMenu = function (x, y, items) {
+    app.hideMenu();
+    var menu = document.createElement("div");
+    menu.id = "appmenu";
+    items.forEach(function (it) {
+      var row = document.createElement("div");
+      row.className = "appmenuitem";
+      row.textContent = it.label;
+      row.addEventListener("pointerdown", function (ev) {
+        ev.stopPropagation();
+        app.hideMenu();
+        it.fn();
+      });
+      menu.appendChild(row);
+    });
+    menu.style.left = Math.max(4, Math.min(x, window.innerWidth - 190)) + "px";
+    menu.style.top = Math.max(4, Math.min(y, window.innerHeight - 30 * items.length - 10)) + "px";
+    document.body.appendChild(menu);
+    appMenuEl = menu;
+  };
+  window.addEventListener("pointerdown", function () { app.hideMenu(); }, true);
+
+  // the editor canvas: right-click a selection → library actions
+  canvas.addEventListener("contextmenu", function (ev) {
+    var clip = app.currentSelectionClip();
+    if (!clip) return;
+    app.showMenu(ev.clientX, ev.clientY, [
+      { label: "Convert to Symbol", fn: app.convertSelectionToSymbol }
+    ]);
   });
 
   // ---- boot ------------------------------------------------------------------------

@@ -144,6 +144,16 @@ Project
   controls (future) attach to instances; edits to the prototype flow to
   all instances. Scene instances already work this way; actors, symbols,
   NoteObjects, and boards adopt the same two-level id shape from day one.
+- **The object library (DECIDED 2026-07-10):** scenes and actors are data
+  containers (the reference model), and SYMBOLS are the third container
+  type: any marquee/lasso selection can be right-clicked → "Convert to
+  Symbol", which materializes its self-contained clip into a library cell.
+  BACKGROUNDS are the fourth kind — stage-sized backdrop containers.
+  Actors, symbols, and backgrounds live together in the Library panel;
+  entries can be deleted (a management system for instances — including
+  delete-all-instances — comes later, with instantiation). Library cells
+  are ordinary y2kvector docs edited through the journaled editTarget, so
+  the whole tool suite and byte-exact replay apply for free.
 - **All vector art is a y2kvector document** (the planar map engine we
   already have — the in-code `VBDocument` class and the current `.vbd`
   codec are renamed to y2kvector, extension `.y2kvector`, when the shell

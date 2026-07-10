@@ -48,6 +48,7 @@
 <script src="../js/history.js"></script>
 <script src="../js/project.js"></script>
 <script src="../js/actors.js"></script>
+<script src="../js/library.js"></script>
 <script src="../js/thumbs.js"></script>
 <script src="../js/brainstorm.js"></script>
 <script src="../js/pitch.js"></script>
@@ -3654,6 +3655,92 @@
   } catch (err) {
     fail++;
     log("  ACTORS EXCEPTION: " + (err && err.stack || err), "fail");
+  }
+
+  // ============================== library =====================================
+  // The object library (library.js): SYMBOLS — marquee/lasso selections
+  // converted through their self-contained clip (the same payload the
+  // clipboard carries) — and stage-sized BACKGROUNDS. Entries are
+  // containers whose cells the whole tool suite edits through the
+  // journaled editTarget; everything replays byte-exact.
+  log("");
+  log("library:");
+  try {
+    var lse = new VB.Session({ width: 11000, height: 8000 });
+    lse.exec({ op: "brush",
+               points: [{ x: 2000, y: 2000 }, { x: 3000, y: 2200 }],
+               radius: 300, color: { r: 220, g: 40, b: 40, a: 255 } });
+    var lband = [{ x: 1500, y: 1500 }, { x: 3600, y: 1500 },
+                 { x: 3600, y: 2700 }, { x: 1500, y: 2700 }];
+    var lclip = VB.clipFromLifted(
+      VB.regionLift(lse.project.activeCell(), lband), null);
+    check("marquee clip lifts the art",
+      lclip.edges.length > 0 && lclip.fills.length === 1,
+      lclip.edges.length + " edges");
+    lse.exec({ op: "symbolCreate", id: "lib_s1",
+               clip: JSON.parse(JSON.stringify(lclip)) });
+    var libS1 = VB.libraryEntryById(lse.project, "lib_s1");
+    check("convert-to-symbol lands in the library",
+      lse.project.library.length === 1 && libS1 &&
+      libS1.entry.kind === "symbol" && libS1.entry.name === "symbol 01" &&
+      libS1.entry.cell.edges.length === lclip.edges.length &&
+      VB.geom.fillAt(libS1.entry.cell, 2500, 2100) === 1,
+      libS1 && libS1.entry.name);
+    check("the original art stays in place",
+      VB.geom.fillAt(lse.project.activeCell(), 2500, 2100) === 1);
+
+    lse.exec({ op: "symbolCreate", id: "lib_bg1", kind: "background" });
+    var libBg = VB.libraryEntryById(lse.project, "lib_bg1");
+    check("backgrounds are stage-sized containers",
+      libBg && libBg.entry.kind === "background" &&
+      libBg.entry.cell.width === 11000 && libBg.entry.cell.height === 8000 &&
+      libBg.entry.name === "background 01",
+      libBg && libBg.entry.name);
+
+    // the library cell takes journaled art through the edit target
+    lse.exec({ op: "editTargetSet", target: { librarySymbol: "lib_bg1" } });
+    check("edit target retargets to the library cell",
+      lse.project.activeCell() === libBg.entry.cell &&
+      lse.project.stage().width === 11000);
+    lse.exec({ op: "pencil",
+               points: [{ x: 1000, y: 1000 }, { x: 9000, y: 1400 }],
+               style: { width: 20, color: { r: 0, g: 0, b: 0, a: 255 } } });
+    check("journaled art lands in the library cell",
+      libBg.entry.cell.edges.length > 0,
+      libBg.entry.cell.edges.length + " edges");
+    lse.exec({ op: "editTargetClear" });
+
+    lse.exec({ op: "symbolRename", id: "lib_s1", name: "hero blob" });
+    check("symbolRename applies",
+      VB.libraryEntryById(lse.project, "lib_s1").entry.name === "hero blob");
+
+    var lPlain = function (p) {
+      return JSON.stringify((p.library || []).map(function (e) {
+        return { id: e.id, kind: e.kind, name: e.name,
+                 w: e.cell.width, h: e.cell.height, edges: e.cell.edges };
+      }));
+    };
+    var lRep = await VB.replayJournal(JSON.parse(JSON.stringify(lse.journal)));
+    check("library replays byte-exact (cells included)",
+      lPlain(lRep.project) === lPlain(lse.project));
+
+    // journaled undo so the replay comparison still holds
+    lse.exec({ op: "symbolRemove", id: "lib_s1" });
+    check("delete drops the library entry",
+      lse.project.library.length === 1 &&
+      !VB.libraryEntryById(lse.project, "lib_s1"));
+    lse.exec({ op: "undo" });
+    check("undo restores the library (art included)",
+      lse.project.library.length === 2 &&
+      VB.libraryEntryById(lse.project, "lib_s1").entry.name === "hero blob" &&
+      VB.geom.fillAt(
+        VB.libraryEntryById(lse.project, "lib_s1").entry.cell, 2500, 2100) === 1);
+    var lRep2 = await VB.replayJournal(JSON.parse(JSON.stringify(lse.journal)));
+    check("remove/undo replays byte-exact",
+      lPlain(lRep2.project) === lPlain(lse.project));
+  } catch (err) {
+    fail++;
+    log("  LIBRARY EXCEPTION: " + (err && err.stack || err), "fail");
   }
 
   // =========================== streaming skeleton ============================

@@ -253,6 +253,16 @@
     padding: 2px 8px; cursor: pointer;
   }
   #editcrumb button:hover { background: #3d5a80; }
+  /* the app context menu (right-click is app-owned) */
+  #appmenu {
+    position: fixed; z-index: 200; min-width: 170px;
+    background: #16181b; border: 1px solid var(--panel-edge);
+    border-radius: 4px; padding: 3px;
+    box-shadow: 0 6px 22px #000a;
+    font-size: 12px; color: var(--text);
+  }
+  .appmenuitem { padding: 6px 12px; border-radius: 3px; cursor: pointer; }
+  .appmenuitem:hover { background: #3d5a80; }
 
   #debugpanel {
     width: 280px;
@@ -933,9 +943,10 @@
         <div id="mat-profile"></div>
       </div>
       <div id="actorhead">
-        <span>Actors</span>
+        <span>Library</span>
         <span class="spacer"></span>
-        <button id="btn-actor-add" title="New actor">+</button>
+        <button id="btn-actor-add" title="New actor">🎭+</button>
+        <button id="btn-bg-add" title="New background object">🖼+</button>
         <button id="btn-actor-import" title="Import .y2kactor">⭱</button>
         <input type="file" id="actor-import-file" accept=".y2kactor"
                style="display:none">
@@ -997,6 +1008,7 @@
   <script src="js/ttf.js"></script>
   <script src="js/project.js"></script>
   <script src="js/actors.js"></script>
+  <script src="js/library.js"></script>
   <script src="js/thumbs.js"></script>
   <script src="js/brainstorm.js"></script>
   <script src="js/pitch.js"></script>

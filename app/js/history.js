@@ -120,6 +120,10 @@
           ? snapshotDoc(target.notes.canvas) : null
       },
       writing: JSON.parse(JSON.stringify(target.writing || { docs: [] })),
+      library: (target.library || []).map(function (e) {
+        return { id: e.id, kind: e.kind, name: e.name,
+                 cell: snapshotDoc(e.cell) };
+      }),
       pitch: {
         cur: (target.pitch || {}).cur || 0,
         slides: ((target.pitch || {}).slides || []).map(function (s) {
@@ -181,6 +185,11 @@
       target.notes.canvas = noteCv;
     }
     target.writing = JSON.parse(JSON.stringify(snap.writing || { docs: [] }));
+    target.library = (snap.library || []).map(function (e) {
+      var cell = new VB.Y2KVectorDocument();
+      restoreDoc(cell, e.cell);
+      return { id: e.id, kind: e.kind, name: e.name, cell: cell };
+    });
     target.pitch = {
       cur: (snap.pitch || {}).cur || 0,
       slides: ((snap.pitch || {}).slides || []).map(function (s) {
