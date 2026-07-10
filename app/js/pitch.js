@@ -430,14 +430,20 @@
     view.app = app;
     host.innerHTML = "";
 
-    var bar = document.createElement("div");
-    bar.id = "pt-tools";
-    bar.className = "y2kxbar";
+    // toolpanels join the ONE top toolbar (the core xRack UI language)
+    // and leave with the workspace
+    var bar = document.getElementById("topbar");
+    view.xpanels = [];
     function xpanel(name) {
-      if (app.xpanel) return app.xpanel(bar, name);
-      var p = document.createElement("div");
-      p.className = "y2kxpanel";
-      bar.appendChild(p);
+      var p;
+      if (app.xpanel && bar) {
+        p = app.xpanel(bar, "pt-" + name);
+      } else {
+        p = document.createElement("div");
+        p.className = "y2kxpanel";
+        (bar || host).appendChild(p);
+      }
+      view.xpanels.push(p);
       return p;
     }
     function toolBtn(label, title, fn) {
@@ -505,12 +511,7 @@
       function () { setPresent(!view.present); });
     showPanel.appendChild(view.presentBtn);
 
-    var hint = document.createElement("span");
-    hint.id = "pt-hint";
-    hint.textContent = "←/→ change slides · Draw paints with the stage tools";
-    bar.appendChild(hint);
-    host.appendChild(bar);
-    if (app.wireXbar) app.wireXbar("ws-pitch", bar);
+    if (app.wireXbar && bar) app.wireXbar("top", bar);
 
     var body = document.createElement("div");
     body.id = "pt-body";
@@ -644,6 +645,8 @@
 
   function unmount() {
     if (!view.host) return;
+    (view.xpanels || []).forEach(function (p) { p.remove(); });
+    view.xpanels = [];
     window.removeEventListener("keydown", onKeyDown);
     window.removeEventListener("resize", onViewResize);
     if (view.ro) { view.ro.disconnect(); view.ro = null; }

@@ -268,17 +268,23 @@
 
   /* y2kshell drawers: the properties bar and the sequencing stack
      collapse behind slim handles */
-  /* drawers OVERLAY the canvas (user spec): pulling one slides it over
-     the workspace — the canvas never moves or resizes under it */
-  .y2kdrawer {
+  /* DOCKS (the core xRack UI language): each dock is a fixed unit of
+     [drawer content + toolbar] — the TOOLBAR IS THE DRAWER'S FACE and
+     slides with the pull, over the canvas. The dockspace spacers hold
+     the toolbars' resting footprint in the layout. */
+  .y2kdock {
     position: fixed; left: 0; right: 0; z-index: 40;
     display: flex; flex-direction: column;
-    background: var(--panel);
-    overflow: hidden; /* small pulls clip smoothly, never jump */
   }
-  #drawer-top { box-shadow: 0 10px 26px rgba(0,0,0,0.20); }
-  #drawer-bottom { box-shadow: 0 -10px 26px rgba(0,0,0,0.20); }
-  .y2kdrawer.closed { display: none; }
+  #topdock { box-shadow: 0 6px 18px rgba(0,0,0,0.12); }
+  #botdock { box-shadow: 0 -6px 18px rgba(0,0,0,0.12); }
+  .y2kdockspace { flex: none; }
+  .y2kdrawer {
+    flex: none; height: 0;
+    display: flex; flex-direction: column;
+    background: var(--panel);
+    overflow: hidden; /* partial pulls clip smoothly, never jump */
+  }
   /* the toolbars themselves pull the drawers: drag down on the top
      toolbar / up on the bottom one (buttons still click normally);
      every xToolbar scrolls freely left-to-right (trailing overscroll) */
@@ -844,12 +850,12 @@
   .bbitem:hover .bbdel, .bbitem:hover .bbresize { display: flex; }
 
   /* timeline rail (Sequence/Roughs) — frame columns of the active layer */
-  /* the CONTEXT timeline (reference: the per-scene animation rows) —
-     stacked under the scene timeline at the bottom of the editor */
+  /* the CONTEXT timeline (the step sequencer): it EXPANDS when the
+     drawer is pulled taller — more room for future track rows */
   #timebar {
-    flex: none; height: 30px;
-    display: flex; align-items: center; gap: 6px;
-    padding: 0 10px;
+    flex: 1 1 30px; min-height: 30px;
+    display: flex; align-items: flex-start; gap: 6px;
+    padding: 6px 10px;
     background: var(--panel);
     border-top: 1px solid var(--panel-edge);
     font-size: 12px; color: var(--text);
@@ -886,9 +892,9 @@
      at the BOTTOM of the editor: frame-proportional blocks, ruler,
      playhead, boundary drags */
   #seqbar {
-    /* base height; inside the drawer it FLEXES — pulling the bottom
-       toolbar up grows the scene timeline */
-    flex: 1 1 84px; min-height: 84px; height: auto;
+    /* the scene timeline keeps a FIXED height — the step sequencer is
+       what grows when the drawer is pulled taller (more tracks) */
+    flex: none; height: 84px;
     display: flex; align-items: stretch; gap: 6px;
     padding: 4px 8px;
     background: var(--panel);
@@ -1022,7 +1028,8 @@
         moves them as .y2kproj packages.</div>
     </div>
   </div>
-  <div id="drawer-top" class="y2kdrawer closed">
+  <div id="topdock" class="y2kdock">
+  <div id="drawer-top" class="y2kdrawer">
     <div id="scratchwrap">
       <canvas id="scratch-canvas"></canvas>
       <button id="scratch-draw"
@@ -1092,6 +1099,8 @@
     <div class="spacer"></div>
     <div id="fileinfo">no file loaded</div>
   </div>
+  </div>
+  <div class="y2kdockspace" id="dockspace-top"></div>
 
   <div id="workspace-stub">
     <div>
@@ -1254,6 +1263,8 @@
     </div>
   </div>
 
+  <div class="y2kdockspace" id="dockspace-bottom"></div>
+  <div id="botdock" class="y2kdock">
   <div id="xbar-bottom" class="y2kxbar" data-xbar="bottom">
     <div class="y2kxpanel" data-panel="transport">
       <span class="y2kxgrip" title="Drag to rearrange">⠿</span>
@@ -1279,6 +1290,7 @@
 
   <div id="timebar">
     <div id="tl-frames"></div>
+  </div>
   </div>
   </div>
 

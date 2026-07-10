@@ -580,14 +580,20 @@
     view.app = app;
     host.innerHTML = "";
 
-    var bar = document.createElement("div");
-    bar.id = "bd-tools";
-    bar.className = "y2kxbar";
+    // toolpanels join the ONE top toolbar (the core xRack UI language)
+    // and leave with the workspace
+    var bar = document.getElementById("topbar");
+    view.xpanels = [];
     function xpanel(name) {
-      if (app.xpanel) return app.xpanel(bar, name);
-      var p = document.createElement("div");
-      p.className = "y2kxpanel";
-      bar.appendChild(p);
+      var p;
+      if (app.xpanel && bar) {
+        p = app.xpanel(bar, "bd-" + name);
+      } else {
+        p = document.createElement("div");
+        p.className = "y2kxpanel";
+        (bar || host).appendChild(p);
+      }
+      view.xpanels.push(p);
       return p;
     }
     var panelsPanel = xpanel("panels");
@@ -672,12 +678,7 @@
         if (view.animatic.playing) stopAnimatic(); else startAnimatic();
       }));
 
-    var hint = document.createElement("span");
-    hint.id = "bd-hint";
-    hint.textContent = "←/→ change panels · the text below plays as the panel's subtitle";
-    bar.appendChild(hint);
-    host.appendChild(bar);
-    if (app.wireXbar) app.wireXbar("ws-boards", bar);
+    if (app.wireXbar && bar) app.wireXbar("top", bar);
 
     var body = document.createElement("div");
     body.id = "bd-body";
@@ -752,6 +753,8 @@
 
   function unmount() {
     if (!view.host) return;
+    (view.xpanels || []).forEach(function (p) { p.remove(); });
+    view.xpanels = [];
     stopAnimatic();
     commitCaption();
     window.removeEventListener("keydown", onKeyDown);

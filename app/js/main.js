@@ -1855,26 +1855,32 @@
           dom.classList.toggle("collapsed", !m.expanded);
         });
       });
+      // the DOCKS: fixed [drawer + toolbar] units — the toolbars are
+      // the drawer faces and slide with the pull, over the canvas
+      var wsbar = document.getElementById("workspacebar");
+      var sbar = document.getElementById("statusbar");
+      var topdock = document.getElementById("topdock");
+      var botdock = document.getElementById("botdock");
+      if (topdock) {
+        topdock.style.top = (wsbar ? wsbar.offsetHeight : 32) + "px";
+      }
+      if (botdock) {
+        botdock.style.bottom = (sbar ? sbar.offsetHeight : 24) + "px";
+      }
       ["top", "bottom"].forEach(function (which) {
         var drawer = document.getElementById("drawer-" + which);
         if (!drawer) return;
         var d = state.drawers[which];
-        drawer.classList.toggle("closed", !d.open);
-        if (d.open) { // an OVERLAY, anchored to its toolbar — the
-          // height follows the pull exactly (smooth, no minimums)
-          drawer.style.height = Math.max(0, d.h | 0) + "px";
-          if (which === "top") {
-            var tb = document.getElementById("topbar");
-            drawer.style.top = tb
-              ? Math.round(tb.getBoundingClientRect().bottom) + "px" : "64px";
-          } else {
-            var xb = document.getElementById("xbar-bottom");
-            drawer.style.bottom = xb
-              ? Math.round(window.innerHeight -
-                           xb.getBoundingClientRect().top) + "px" : "56px";
-          }
-        }
+        drawer.style.height =
+          (d.open ? Math.max(0, d.h | 0) : 0) + "px";
       });
+      // the resting toolbars keep their footprint in the layout
+      var dsTop = document.getElementById("dockspace-top");
+      var tb = document.getElementById("topbar");
+      if (dsTop && tb) dsTop.style.height = tb.offsetHeight + "px";
+      var dsBot = document.getElementById("dockspace-bottom");
+      var xb = document.getElementById("xbar-bottom");
+      if (dsBot && xb) dsBot.style.height = xb.offsetHeight + "px";
       persist();
     }
 
@@ -2165,6 +2171,8 @@
         persist();
       }
       panels().forEach(function (el) {
+        if (el.dataset.xwired) return; // re-wiring after late panels
+        el.dataset.xwired = "1";
         var grip = el.querySelector(".y2kxgrip");
         if (!grip) return;
         grip.addEventListener("pointerdown", function (ev) {
@@ -2214,7 +2222,9 @@
       g.textContent = "⠿";
       g.title = "Drag to rearrange";
       p.appendChild(g);
-      bar.appendChild(p);
+      var spacer = bar.querySelector(".spacer");
+      if (spacer) bar.insertBefore(p, spacer);
+      else bar.appendChild(p);
       return p;
     };
     window.addEventListener("resize", function () { applyShell(); });

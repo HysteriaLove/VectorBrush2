@@ -751,14 +751,20 @@
     view.app = app;
     host.innerHTML = "";
 
-    var bar = document.createElement("div");
-    bar.id = "au-tools";
-    bar.className = "y2kxbar";
+    // toolpanels join the ONE top toolbar (the core xRack UI language)
+    // and leave with the workspace
+    var bar = document.getElementById("topbar");
+    view.xpanels = [];
     function xpanel(name) {
-      if (app.xpanel) return app.xpanel(bar, name);
-      var p = document.createElement("div");
-      p.className = "y2kxpanel";
-      bar.appendChild(p);
+      var p;
+      if (app.xpanel && bar) {
+        p = app.xpanel(bar, "au-" + name);
+      } else {
+        p = document.createElement("div");
+        p.className = "y2kxpanel";
+        (bar || host).appendChild(p);
+      }
+      view.xpanels.push(p);
       return p;
     }
     function toolBtn(label, title, fn) {
@@ -806,13 +812,7 @@
           view.app.setMsg("bake failed: " + (err && err.message || err));
         });
       }));
-    var hint = document.createElement("span");
-    hint.id = "au-hint";
-    hint.textContent = "drag stems onto tracks · drag clips to move · " +
-      "drag edges to trim · Space plays · wheel zooms · middle-drag pans";
-    bar.appendChild(hint);
-    host.appendChild(bar);
-    if (app.wireXbar) app.wireXbar("ws-audio", bar);
+    if (app.wireXbar && bar) app.wireXbar("top", bar);
 
     var body = document.createElement("div");
     body.id = "au-body";
@@ -964,6 +964,8 @@
 
   function unmount() {
     if (!view.host) return;
+    (view.xpanels || []).forEach(function (p) { p.remove(); });
+    view.xpanels = [];
     // the transport deliberately KEEPS PLAYING — audio runs on while
     // the user works in other tabs; Space or ▶ stops it from anywhere
     window.removeEventListener("keydown", onKeyDown);
