@@ -43,9 +43,10 @@
       // the step sequencer's own view (the scene timeline keeps its
       // zoom/pan inside the strip itself)
       step: { cellW: 13 },
-      // floating toolpanel ISLANDS — composable clusters of xPanels
-      // shared (and remembered) across every workspace
-      islands: { seq: 1, list: [] }
+      // floating toolpanels — every xPanel is its own island: docked
+      // into the top or bottom bar's row, or floating free where it
+      // was dropped; shared (and remembered) across every workspace
+      float: { panels: {} }
     };
   }
 
@@ -311,59 +312,42 @@
     return bar.scroll;
   }
 
-  // ---- toolpanel islands (floating, composable, cross-workspace) -----------------
-  // membership lives HERE (pure); the DOM layer adopts panel elements
-  // into whichever island claims their name
+  // ---- floating toolpanels (dock to a bar's bounds, or float free) ----------------
+  // placement lives HERE (pure); the DOM layer measures elements and
+  // lays the docked rows out along the top/bottom bar bounds
 
-  function islandById(state, id) {
-    var list = state.islands.list;
-    for (var i = 0; i < list.length; i++) {
-      if (list[i].id === id) return list[i];
-    }
-    return null;
+  function floatGet(state, name) {
+    return state.float.panels[name] || null;
   }
 
-  function islandFor(state, panel) {
-    var list = state.islands.list;
-    for (var i = 0; i < list.length; i++) {
-      if (list[i].panels.indexOf(panel) >= 0) return list[i];
-    }
-    return null;
-  }
-
-  function islandCreate(state, x, y, panels) {
-    var isl = {
-      id: "isl" + state.islands.seq++,
-      x: Math.round(x) || 0, y: Math.round(y) || 0,
-      panels: panels ? panels.slice() : []
-    };
-    state.islands.list.push(isl);
-    return isl;
-  }
-
-  // moving a panel between islands is detach + assign; an island that
-  // loses its last panel dissolves (prune)
-  function islandDetach(state, panel) {
-    var isl = islandFor(state, panel);
-    if (!isl) return null;
-    isl.panels.splice(isl.panels.indexOf(panel), 1);
-    return isl;
-  }
-
-  function islandAssign(state, panel, id, index) {
-    var isl = islandById(state, id);
-    if (!isl) return null;
-    islandDetach(state, panel);
-    var at = index === undefined ? isl.panels.length
-      : Math.max(0, Math.min(isl.panels.length, index | 0));
-    isl.panels.splice(at, 0, panel);
-    return isl;
-  }
-
-  function islandPrune(state) {
-    state.islands.list = state.islands.list.filter(function (isl) {
-      return isl.panels.length > 0;
+  function floatRow(state, dock) {
+    var panels = state.float.panels;
+    var names = Object.keys(panels).filter(function (n) {
+      return panels[n].dock === dock;
     });
+    names.sort(function (a, b) { return panels[a].ord - panels[b].ord; });
+    return names;
+  }
+
+  // snapping to a bar seats the panel in that row (index counts the
+  // row WITHOUT the moving panel); ords renumber densely
+  function floatDock(state, name, dock, index) {
+    var row = floatRow(state, dock).filter(function (n) {
+      return n !== name;
+    });
+    var at = index === undefined ? row.length
+      : Math.max(0, Math.min(row.length, index | 0));
+    row.splice(at, 0, name);
+    state.float.panels[name] = { dock: dock, ord: at };
+    row.forEach(function (n, i) { state.float.panels[n].ord = i; });
+    return state.float.panels[name];
+  }
+
+  function floatFree(state, name, x, y) {
+    state.float.panels[name] = {
+      dock: "free", x: Math.round(x) || 0, y: Math.round(y) || 0
+    };
+    return state.float.panels[name];
   }
 
   // ---- persistence (view state — never the journal) ------------------------------
@@ -372,7 +356,7 @@
     return JSON.stringify({
       racks: state.racks, toolbars: state.toolbars,
       drawers: state.drawers, step: state.step,
-      islands: state.islands
+      float: state.float
     });
   }
 
@@ -389,7 +373,7 @@
       if (data && data.toolbars) state.toolbars = data.toolbars;
       if (data && data.drawers) state.drawers = data.drawers;
       if (data && data.step) state.step = data.step;
-      if (data && data.islands) state.islands = data.islands;
+      if (data && data.float) state.float = data.float;
     } catch (e) { /* fresh defaults */ }
     // normalize fields older persisted states lack
     ["left", "right"].forEach(function (side) {
@@ -406,16 +390,23 @@
     if (state.drawers.top.h === undefined) state.drawers.top.h = 220;
     if (state.drawers.bottom.h === undefined) state.drawers.bottom.h = 130;
     if (!state.step || !(state.step.cellW > 0)) state.step = { cellW: 13 };
-    if (!state.islands || !Array.isArray(state.islands.list)) {
-      state.islands = { seq: 1, list: [] };
+    if (!state.float || typeof state.float !== "object" ||
+        !state.float.panels || typeof state.float.panels !== "object") {
+      state.float = { panels: {} };
     }
-    if (!(state.islands.seq > 0)) state.islands.seq = 1;
-    state.islands.list = state.islands.list.filter(function (isl) {
-      return isl && isl.id && Array.isArray(isl.panels);
-    });
-    state.islands.list.forEach(function (isl) {
-      if (!isFinite(isl.x)) isl.x = 8;
-      if (!isFinite(isl.y)) isl.y = 40;
+    Object.keys(state.float.panels).forEach(function (n) {
+      var e = state.float.panels[n];
+      if (!e || (e.dock !== "top" && e.dock !== "bottom" &&
+                 e.dock !== "free")) {
+        delete state.float.panels[n];
+        return;
+      }
+      if (e.dock === "free") {
+        if (!isFinite(e.x)) e.x = 8;
+        if (!isFinite(e.y)) e.y = 44;
+      } else if (!isFinite(e.ord)) {
+        e.ord = 0;
+      }
     });
     return state;
   }
@@ -443,12 +434,10 @@
     endPanelDrag: endPanelDrag,
     clampToolbarScroll: clampToolbarScroll,
     solveIsland: solveIsland,
-    islandById: islandById,
-    islandFor: islandFor,
-    islandCreate: islandCreate,
-    islandDetach: islandDetach,
-    islandAssign: islandAssign,
-    islandPrune: islandPrune,
+    floatGet: floatGet,
+    floatRow: floatRow,
+    floatDock: floatDock,
+    floatFree: floatFree,
     serialize: serialize,
     restore: restore
   };

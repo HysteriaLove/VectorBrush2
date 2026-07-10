@@ -4118,38 +4118,44 @@
       pk.racks.left.open === true && pkById("a").y === 0 &&
       pkById("c").y === 0 && pkById("b").y === 100);
 
-    // floating toolpanel islands (composable, remembered across
-    // workspaces — user spec): membership is pure state; the DOM
-    // layer only seats panel elements into their claiming island
-    var il = Sh.defaults();
-    check("defaults start with no islands",
-      il.islands.list.length === 0 && il.islands.seq === 1);
-    var iA = Sh.islandCreate(il, 8, 44, ["file", "edit"]);
-    var iB = Sh.islandCreate(il, 300, 200, []);
-    check("islands get deterministic ids",
-      iA.id === "isl1" && iB.id === "isl2" && il.islands.seq === 3);
-    check("membership lookups find the claiming island",
-      Sh.islandFor(il, "edit") === iA &&
-      Sh.islandFor(il, "zoom") === null &&
-      Sh.islandById(il, "isl2") === iB);
-    Sh.islandAssign(il, "edit", "isl2");
-    check("assign moves a panel between islands",
-      iA.panels.join() === "file" && iB.panels.join() === "edit");
-    Sh.islandAssign(il, "file", "isl2", 0);
-    check("assign seats at the requested index",
-      iB.panels.join() === "file,edit");
-    Sh.islandAssign(il, "file", "isl2", 99);
-    check("seat indexes clamp into the list",
-      iB.panels.join() === "edit,file");
-    Sh.islandPrune(il);
-    check("empty islands dissolve on prune",
-      il.islands.list.length === 1 && il.islands.list[0] === iB);
-    var il2 = Sh.restore(Sh.serialize(il));
-    check("island composition roundtrips",
-      Sh.serialize(il2) === Sh.serialize(il));
-    check("legacy shell states grow an island field",
-      Sh.restore('{"step":{"cellW":13}}').islands.list.length === 0 &&
-      Sh.restore('{"step":{"cellW":13}}').islands.seq === 1);
+    // floating toolpanels (every panel is its own island — it docks
+    // to the top/bottom bar bounds or floats free; user spec):
+    // placement is pure state, the DOM lays the rows out
+    var fl = Sh.defaults();
+    check("defaults start with no float placements",
+      Object.keys(fl.float.panels).length === 0);
+    Sh.floatDock(fl, "file", "top");
+    Sh.floatDock(fl, "edit", "top");
+    Sh.floatDock(fl, "zoom", "top");
+    check("docked panels seat in arrival order",
+      Sh.floatRow(fl, "top").join() === "file,edit,zoom");
+    Sh.floatDock(fl, "zoom", "top", 0);
+    check("re-docking reseats at the requested slot",
+      Sh.floatRow(fl, "top").join() === "zoom,file,edit");
+    Sh.floatDock(fl, "zoom", "top", 99);
+    check("seat indexes clamp into the row",
+      Sh.floatRow(fl, "top").join() === "file,edit,zoom");
+    Sh.floatDock(fl, "file", "bottom");
+    check("panels snap between the two bars",
+      Sh.floatRow(fl, "top").join() === "edit,zoom" &&
+      Sh.floatRow(fl, "bottom").join() === "file");
+    Sh.floatFree(fl, "edit", 200, 150);
+    check("a freed panel remembers its spot",
+      Sh.floatGet(fl, "edit").dock === "free" &&
+      Sh.floatGet(fl, "edit").x === 200 &&
+      Sh.floatGet(fl, "edit").y === 150 &&
+      Sh.floatRow(fl, "top").join() === "zoom" &&
+      Sh.floatGet(fl, "missing") === null);
+    var fl2 = Sh.restore(Sh.serialize(fl));
+    check("float placement roundtrips",
+      Sh.serialize(fl2) === Sh.serialize(fl));
+    check("legacy shell states grow a float field",
+      Object.keys(Sh.restore('{"step":{"cellW":13}}').float.panels)
+        .length === 0);
+    check("garbage float entries are dropped on restore",
+      Object.keys(Sh.restore('{"float":{"panels":{' +
+        '"x":{"dock":"weird"},"y":{"dock":"top","ord":0}}}}')
+        .float.panels).join() === "y");
 
     // persistence roundtrip (view state, never the journal)
     var sh2 = Sh.restore(Sh.serialize(sh));

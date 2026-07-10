@@ -100,13 +100,13 @@ App
   y2kshell.js), two drawers whose faces pull them open (shared
   scratchpad up top behind a slim handle; the playback toolbar +
   timelines at the bottom — the ONLY fixed toolbar strip), and
-  **floating toolpanel islands** for everything else. Islands are
-  composable clusters of xPanels: drag an island by its bar, drag a
-  panel's ⠿ grip into another island to regroup, or onto empty space to
-  spawn a new island. Composition and positions are view state
-  (localStorage `vb-y2kshell`, never the journal) and are REMEMBERED
-  across workspaces and reloads; a workspace's panels leave with it but
-  keep their island seats for remount.
+  **floating toolpanels** for everything else. Every xPanel is its own
+  island: drag its ⠿ grip near the top or bottom toolbar bounds and it
+  ATTACHES — seating into a row that rides the drawer faces — or drop
+  it anywhere else and it floats free right there. Placement is view
+  state (localStorage `vb-y2kshell`, never the journal) and is
+  REMEMBERED across workspaces and reloads; a workspace's panels leave
+  with it but keep their seats for remount.
 - **`.theme` reskinning (DECIDED, future).** The whole UI — homescreen
   and every section view — is reskinnable via `.theme` packages, built
   mostly on slice-9 skinning, with a skin repository for distribution.

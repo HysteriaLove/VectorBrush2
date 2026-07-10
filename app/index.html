@@ -106,7 +106,7 @@
     width: 52px; font: inherit; color: var(--text);
     background: var(--btn); border: 1px solid var(--btn-edge); border-radius: 4px; padding: 3px 6px;
   }
-  .y2kisland button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #islands button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
   #fileinfo { color: var(--text-dim); font-size: 12px; }
 
   #middle { flex: 1; display: flex; min-height: 0; }
@@ -184,38 +184,33 @@
   }
   #layerlist, #matlist, #actorlist { flex: 1; min-height: 40px; }
 
-  /* toolpanel ISLANDS: floating, composable clusters of xPanels that
-     persist across every workspace — drag the island bar to move it,
-     drag a panel's ⠿ between islands or to empty space for a new one */
+  /* floating toolpanels: every xPanel is its own island — drag its ⠿
+     near the top or bottom toolbar bounds to ATTACH it to that row,
+     or drop it anywhere else to leave it floating there. Placement
+     persists across every workspace. */
   #islands {
     position: fixed; inset: 0; z-index: 46;
     pointer-events: none;
   }
-  .y2kisland {
+  #islands > .y2kxpanel {
     position: absolute; pointer-events: auto;
-    display: flex; flex-direction: column; gap: 4px;
     background: var(--panel);
-    border: 1px solid var(--panel-edge); border-radius: 8px;
-    box-shadow: 0 4px 18px rgba(0,0,0,0.18);
-    padding: 0 6px 6px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.22);
     user-select: none;
   }
-  .y2kisland.dropready { outline: 2px solid var(--accent); }
-  .y2kislandgrip {
-    height: 14px; margin: 0 -6px 0;
-    display: flex; align-items: center; justify-content: center;
-    cursor: grab; color: var(--text-dim);
-    border-bottom: 1px solid var(--row-edge);
+  #islands > .y2kxpanel.docked {
+    box-shadow: 0 1px 4px rgba(0,0,0,0.10);
   }
-  .y2kislandgrip::before {
-    content: ""; width: 40px; height: 3px; border-radius: 2px;
-    background: var(--text-dim); opacity: 0.5;
+  #islands > .y2kxpanel.floatdrag {
+    opacity: 0.88; z-index: 5;
+    box-shadow: 0 8px 22px rgba(0,0,0,0.3);
   }
-  .y2kisland .y2kxpanel { background: var(--field); }
-  .y2kxpanel.islanddrag {
-    position: fixed; z-index: 260; pointer-events: none;
-    opacity: 0.85; box-shadow: 0 6px 18px rgba(0,0,0,0.3);
+  .y2ksnapzone {
+    position: absolute; left: 0; right: 0; height: 3px;
+    background: var(--accent); opacity: 0;
+    pointer-events: none; transition: opacity 0.1s;
   }
+  .y2ksnapzone.show { opacity: 1; }
   #tophandle {
     flex: none; height: 12px; cursor: ns-resize;
     background: var(--panel);
