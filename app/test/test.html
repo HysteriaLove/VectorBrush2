@@ -3953,6 +3953,44 @@
     var sqRep2 = await VB.replayJournal(JSON.parse(JSON.stringify(sqe.journal)));
     check("remove/undo replays byte-exact",
       sqPlain(sqRep2.project) === sqPlain(sqe.project));
+
+    // boundary DRAG (reference set_scene_instance_boundary): the strip's
+    // edge drag rebalances two instances inside their FIXED zone; only
+    // the last instance's right edge extends the sequence
+    var sqd = new VB.Session({ width: 11000, height: 8000 });
+    sqd.exec({ op: "sceneAdd", id: "d_b" });
+    sqd.exec({ op: "sceneInstAdd", id: "d_i2", scene: "d_b", duration: 100 });
+    sqd.exec({ op: "sceneBoundaryDrag", inst: "seq@0", edge: "right",
+               frame: 100 });
+    check("boundary drag rebalances inside the fixed zone",
+      sqd.project.sequence[0].duration === 100 &&
+      sqd.project.sequence[1].duration === 144 &&
+      VB.sequenceDuration(sqd.project) === 244);
+    sqd.exec({ op: "sceneBoundaryDrag", inst: "d_i2", edge: "left",
+               frame: 200 });
+    check("a left-edge drag moves the same shared boundary",
+      sqd.project.sequence[0].duration === 200 &&
+      sqd.project.sequence[1].duration === 44);
+    sqd.exec({ op: "sceneBoundaryDrag", inst: "seq@0", edge: "right",
+               frame: 0 });
+    check("drags clamp so both sides keep a frame",
+      sqd.project.sequence[0].duration === 1 &&
+      sqd.project.sequence[1].duration === 243 &&
+      VB.sequenceDuration(sqd.project) === 244);
+    sqd.exec({ op: "sceneBoundaryDrag", inst: "d_i2", edge: "right",
+               frame: 400 });
+    check("the last right edge extends the sequence",
+      sqd.project.sequence[1].duration === 399 &&
+      VB.sequenceDuration(sqd.project) === 400);
+    sqd.exec({ op: "sceneInstLock", id: "d_i2", on: true });
+    sqd.exec({ op: "sceneBoundaryDrag", inst: "seq@0", edge: "right",
+               frame: 150 });
+    check("locked neighbors freeze the shared boundary",
+      sqd.project.sequence[0].duration === 1 &&
+      sqd.project.sequence[1].duration === 399);
+    var sqRep3 = await VB.replayJournal(JSON.parse(JSON.stringify(sqd.journal)));
+    check("boundary drags replay byte-exact",
+      sqPlain(sqRep3.project) === sqPlain(sqd.project));
   } catch (err) {
     fail++;
     log("  SEQUENCE EXCEPTION: " + (err && err.stack || err), "fail");

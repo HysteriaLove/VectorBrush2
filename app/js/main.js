@@ -1938,31 +1938,45 @@
     updateStatus();
   }
 
+  // The sequence menu (reference scene_sequence_context_menu): with an
+  // instance under the cursor it carries the per-instance actions; on
+  // empty strip space it still creates scenes and instances.
   function seqMenu(ev, inst) {
     var project = app.project;
-    var sc = VB.sceneById(project, inst.scene);
+    var sc = inst ? VB.sceneById(project, inst.scene) : null;
     var items = [
-      { label: "Rename Scene", fn: function () {
-          var n = prompt("Scene name", sc ? sc.scene.name : "");
-          if (n && n.trim()) {
-            app.exec({ op: "sceneRename", scene: inst.scene, name: n });
-          }
-        } },
-      { label: "Set Duration…", fn: function () {
-          var v = parseInt(prompt("Duration (frames)", inst.duration), 10);
-          if (v > 0) app.exec({ op: "sceneInstDuration", id: inst.id, frames: v });
-        } },
-      { label: inst.locked ? "Unlock" : "Lock", fn: function () {
-          app.exec({ op: "sceneInstLock", id: inst.id, on: !inst.locked });
+      { label: "Create Scene", fn: function () {
+          var sid = VB.actorNewId("scene");
+          app.exec({ op: "sceneAdd", id: sid });
+          app.exec({ op: "sceneInstAdd", id: VB.actorNewId("seq"),
+                     scene: sid, after: inst ? inst.id : undefined });
         } }
     ];
+    if (inst) {
+      items.push(
+        { label: "Rename Scene", fn: function () {
+            var n = prompt("Scene name", sc ? sc.scene.name : "");
+            if (n && n.trim()) {
+              app.exec({ op: "sceneRename", scene: inst.scene, name: n });
+            }
+          } },
+        { label: "Set Duration…", fn: function () {
+            var v = parseInt(prompt("Duration (frames)", inst.duration), 10);
+            if (v > 0) {
+              app.exec({ op: "sceneInstDuration", id: inst.id, frames: v });
+            }
+          } },
+        { label: inst.locked ? "Unlock" : "Lock", fn: function () {
+            app.exec({ op: "sceneInstLock", id: inst.id, on: !inst.locked });
+          } });
+    }
     project.scenes.forEach(function (s) {
       items.push({ label: "Add Instance: " + s.name, fn: function () {
         app.exec({ op: "sceneInstAdd", id: VB.actorNewId("seq"),
-                   scene: s.id, after: inst.id });
+                   scene: s.id, after: inst ? inst.id : undefined });
       } });
     });
-    if (VB.sequenceOf(project).length > 1) {
+    if (inst && VB.sequenceOf(project).length > 1) {
       items.push({ label: "Remove Instance", fn: function () {
         app.exec({ op: "sceneInstRemove", id: inst.id });
       } });
@@ -1994,97 +2008,370 @@
     app.showMenu(ev.clientX, ev.clientY, items);
   }
 
-  function seqChipDown(inst, index) {
-    return function (ev) {
-      if (ev.button !== 0) return;
-      stopSeqPlay();
-      seqSel = inst.id;
-      var sc = VB.sceneById(app.project, inst.scene);
-      if (sc) selectSceneIndex(sc.index);
-      refreshSequence();
-      var chip = document.querySelector('#seqbar .seqchip[data-id="' +
-                                        inst.id + '"]');
-      if (!chip) return;
-      chip.setPointerCapture(ev.pointerId);
-      var startX = ev.clientX, moved = false;
-      function onMove(e2) {
-        if (Math.abs(e2.clientX - startX) > 6) {
-          moved = true;
-          chip.classList.add("dragging");
-        }
-      }
-      function onUp(e2) {
-        chip.removeEventListener("pointermove", onMove);
-        chip.removeEventListener("pointerup", onUp);
-        chip.classList.remove("dragging");
-        if (!moved) return;
-        var to = 0; // insertion index among the OTHER chips
-        document.querySelectorAll("#seqbar .seqchip").forEach(function (el) {
-          if (el === chip) return;
-          var r = el.getBoundingClientRect();
-          if (e2.clientX > r.left + r.width / 2) to++;
-        });
-        if (to !== index) {
-          app.exec({ op: "sceneInstMove", id: inst.id, index: to });
-        }
-      }
-      chip.addEventListener("pointermove", onMove);
-      chip.addEventListener("pointerup", onUp);
-    };
+  // The strip is the reference's NLE scene lane: frame-proportional
+  // blocks in alternating blues (#6ea7df/#a9d0f5, active outlined
+  // #1d4ed8), a frame ruler, a playhead, boundary drags that rebalance
+  // the shared zone (sceneBoundaryDrag), block drags that reorder, and
+  // the sequence menu on right-click.
+  var SEQ_RULER = 15;
+  var seqView = { canvas: null, playBtn: null, ro: null,
+                  pxf: 0, pan: 0, userZoom: false, drag: null };
+
+  function seqStarts() {
+    var seq = VB.sequenceOf(app.project);
+    var starts = [], acc = 0;
+    for (var i = 0; i < seq.length; i++) {
+      starts.push(acc);
+      acc += Math.max(1, seq[i].duration | 0);
+    }
+    return { seq: seq, starts: starts, total: acc };
   }
 
-  function refreshSequence() {
+  function seqFrameAt(x) { return seqView.pan + x / seqView.pxf; }
+  function seqXOf(frame) { return (frame - seqView.pan) * seqView.pxf; }
+
+  /** The master frame under the playhead marker. */
+  function seqMasterFrame() {
+    if (seqPlay.playing && seqPlay.frame >= 0) return seqPlay.frame;
+    var hit = seqSel ? VB.sequenceInstById(app.project, seqSel) : null;
+    if (!hit) {
+      var s = seqStarts();
+      var curScene = app.project.scenes[app.project.cur.scene];
+      for (var i = 0; curScene && i < s.seq.length; i++) {
+        if (s.seq[i].scene === curScene.id) { hit = { inst: s.seq[i], index: i }; break; }
+      }
+    }
+    if (!hit) return 0;
+    return VB.sequenceInstStart(app.project, hit.index) +
+      Math.min(app.project.cur.frame,
+               Math.max(1, hit.inst.duration | 0) - 1);
+  }
+
+  function ensureSeqStrip() {
     var bar = document.getElementById("seqbar");
-    if (!bar) return;
-    bar.innerHTML = "";
-    var seq = VB.sequenceOf(app.project);
-    if (seqSel && !VB.sequenceInstById(app.project, seqSel)) seqSel = null;
-    var label = document.createElement("span");
-    label.id = "seq-label";
-    label.textContent = "Sequence";
-    bar.appendChild(label);
+    if (!bar || seqView.canvas) return;
     var play = document.createElement("button");
     play.id = "seq-play";
-    play.textContent =
-      (typeof seqPlay !== "undefined" && seqPlay.playing) ? "⏹" : "▶";
+    play.textContent = "▶";
     play.title = "Play the sequence, audio-synced (Shift+Enter)";
     play.addEventListener("click", function () {
       if (seqPlay.playing) stopSeqPlay(); else startSeqPlay();
     });
     bar.appendChild(play);
-    seq.forEach(function (inst, i) {
+    var cvs = document.createElement("canvas");
+    cvs.id = "seq-strip";
+    bar.appendChild(cvs);
+    seqView.playBtn = play;
+    seqView.canvas = cvs;
+    wireSeqStrip(cvs);
+    if (window.ResizeObserver) {
+      seqView.ro = new ResizeObserver(function () { renderSeqStrip(); });
+      seqView.ro.observe(bar);
+    }
+  }
+
+  function renderSeqStrip() {
+    var cvs = seqView.canvas;
+    if (!cvs) return;
+    var w = cvs.clientWidth, h = cvs.clientHeight;
+    if (!w || !h) return;
+    if (cvs.width !== w || cvs.height !== h) { cvs.width = w; cvs.height = h; }
+    var ctx = cvs.getContext("2d");
+    var s = seqStarts();
+    if (!seqView.userZoom) { // fit the whole sequence until the user zooms
+      seqView.pxf = Math.min(6, Math.max(0.02, (w - 24) / Math.max(1, s.total)));
+      seqView.pan = 0;
+    }
+    var css = getComputedStyle(document.body);
+    var panel = css.getPropertyValue("--panel").trim() || "#f2f3f5";
+    var edge = css.getPropertyValue("--panel-edge").trim() || "#c6cad0";
+    var dim = css.getPropertyValue("--text-dim").trim() || "#6b7079";
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = panel;
+    ctx.fillRect(0, 0, w, h);
+
+    // frame ruler: ticks land on whole seconds when zoomed out
+    var fps = app.project.fps || 24;
+    var stepOpts = [1, 2, 4, 6, 12, fps, fps * 2, fps * 5, fps * 10,
+                    fps * 20, fps * 60];
+    var step = stepOpts[stepOpts.length - 1];
+    for (var so = 0; so < stepOpts.length; so++) {
+      if (stepOpts[so] * seqView.pxf >= 46) { step = stepOpts[so]; break; }
+    }
+    ctx.strokeStyle = edge;
+    ctx.fillStyle = dim;
+    ctx.font = "9px system-ui";
+    ctx.textAlign = "left";
+    ctx.beginPath();
+    var f0 = Math.max(0, Math.floor(seqView.pan / step) * step);
+    for (var f = f0; seqXOf(f) < w; f += step) {
+      var tx = Math.round(seqXOf(f)) + 0.5;
+      ctx.moveTo(tx, SEQ_RULER - 5);
+      ctx.lineTo(tx, SEQ_RULER);
+      ctx.fillText(String(f + 1), tx + 2, SEQ_RULER - 6);
+    }
+    ctx.moveTo(0, SEQ_RULER + 0.5);
+    ctx.lineTo(w, SEQ_RULER + 0.5);
+    ctx.stroke();
+    ctx.textAlign = "right";
+    ctx.fillText(s.total + "f · " + (s.total / fps).toFixed(1) + "s",
+                 w - 4, SEQ_RULER - 6);
+
+    // scene instance blocks — the reference's alternating blues
+    var ghost = seqView.drag && seqView.drag.ghost;
+    var y = SEQ_RULER + 4, bh = h - SEQ_RULER - 9;
+    var gStarts = 0;
+    for (var i = 0; i < s.seq.length; i++) {
+      var inst = s.seq[i];
+      var dur = ghost && ghost[inst.id] !== undefined
+        ? ghost[inst.id] : Math.max(1, inst.duration | 0);
+      var bx = seqXOf(gStarts), bw = Math.max(2, dur * seqView.pxf);
+      gStarts += dur;
+      if (bx > w || bx + bw < 0) continue;
       var sc = VB.sceneById(app.project, inst.scene);
-      var chip = document.createElement("div");
-      chip.className = "seqchip" +
-        (seqSel === inst.id ? " sel" : "") +
-        (sc && sc.index === app.project.cur.scene ? " cur" : "");
-      chip.dataset.id = inst.id;
-      chip.textContent = (inst.locked ? "🔒 " : "") +
-        (sc ? sc.scene.name : "?") + " · " + inst.duration + "f";
-      chip.title = "Click: edit this scene · drag: reorder · right-click: actions";
-      chip.addEventListener("pointerdown", seqChipDown(inst, i));
-      chip.addEventListener("contextmenu", function (ev) {
-        seqMenu(ev, inst);
-      });
-      bar.appendChild(chip);
+      ctx.fillStyle = i % 2 === 0 ? "#6ea7df" : "#a9d0f5";
+      ctx.strokeStyle = "#11161b";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(bx, y, bw, bh, 3);
+      ctx.fill();
+      ctx.stroke();
+      if (seqSel === inst.id) { // the reference's active outline
+        ctx.strokeStyle = "#1d4ed8";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(bx + 1, y + 1, Math.max(1, bw - 2), bh - 2, 2);
+        ctx.stroke();
+        ctx.lineWidth = 1;
+      }
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(bx + 2, y, Math.max(1, bw - 4), bh);
+      ctx.clip();
+      ctx.fillStyle = "#11161b";
+      ctx.font = "10px system-ui";
+      ctx.textAlign = "left";
+      ctx.fillText((inst.locked ? "🔒 " : "") +
+        (sc ? sc.scene.name : "?") + " · " + dur + "f",
+        bx + 5, y + bh / 2 + 3);
+      ctx.restore();
+    }
+
+    // reorder caret
+    if (seqView.drag && seqView.drag.kind === "move" &&
+        seqView.drag.to !== undefined) {
+      var cx = seqXOf(seqView.drag.toFrame);
+      ctx.strokeStyle = "#1d4ed8";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(cx, SEQ_RULER + 1);
+      ctx.lineTo(cx, h - 2);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+    }
+
+    // playhead
+    var px = Math.round(seqXOf(seqMasterFrame())) + 0.5;
+    if (px >= 0 && px <= w) {
+      ctx.strokeStyle = css.getPropertyValue("--hot").trim() || "#d03030";
+      ctx.beginPath();
+      ctx.moveTo(px, 0);
+      ctx.lineTo(px, h);
+      ctx.stroke();
+    }
+  }
+
+  function wireSeqStrip(cvs) {
+    function local(ev) {
+      var r = cvs.getBoundingClientRect();
+      return { x: ev.clientX - r.left, y: ev.clientY - r.top };
+    }
+    /** A draggable boundary within 5px: the right edge of block i. */
+    function boundaryAt(x) {
+      var s = seqStarts();
+      var acc = 0;
+      for (var i = 0; i < s.seq.length; i++) {
+        acc += Math.max(1, s.seq[i].duration | 0);
+        if (Math.abs(seqXOf(acc) - x) <= 5) {
+          return { inst: s.seq[i], index: i };
+        }
+      }
+      return null;
+    }
+    function instAt(x) {
+      var s = seqStarts();
+      var f = seqFrameAt(x);
+      if (f < 0 || f >= s.total) return null;
+      return VB.sequenceAt(app.project, Math.floor(f));
+    }
+    function scrubTo(x) {
+      var s = seqStarts();
+      var f = Math.max(0, Math.min(s.total - 1, Math.round(seqFrameAt(x))));
+      var at = VB.sequenceAt(app.project, f);
+      if (!at) return;
+      seqSel = at.inst.id;
+      var sc = VB.sceneById(app.project, at.inst.scene);
+      if (sc && sc.index !== app.project.cur.scene) {
+        app.project.selectScene(sc.index); // direct while scrubbing
+        refreshLayers();
+      }
+      app.project.cur.frame = f - at.start;
+      requestRender();
+      refreshTimeline();
+      renderSeqStrip();
+    }
+    cvs.addEventListener("pointerdown", function (ev) {
+      var p = local(ev);
+      if (ev.button === 1) {
+        ev.preventDefault();
+        cvs.setPointerCapture(ev.pointerId);
+        seqView.drag = { kind: "pan", x0: p.x, pan0: seqView.pan };
+        return;
+      }
+      if (ev.button !== 0) return;
+      stopSeqPlay();
+      cvs.setPointerCapture(ev.pointerId);
+      if (p.y < SEQ_RULER) { // scrub the master playhead
+        seqView.drag = { kind: "scrub" };
+        scrubTo(p.x);
+        return;
+      }
+      var edge = boundaryAt(p.x);
+      if (edge) {
+        seqView.drag = { kind: "boundary", inst: edge.inst,
+                         index: edge.index, ghost: null };
+        return;
+      }
+      var at = instAt(p.x);
+      if (!at) return;
+      seqSel = at.inst.id;
+      var sc = VB.sceneById(app.project, at.inst.scene);
+      if (sc) selectSceneIndex(sc.index);
+      seqView.drag = { kind: "maybe-move", inst: at.inst,
+                       index: at.index, x0: p.x };
+      renderSeqStrip();
     });
-    var add = document.createElement("button");
-    add.id = "seq-add";
-    add.textContent = "＋";
-    add.title = "Create a new scene and add it to the sequence";
-    add.addEventListener("click", function () {
-      var sid = VB.actorNewId("scene");
-      app.exec({ op: "sceneAdd", id: sid });
-      app.exec({ op: "sceneInstAdd", id: VB.actorNewId("seq"), scene: sid,
-                 after: seqSel || undefined });
+    cvs.addEventListener("pointermove", function (ev) {
+      var p = local(ev);
+      var d = seqView.drag;
+      if (!d) {
+        cvs.style.cursor = boundaryAt(p.x) ? "ew-resize"
+          : (p.y < SEQ_RULER ? "crosshair" : "default");
+        return;
+      }
+      if (d.kind === "pan") {
+        seqView.userZoom = true;
+        seqView.pan = Math.max(-20, d.pan0 - (p.x - d.x0) / seqView.pxf);
+        renderSeqStrip();
+        return;
+      }
+      if (d.kind === "scrub") { scrubTo(p.x); return; }
+      if (d.kind === "boundary") {
+        // ghost with the SAME zone-preserving math the op applies
+        var s = seqStarts();
+        var start = s.starts[d.index];
+        var inst = d.inst;
+        var next = s.seq[d.index + 1];
+        var frame = Math.max(0, Math.round(seqFrameAt(p.x)));
+        var ghost = {};
+        if (inst.locked || (next && next.locked)) return;
+        if (next) {
+          var nextEnd = start + Math.max(1, inst.duration | 0) +
+                        Math.max(1, next.duration | 0);
+          var b = Math.max(start + 1, Math.min(frame, nextEnd - 1));
+          ghost[inst.id] = b - start;
+          ghost[next.id] = nextEnd - b;
+        } else {
+          ghost[inst.id] = Math.max(1, frame - start);
+        }
+        d.ghost = ghost;
+        d.frame = frame;
+        renderSeqStrip();
+        return;
+      }
+      if (d.kind === "maybe-move" && Math.abs(p.x - d.x0) > 6) d.kind = "move";
+      if (d.kind === "move") {
+        var s2 = seqStarts();
+        var f2 = seqFrameAt(p.x);
+        var to = 0;
+        for (var i = 0; i < s2.seq.length; i++) {
+          if (s2.seq[i] === d.inst) continue;
+          var mid = s2.starts[i] + Math.max(1, s2.seq[i].duration | 0) / 2;
+          if (f2 > mid) to++;
+        }
+        d.to = to;
+        // caret sits at the insertion boundary among the OTHER blocks
+        var caret = 0, seen = 0;
+        for (var j = 0; j < s2.seq.length && seen < to; j++) {
+          if (s2.seq[j] === d.inst) continue;
+          caret = s2.starts[j] + Math.max(1, s2.seq[j].duration | 0);
+          seen++;
+        }
+        d.toFrame = to === 0 ? 0 : caret;
+        renderSeqStrip();
+      }
     });
-    bar.appendChild(add);
-    var total = document.createElement("span");
-    total.id = "seq-total";
-    var frames = VB.sequenceDuration(app.project);
-    total.textContent = frames + "f · " +
-      (frames / (app.project.fps || 24)).toFixed(1) + "s";
-    bar.appendChild(total);
+    cvs.addEventListener("pointerup", function () {
+      var d = seqView.drag;
+      seqView.drag = null;
+      if (!d) return;
+      if (d.kind === "scrub") {
+        // pin the landing scene + frame so replay agrees
+        app.record({ op: "sceneSelect", index: app.project.cur.scene });
+        app.exec({ op: "frameSelect", index: app.project.cur.frame });
+        return;
+      }
+      if (d.kind === "boundary" && d.frame !== undefined) {
+        app.exec({ op: "sceneBoundaryDrag", inst: d.inst.id,
+                   edge: "right", frame: d.frame });
+        return;
+      }
+      if (d.kind === "move" && d.to !== undefined && d.to !== d.index) {
+        app.exec({ op: "sceneInstMove", id: d.inst.id, index: d.to });
+        return;
+      }
+      renderSeqStrip();
+    });
+    cvs.addEventListener("pointercancel", function () {
+      seqView.drag = null;
+      renderSeqStrip();
+    });
+    cvs.addEventListener("wheel", function (ev) {
+      ev.preventDefault();
+      var p = local(ev);
+      var fAt = seqFrameAt(p.x);
+      seqView.userZoom = true;
+      var factor = ev.deltaY < 0 ? 1.2 : 1 / 1.2;
+      seqView.pxf = Math.max(0.02, Math.min(12, seqView.pxf * factor));
+      seqView.pan = fAt - p.x / seqView.pxf;
+      renderSeqStrip();
+    }, { passive: false });
+    cvs.addEventListener("contextmenu", function (ev) {
+      var p = local(ev);
+      var at = instAt(p.x);
+      seqMenu(ev, at ? at.inst : null);
+    });
+    cvs.addEventListener("dblclick", function (ev) {
+      var p = local(ev);
+      var at = instAt(p.x);
+      if (!at) return;
+      var sc = VB.sceneById(app.project, at.inst.scene);
+      var n = prompt("Scene name", sc ? sc.scene.name : "");
+      if (n && n.trim()) {
+        app.exec({ op: "sceneRename", scene: at.inst.scene, name: n });
+      }
+    });
+  }
+
+  function refreshSequence() {
+    ensureSeqStrip();
+    if (!seqView.canvas) return;
+    if (seqSel && !VB.sequenceInstById(app.project, seqSel)) seqSel = null;
+    if (seqView.playBtn) {
+      seqView.playBtn.textContent =
+        (typeof seqPlay !== "undefined" && seqPlay.playing) ? "⏹" : "▶";
+    }
+    renderSeqStrip();
   }
 
   // Empty-space drags in the transform tool draw a fresh region band —
@@ -2291,6 +2578,7 @@
         app.session.clock.frame = app.project.cur.frame;
         requestRender();
         refreshTimeline();
+        renderSeqStrip(); // the playhead sweeps the strip
       }
       seqPlay.raf = requestAnimationFrame(tick);
     }
@@ -2310,6 +2598,8 @@
     app.exec({ op: "frameSelect", index: app.project.cur.frame });
     refreshSequence();
   }
+
+  ensureSeqStrip(); // build the strip at load — remounts never add canvases
 
   // ---- Actors panel (actors.js; Architecture §6.6, step-2 beat 2) --------------
   // The library lists actors and their poses; clicking a pose enters the

@@ -506,7 +506,30 @@
   // trivial ops: valid low-cost profiles, never null
   ["undo", "redo", "new", "load", "layerAdd", "layerDelete", "layerMove",
    "layerRename", "layerSelect", "layerVisible", "layerLock", "sceneAdd",
-   "sceneSelect", "materialAdd", "materialEdit"].forEach(function (kind) {
+   "sceneSelect", "materialAdd", "materialEdit",
+   // structure/bookkeeping ops from the section workspaces — none touch
+   // planar geometry
+   "frameAdd", "frameRemove", "frameSelect", "fpsSet",
+   "sceneRename", "sceneInstAdd", "sceneInstRemove", "sceneInstMove",
+   "sceneInstDuration", "sceneInstLock", "sceneBoundarySet",
+   "sceneBoundaryDrag",
+   "editTargetSet", "editTargetClear",
+   "actorAdd", "actorRename", "actorRemove", "actorImport", "poseAdd",
+   "poseRename", "poseRemove", "poseSelect", "symbolAdd", "drawingAdd",
+   "drawingSelect",
+   "symbolCreate", "symbolRename", "symbolRemove",
+   "noteAdd", "noteMove", "noteMoveMany", "noteResize", "noteEdit",
+   "noteInk", "noteRemove", "noteRemoveMany",
+   "pitchSlideAdd", "pitchSlideMove", "pitchSlideRemove", "pitchSelect",
+   "pitchTextAdd", "pitchTextEdit", "pitchTextMove", "pitchTextRemove",
+   "writingDocAdd", "writingDocRename", "writingDocRemove",
+   "writingDocEdit", "blockAdd", "blockEdit", "blockMove", "blockRemove",
+   "beatAdd", "beatRename", "beatMove", "beatRemove", "panelAdd",
+   "panelMove", "panelRemove", "panelDuration", "panelCaption",
+   "panelLineAttach", "panelLineDetach", "boardsSelect",
+   "audioImport", "audioRemove", "trackAdd", "trackRename", "trackRemove",
+   "clipAdd", "clipMove", "clipTrim", "clipGain", "clipRemove"
+  ].forEach(function (kind) {
     ESTIMATORS[kind] = function (doc) {
       var b = Builder(kind, kind, doc, null);
       b.stage("bookkeeping", "op", 1, 10);

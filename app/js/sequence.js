@@ -211,6 +211,51 @@
     }
   });
 
+  // The reference's DRAG rebalance (set_scene_instance_boundary):
+  // moving the boundary between two instances keeps their combined
+  // zone fixed — the neighbor absorbs what this edge gives or takes,
+  // so scenes resize to fit a region. Only the LAST instance's right
+  // edge extends the sequence total. Locked instances freeze their
+  // edges; both sides always keep >= 1 frame.
+  VB.defineOp("sceneBoundaryDrag", function (c, op) {
+    var hit = instById(c.project, op.inst);
+    if (!hit) return;
+    var seq = sequenceOf(c.project);
+    var frame = Math.max(0, op.frame | 0);
+    if (op.edge === "right") {
+      if (hit.inst.locked) return;
+      var start = instStart(c.project, hit.index);
+      var next = seq[hit.index + 1];
+      if (next) {
+        if (next.locked) return;
+        var nextEnd = start + Math.max(1, hit.inst.duration | 0) +
+                      Math.max(1, next.duration | 0);
+        var b = Math.max(start + 1, Math.min(frame, nextEnd - 1));
+        c.history.push(c.project);
+        hit.inst.duration = b - start;
+        next.duration = nextEnd - b;
+      } else {
+        c.history.push(c.project);
+        hit.inst.duration = Math.max(1, frame - start);
+      }
+      c.sync();
+      return;
+    }
+    if (op.edge === "left") {
+      if (hit.index <= 0) return;
+      var prev = seq[hit.index - 1];
+      if (prev.locked || hit.inst.locked) return;
+      var myStart = instStart(c.project, hit.index);
+      var prevStart = myStart - Math.max(1, prev.duration | 0);
+      var myEnd = myStart + Math.max(1, hit.inst.duration | 0);
+      var b2 = Math.max(prevStart + 1, Math.min(frame, myEnd - 1));
+      c.history.push(c.project);
+      prev.duration = b2 - prevStart;
+      hit.inst.duration = myEnd - b2;
+      c.sync();
+    }
+  });
+
   window.VB = window.VB || {};
   VB.sequenceOf = sequenceOf;
   VB.sequenceDuration = sequenceDuration;
