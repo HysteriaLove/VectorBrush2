@@ -124,23 +124,39 @@
                          inst.rotation, -40 - (zi++) * 4);
     });
 
-    // the scene's DRAWN layers (cast excluded) as one plane
-    var art = document.createElement("canvas");
-    art.width = Math.max(2, Math.round(st.w * TEX_ZOOM));
-    art.height = Math.max(2, Math.round(st.h * TEX_ZOOM));
-    var actx = art.getContext("2d");
-    var as = TEX_ZOOM / VB.TWIPS;
-    actx.setTransform(as, 0, 0, as, 0, 0);
-    for (var li = scene.layers.length - 1; li >= 0; li--) {
-      if (!scene.layers[li].visible) continue;
-      VB.renderDocContent(actx, VB.frameCell(scene.layers[li], frame),
-                          { zoom: TEX_ZOOM, dpr: 1 });
+    // the scene's DRAWN layers (cast excluded) as one plane — the
+    // texture is CACHED by content (scene + per-layer cell hashes):
+    // uploading a fresh stage-sized texture every rebuild churned GPU
+    // memory hard enough to risk context loss during playback + drag
+    var artKey = project.cur.scene + "|";
+    for (var ki = 0; ki < scene.layers.length; ki++) {
+      var kl = scene.layers[ki];
+      artKey += (kl.visible
+        ? (VB.pixiHashCell
+            ? VB.pixiHashCell(VB.frameCell(kl, frame)) : frame)
+        : "x") + ",";
     }
-    var artTex = new T.CanvasTexture(art);
-    artTex.colorSpace = T.SRGBColorSpace;
+    if (!view.artCache || view.artCache.key !== artKey) {
+      var art = document.createElement("canvas");
+      art.width = Math.max(2, Math.round(st.w * TEX_ZOOM));
+      art.height = Math.max(2, Math.round(st.h * TEX_ZOOM));
+      var actx = art.getContext("2d");
+      var as = TEX_ZOOM / VB.TWIPS;
+      actx.setTransform(as, 0, 0, as, 0, 0);
+      for (var li = scene.layers.length - 1; li >= 0; li--) {
+        if (!scene.layers[li].visible) continue;
+        VB.renderDocContent(actx, VB.frameCell(scene.layers[li], frame),
+                            { zoom: TEX_ZOOM, dpr: 1 });
+      }
+      var artTex = new T.CanvasTexture(art);
+      artTex.colorSpace = T.SRGBColorSpace;
+      if (view.artCache) view.artCache.tex.dispose();
+      view.artCache = { key: artKey, tex: artTex };
+    }
     var artMesh = new T.Mesh(
       new T.PlaneGeometry(st.w, st.h),
-      new T.MeshBasicMaterial({ map: artTex, transparent: true }));
+      new T.MeshBasicMaterial({ map: view.artCache.tex,
+                                transparent: true }));
     artMesh.position.set(0, 0, 0);
     view.group.add(artMesh);
 
@@ -273,7 +289,21 @@
 
   function renderLoop() {
     if (!view.host || !view.renderer) return;
-    view.renderer.render(view.scene, camera());
+    // never die silently: a throw here used to kill the loop and the
+    // view sat blank with no message
+    if (!view.ctxLost) {
+      try {
+        view.renderer.render(view.scene, camera());
+      } catch (e) {
+        if (!view.renderErr) {
+          view.renderErr = true;
+          if (view.app && view.app.setMsg) {
+            view.app.setMsg("3D render error: " +
+                            (e && e.message || e));
+          }
+        }
+      }
+    }
     view.raf = requestAnimationFrame(renderLoop);
   }
 
@@ -374,8 +404,35 @@
 
     var dom = view.renderer.domElement;
     dom.style.touchAction = "none";
+    // a GPU hiccup (driver reset, memory pressure — pen drags during
+    // playback were enough) LOSES the WebGL context; three.js never
+    // recovers on its own and the canvas sits transparent — "the
+    // background goes white". preventDefault allows the restore, then
+    // every GPU-side object rebuilds from our records (the model is
+    // the truth, so nothing is lost).
+    dom.addEventListener("webglcontextlost", function (ev) {
+      ev.preventDefault();
+      view.ctxLost = true;
+      if (view.app && view.app.setMsg) {
+        view.app.setMsg("3D context lost — recovering…");
+      }
+    });
+    dom.addEventListener("webglcontextrestored", function () {
+      view.ctxLost = false;
+      view.renderErr = false;
+      view.texCache.forEach(function (e) { e.tex.dispose(); });
+      view.texCache = new Map();
+      if (view.artCache) {
+        view.artCache.tex.dispose();
+        view.artCache = null;
+      }
+      view.dirty = true;
+      syncFrame();
+      if (view.app && view.app.setMsg) view.app.setMsg("3D view recovered");
+    });
     dom.addEventListener("pointerdown", function (ev) {
-      dom.setPointerCapture(ev.pointerId);
+      try { dom.setPointerCapture(ev.pointerId); }
+      catch (e) { /* a pen can drop its pointer between events */ }
       view.drag = { btn: ev.button, x: ev.clientX, y: ev.clientY };
     });
     dom.addEventListener("pointermove", function (ev) {
@@ -463,6 +520,12 @@
     clearGroup();
     view.texCache.forEach(function (e) { e.tex.dispose(); });
     view.texCache = new Map();
+    if (view.artCache) {
+      view.artCache.tex.dispose();
+      view.artCache = null;
+    }
+    view.ctxLost = false;
+    view.renderErr = false;
     if (view.renderer) {
       view.renderer.dispose();
       view.renderer = null;
