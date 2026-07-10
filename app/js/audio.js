@@ -751,13 +751,13 @@
     view.app = app;
     host.innerHTML = "";
 
-    // toolpanels join the ONE top toolbar (the core xRack UI language)
-    // and leave with the workspace
+    // toolpanels join the floating ISLANDS (the core xRack UI
+    // language) and leave with the workspace
     var bar = document.getElementById("topbar");
     view.xpanels = [];
     function xpanel(name) {
       var p;
-      if (app.xpanel && bar) {
+      if (app.xpanel) {
         p = app.xpanel(bar, "au-" + name);
       } else {
         p = document.createElement("div");
@@ -812,7 +812,6 @@
           view.app.setMsg("bake failed: " + (err && err.message || err));
         });
       }));
-    if (app.wireXbar && bar) app.wireXbar("top", bar);
 
     var body = document.createElement("div");
     body.id = "au-body";
@@ -1031,6 +1030,50 @@
     if (!rig.playing) rig.masterMs = Math.max(0, ms || 0);
   };
   VB.audioIsPlaying = function () { return !!rig.playing; };
+  /** A MediaStream of the project's audio scheduled from fromMs — the
+   *  video export records this track alongside the canvas frames. */
+  VB.audioExportStream = function (project, fromMs) {
+    var need = {};
+    audioOf(project).tracks.forEach(function (tr) {
+      tr.clips.forEach(function (cl) { need[cl.asset] = true; });
+    });
+    var jobs = Object.keys(need).map(function (id) {
+      var hit = assetById(project, id);
+      return hit ? decodeAsset(hit.asset).catch(function () {}) : null;
+    });
+    return Promise.all(jobs).then(function () {
+      var ctx = ensureCtx();
+      var dest = ctx.createMediaStreamDestination();
+      var when0 = ctx.currentTime + 0.05;
+      var sources = [];
+      audioOf(project).tracks.forEach(function (tr) {
+        tr.clips.forEach(function (cl) {
+          var buffer = rig.buffers[cl.asset];
+          if (!buffer) return;
+          if (cl.at + cl.duration <= fromMs) return;
+          var lead = Math.max(0, cl.at - fromMs) / 1000;
+          var skip = Math.max(0, fromMs - cl.at);
+          var src = ctx.createBufferSource();
+          src.buffer = buffer;
+          var g = ctx.createGain();
+          g.gain.value = cl.gain;
+          src.connect(g);
+          g.connect(dest); // to the stream only — the export is silent
+          src.start(when0 + lead, (cl.offset + skip) / 1000,
+                    (cl.duration - skip) / 1000);
+          sources.push(src);
+        });
+      });
+      return {
+        stream: dest.stream,
+        stop: function () {
+          sources.forEach(function (s) {
+            try { s.stop(); } catch (e) { /* ended */ }
+          });
+        }
+      };
+    });
+  };
   /** Peaks for drawing a stem elsewhere (the sequence strip's audio
    *  band): returns the pyramid, or null while the decode it kicked
    *  off is still running (onReady fires when it lands). */

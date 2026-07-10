@@ -95,6 +95,18 @@ App
   Boards, Audio, Roughs, Actors, Composite, Grading, Export; decided
   2026-07-10). Sections lazy-load: opening a project
   loads the manifest + the section you enter, nothing else (§5).
+- **The y2kshell UI language (DECIDED 2026-07-10).** Every workspace
+  shares one chrome: side racks of packed property modules (xRack port,
+  y2kshell.js), two drawers whose faces pull them open (shared
+  scratchpad up top behind a slim handle; the playback toolbar +
+  timelines at the bottom — the ONLY fixed toolbar strip), and
+  **floating toolpanel islands** for everything else. Islands are
+  composable clusters of xPanels: drag an island by its bar, drag a
+  panel's ⠿ grip into another island to regroup, or onto empty space to
+  spawn a new island. Composition and positions are view state
+  (localStorage `vb-y2kshell`, never the journal) and are REMEMBERED
+  across workspaces and reloads; a workspace's panels leave with it but
+  keep their island seats for remount.
 - **`.theme` reskinning (DECIDED, future).** The whole UI — homescreen
   and every section view — is reskinnable via `.theme` packages, built
   mostly on slice-9 skinning, with a skin repository for distribution.
@@ -496,6 +508,16 @@ actually built. The DECIDED/PROPOSED markers below respect that.)
   for the classic-Flash interchange goal, and `.y2kvector`.
 - Every export = journal revision + settings snapshot → artifact +
   shelf entry (Test or Finished). Reproducible by construction.
+- **Video export menu (SHIPPED first slice).** CapCut-style settings:
+  name, resolution presets (480p–4K; width follows the export camera
+  aspect), frame rate (24/25/30/50/60), quality (bitrate tiers), format
+  MP4/WebM (MediaRecorder support-detected, WebM fallback), audio
+  on/off, source flat-oracle or Composite camera, estimated size.
+  Export time maps to master frames as `floor(t × project.fps)`, so the
+  export frame rate never changes film speed; the project's audio joins
+  the container as a real track (`VB.audioExportStream`). Recording
+  rides MediaRecorder at playback pace — the deterministic offline
+  renderer (journal-revision reproducible) is the later slice.
 - Text-in-SWF export remains permanently out of scope (standing decision).
 
 ---

@@ -1987,13 +1987,16 @@
         drawer.style.height =
           (d.open ? Math.max(0, d.h | 0) : 0) + "px";
       });
-      // the resting toolbars keep their footprint in the layout
+      // the resting faces keep their footprint in the layout — up top
+      // that's just the slim scratchpad pull (the toolbar strip became
+      // the floating islands)
       var dsTop = document.getElementById("dockspace-top");
-      var tb = document.getElementById("topbar");
-      if (dsTop && tb) dsTop.style.height = tb.offsetHeight + "px";
+      var th = document.getElementById("tophandle");
+      if (dsTop && th) dsTop.style.height = th.offsetHeight + "px";
       var dsBot = document.getElementById("dockspace-bottom");
       var xb = document.getElementById("xbar-bottom");
       if (dsBot && xb) dsBot.style.height = xb.offsetHeight + "px";
+      layoutIslands();
       persist();
     }
 
@@ -2127,7 +2130,7 @@
         barEl.addEventListener("pointercancel", onUp);
       });
     }
-    wireDrawerPull(document.getElementById("topbar"), "top", 1);
+    wireDrawerPull(document.getElementById("tophandle"), "top", 1);
     wireDrawerPull(document.getElementById("xbar-bottom"), "bottom", -1);
 
     // the step sequencer keeps its OWN view: wheel zooms its cells
@@ -2321,11 +2324,239 @@
         }
       }, { passive: false });
     }
-    wireXbar("top", document.getElementById("topbar"));
+    // only the bottom PLAYBACK toolbar stays a fixed strip (user
+    // spec) — every other toolpanel lives on the floating islands
     wireXbar("bottom", document.getElementById("xbar-bottom"));
-    // workspaces turn their hardcoded toolbars into xToolbars of
-    // toolpanels through these seams (Phase B)
     app.wireXbar = wireXbar;
+
+    // ---- floating toolpanel ISLANDS ------------------------------------
+    // composable clusters of xPanels shared across EVERY workspace
+    // (user spec): drag an island by its bar to move it, drag a
+    // panel's ⠿ into another island to regroup, or onto empty space
+    // to spawn a new island. Membership and positions persist in the
+    // shell state, so a composition survives workspace switches and
+    // reloads. When a workspace unmounts its panels, the island
+    // remembers the seat and re-seats them on remount.
+    var islandsHost = document.getElementById("islands");
+    var islandDoms = {};   // island id -> element
+    var panelEls = {};     // panel name -> current element
+
+    function islandDom(isl) {
+      var el = islandDoms[isl.id];
+      if (!el && islandsHost) {
+        el = document.createElement("div");
+        el.className = "y2kisland";
+        el.dataset.island = isl.id;
+        var grip = document.createElement("div");
+        grip.className = "y2kislandgrip";
+        grip.title = "Drag to move these tools";
+        el.appendChild(grip);
+        wireIslandMove(el, grip);
+        el.addEventListener("pointerdown", function () {
+          islandsHost.appendChild(el); // raise above its siblings
+        });
+        // a workspace unmounting removes its panel elements — forget
+        // them (membership stays) and let empty islands hide
+        new MutationObserver(function (recs) {
+          var gone = false;
+          recs.forEach(function (rec) {
+            Array.prototype.forEach.call(rec.removedNodes, function (n) {
+              if (n.nodeType !== 1 || !n.dataset || !n.dataset.panel) return;
+              if (!n.isConnected && panelEls[n.dataset.panel] === n) {
+                delete panelEls[n.dataset.panel];
+                gone = true;
+              }
+            });
+          });
+          if (gone) layoutIslands();
+        }).observe(el, { childList: true });
+        islandsHost.appendChild(el);
+        islandDoms[isl.id] = el;
+      }
+      return el;
+    }
+
+    function layoutIslands() {
+      if (!islandsHost) return;
+      var minY = 32;
+      var wsb = document.getElementById("workspacebar");
+      if (wsb && wsb.offsetHeight) minY = wsb.offsetHeight + 4;
+      state.islands.list.forEach(function (isl) {
+        var el = islandDom(isl);
+        if (!el) return;
+        // seat the PRESENT members in membership order (absent ones
+        // keep their seat for when their workspace comes back)
+        var want = [];
+        isl.panels.forEach(function (name) {
+          var p = panelEls[name];
+          if (p && (p.isConnected || p.parentElement === null)) want.push(p);
+        });
+        var have = Array.prototype.filter.call(
+          el.children, function (k) { return k.dataset && k.dataset.panel; });
+        var same = have.length === want.length && want.every(function (p, i) {
+          return have[i] === p;
+        });
+        if (!same) want.forEach(function (p) { el.appendChild(p); });
+        el.style.display = want.length ? "flex" : "none";
+        if (want.length) {
+          isl.x = Math.max(0, Math.min(window.innerWidth - 72, isl.x));
+          isl.y = Math.max(minY, Math.min(window.innerHeight - 48, isl.y));
+          el.style.left = Math.round(isl.x) + "px";
+          el.style.top = Math.round(isl.y) + "px";
+        }
+      });
+      Object.keys(islandDoms).forEach(function (id) {
+        if (!S.islandById(state, id)) {
+          islandDoms[id].remove();
+          delete islandDoms[id];
+        }
+      });
+    }
+
+    // an unassigned panel joins the island where its kind already
+    // lives — core app panels together, workspace panels together
+    function defaultIslandFor(name) {
+      var core = name.indexOf("-") < 0;
+      var mate = null;
+      state.islands.list.forEach(function (isl) {
+        if (mate) return;
+        isl.panels.forEach(function (pn) {
+          if (!mate && (pn.indexOf("-") < 0) === core) mate = isl;
+        });
+      });
+      if (mate) return mate;
+      var below = 44; // a fresh island drops in under the others
+      Object.keys(islandDoms).forEach(function (id) {
+        var el = islandDoms[id];
+        if (el.style.display === "none") return;
+        below = Math.max(below, el.offsetTop + el.offsetHeight + 12);
+      });
+      return S.islandCreate(state, 8, core ? 44 : below);
+    }
+
+    function adoptPanel(p) {
+      var name = p.dataset.panel;
+      if (!name || !islandsHost) return;
+      panelEls[name] = p;
+      var isl = S.islandFor(state, name);
+      if (!isl) {
+        isl = defaultIslandFor(name);
+        S.islandAssign(state, name, isl.id);
+      }
+      var el = islandDom(isl);
+      if (el && p.parentElement !== el) el.appendChild(p);
+      wireIslandPanel(p);
+      layoutIslands();
+      persist();
+    }
+
+    function wireIslandMove(el, grip) {
+      grip.addEventListener("pointerdown", function (ev) {
+        if (ev.button !== 0) return;
+        ev.preventDefault();
+        grip.setPointerCapture(ev.pointerId);
+        var isl = S.islandById(state, el.dataset.island);
+        if (!isl) return;
+        var x0 = ev.clientX - isl.x, y0 = ev.clientY - isl.y;
+        function onMove(e2) {
+          isl.x = e2.clientX - x0;
+          isl.y = e2.clientY - y0;
+          layoutIslands();
+        }
+        function onUp() {
+          grip.removeEventListener("pointermove", onMove);
+          grip.removeEventListener("pointerup", onUp);
+          grip.removeEventListener("pointercancel", onUp);
+          persist();
+        }
+        grip.addEventListener("pointermove", onMove);
+        grip.addEventListener("pointerup", onUp);
+        grip.addEventListener("pointercancel", onUp);
+      });
+    }
+
+    function islandHitAt(x, y) {
+      var hit = null;
+      Object.keys(islandDoms).forEach(function (id) {
+        var el = islandDoms[id];
+        if (el.style.display === "none") return;
+        var r = el.getBoundingClientRect();
+        if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+          hit = id;
+        }
+      });
+      return hit;
+    }
+
+    function wireIslandPanel(p) {
+      if (p.dataset.iswired) return;
+      p.dataset.iswired = "1";
+      var grip = p.querySelector(".y2kxgrip");
+      if (!grip) return;
+      grip.addEventListener("pointerdown", function (ev) {
+        if (ev.button !== 0) return;
+        ev.preventDefault();
+        grip.setPointerCapture(ev.pointerId);
+        var r0 = p.getBoundingClientRect();
+        var dx = ev.clientX - r0.left, dy = ev.clientY - r0.top;
+        var moved = false;
+        function onMove(e2) {
+          if (!moved && Math.abs(e2.clientX - (r0.left + dx)) < 5 &&
+              Math.abs(e2.clientY - (r0.top + dy)) < 5) return;
+          if (!moved) {
+            moved = true;
+            p.classList.add("islanddrag");
+            p.style.width = r0.width + "px";
+          }
+          p.style.left = (e2.clientX - dx) + "px";
+          p.style.top = (e2.clientY - dy) + "px";
+          var hit = islandHitAt(e2.clientX, e2.clientY);
+          Object.keys(islandDoms).forEach(function (id) {
+            islandDoms[id].classList.toggle("dropready", id === hit);
+          });
+        }
+        function onUp(e2) {
+          grip.removeEventListener("pointermove", onMove);
+          grip.removeEventListener("pointerup", onUp);
+          grip.removeEventListener("pointercancel", onUp);
+          Object.keys(islandDoms).forEach(function (id) {
+            islandDoms[id].classList.remove("dropready");
+          });
+          if (!moved) return;
+          p.classList.remove("islanddrag");
+          p.style.left = p.style.top = p.style.width = "";
+          var name = p.dataset.panel;
+          var hit = islandHitAt(e2.clientX, e2.clientY);
+          S.islandDetach(state, name);
+          if (hit) {
+            // seat by pointer height among the target's visible panels
+            var el = islandDoms[hit];
+            var isl = S.islandById(state, hit);
+            var before = null;
+            Array.prototype.forEach.call(
+              el.querySelectorAll(".y2kxpanel"), function (k) {
+                if (k === p || before) return;
+                var r = k.getBoundingClientRect();
+                if (e2.clientY < r.top + r.height / 2) before = k;
+              });
+            S.islandAssign(state, name, hit,
+              before ? isl.panels.indexOf(before.dataset.panel) : undefined);
+          } else {
+            // empty space: the panel becomes its own island
+            S.islandCreate(state, e2.clientX - dx, e2.clientY - dy, [name]);
+          }
+          S.islandPrune(state);
+          layoutIslands();
+          persist();
+        }
+        grip.addEventListener("pointermove", onMove);
+        grip.addEventListener("pointerup", onUp);
+        grip.addEventListener("pointercancel", onUp);
+      });
+    }
+
+    // workspaces hand every toolpanel to the islands through this
+    // seam — the old toolbar argument is accepted and ignored
     app.xpanel = function (bar, name) {
       var p = document.createElement("div");
       p.className = "y2kxpanel";
@@ -2333,13 +2564,19 @@
       var g = document.createElement("span");
       g.className = "y2kxgrip";
       g.textContent = "⠿";
-      g.title = "Drag to rearrange";
+      g.title = "Drag to regroup these tools";
       p.appendChild(g);
-      var spacer = bar.querySelector(".spacer");
-      if (spacer) bar.insertBefore(p, spacer);
-      else bar.appendChild(p);
+      adoptPanel(p);
       return p;
     };
+    app.adoptPanel = adoptPanel;
+
+    // the core panels start life in a hidden nursery in the HTML
+    var nursery = document.getElementById("panel-nursery");
+    if (nursery) {
+      Array.prototype.slice.call(nursery.querySelectorAll(".y2kxpanel"))
+        .forEach(adoptPanel);
+    }
     window.addEventListener("resize", function () { applyShell(); });
 
     // rack column wheel scroll + edge resize

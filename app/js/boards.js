@@ -580,13 +580,13 @@
     view.app = app;
     host.innerHTML = "";
 
-    // toolpanels join the ONE top toolbar (the core xRack UI language)
-    // and leave with the workspace
+    // toolpanels join the floating ISLANDS (the core xRack UI
+    // language) and leave with the workspace
     var bar = document.getElementById("topbar");
     view.xpanels = [];
     function xpanel(name) {
       var p;
-      if (app.xpanel && bar) {
+      if (app.xpanel) {
         p = app.xpanel(bar, "bd-" + name);
       } else {
         p = document.createElement("div");
@@ -678,7 +678,6 @@
         if (view.animatic.playing) stopAnimatic(); else startAnimatic();
       }));
 
-    if (app.wireXbar && bar) app.wireXbar("top", bar);
 
     var body = document.createElement("div");
     body.id = "bd-body";

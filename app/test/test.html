@@ -4118,6 +4118,39 @@
       pk.racks.left.open === true && pkById("a").y === 0 &&
       pkById("c").y === 0 && pkById("b").y === 100);
 
+    // floating toolpanel islands (composable, remembered across
+    // workspaces — user spec): membership is pure state; the DOM
+    // layer only seats panel elements into their claiming island
+    var il = Sh.defaults();
+    check("defaults start with no islands",
+      il.islands.list.length === 0 && il.islands.seq === 1);
+    var iA = Sh.islandCreate(il, 8, 44, ["file", "edit"]);
+    var iB = Sh.islandCreate(il, 300, 200, []);
+    check("islands get deterministic ids",
+      iA.id === "isl1" && iB.id === "isl2" && il.islands.seq === 3);
+    check("membership lookups find the claiming island",
+      Sh.islandFor(il, "edit") === iA &&
+      Sh.islandFor(il, "zoom") === null &&
+      Sh.islandById(il, "isl2") === iB);
+    Sh.islandAssign(il, "edit", "isl2");
+    check("assign moves a panel between islands",
+      iA.panels.join() === "file" && iB.panels.join() === "edit");
+    Sh.islandAssign(il, "file", "isl2", 0);
+    check("assign seats at the requested index",
+      iB.panels.join() === "file,edit");
+    Sh.islandAssign(il, "file", "isl2", 99);
+    check("seat indexes clamp into the list",
+      iB.panels.join() === "edit,file");
+    Sh.islandPrune(il);
+    check("empty islands dissolve on prune",
+      il.islands.list.length === 1 && il.islands.list[0] === iB);
+    var il2 = Sh.restore(Sh.serialize(il));
+    check("island composition roundtrips",
+      Sh.serialize(il2) === Sh.serialize(il));
+    check("legacy shell states grow an island field",
+      Sh.restore('{"step":{"cellW":13}}').islands.list.length === 0 &&
+      Sh.restore('{"step":{"cellW":13}}').islands.seq === 1);
+
     // persistence roundtrip (view state, never the journal)
     var sh2 = Sh.restore(Sh.serialize(sh));
     check("shell state roundtrips",

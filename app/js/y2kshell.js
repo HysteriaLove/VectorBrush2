@@ -42,7 +42,10 @@
       },
       // the step sequencer's own view (the scene timeline keeps its
       // zoom/pan inside the strip itself)
-      step: { cellW: 13 }
+      step: { cellW: 13 },
+      // floating toolpanel ISLANDS — composable clusters of xPanels
+      // shared (and remembered) across every workspace
+      islands: { seq: 1, list: [] }
     };
   }
 
@@ -308,12 +311,68 @@
     return bar.scroll;
   }
 
+  // ---- toolpanel islands (floating, composable, cross-workspace) -----------------
+  // membership lives HERE (pure); the DOM layer adopts panel elements
+  // into whichever island claims their name
+
+  function islandById(state, id) {
+    var list = state.islands.list;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === id) return list[i];
+    }
+    return null;
+  }
+
+  function islandFor(state, panel) {
+    var list = state.islands.list;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].panels.indexOf(panel) >= 0) return list[i];
+    }
+    return null;
+  }
+
+  function islandCreate(state, x, y, panels) {
+    var isl = {
+      id: "isl" + state.islands.seq++,
+      x: Math.round(x) || 0, y: Math.round(y) || 0,
+      panels: panels ? panels.slice() : []
+    };
+    state.islands.list.push(isl);
+    return isl;
+  }
+
+  // moving a panel between islands is detach + assign; an island that
+  // loses its last panel dissolves (prune)
+  function islandDetach(state, panel) {
+    var isl = islandFor(state, panel);
+    if (!isl) return null;
+    isl.panels.splice(isl.panels.indexOf(panel), 1);
+    return isl;
+  }
+
+  function islandAssign(state, panel, id, index) {
+    var isl = islandById(state, id);
+    if (!isl) return null;
+    islandDetach(state, panel);
+    var at = index === undefined ? isl.panels.length
+      : Math.max(0, Math.min(isl.panels.length, index | 0));
+    isl.panels.splice(at, 0, panel);
+    return isl;
+  }
+
+  function islandPrune(state) {
+    state.islands.list = state.islands.list.filter(function (isl) {
+      return isl.panels.length > 0;
+    });
+  }
+
   // ---- persistence (view state — never the journal) ------------------------------
 
   function serialize(state) {
     return JSON.stringify({
       racks: state.racks, toolbars: state.toolbars,
-      drawers: state.drawers, step: state.step
+      drawers: state.drawers, step: state.step,
+      islands: state.islands
     });
   }
 
@@ -330,6 +389,7 @@
       if (data && data.toolbars) state.toolbars = data.toolbars;
       if (data && data.drawers) state.drawers = data.drawers;
       if (data && data.step) state.step = data.step;
+      if (data && data.islands) state.islands = data.islands;
     } catch (e) { /* fresh defaults */ }
     // normalize fields older persisted states lack
     ["left", "right"].forEach(function (side) {
@@ -346,6 +406,17 @@
     if (state.drawers.top.h === undefined) state.drawers.top.h = 220;
     if (state.drawers.bottom.h === undefined) state.drawers.bottom.h = 130;
     if (!state.step || !(state.step.cellW > 0)) state.step = { cellW: 13 };
+    if (!state.islands || !Array.isArray(state.islands.list)) {
+      state.islands = { seq: 1, list: [] };
+    }
+    if (!(state.islands.seq > 0)) state.islands.seq = 1;
+    state.islands.list = state.islands.list.filter(function (isl) {
+      return isl && isl.id && Array.isArray(isl.panels);
+    });
+    state.islands.list.forEach(function (isl) {
+      if (!isFinite(isl.x)) isl.x = 8;
+      if (!isFinite(isl.y)) isl.y = 40;
+    });
     return state;
   }
 
@@ -372,6 +443,12 @@
     endPanelDrag: endPanelDrag,
     clampToolbarScroll: clampToolbarScroll,
     solveIsland: solveIsland,
+    islandById: islandById,
+    islandFor: islandFor,
+    islandCreate: islandCreate,
+    islandDetach: islandDetach,
+    islandAssign: islandAssign,
+    islandPrune: islandPrune,
     serialize: serialize,
     restore: restore
   };

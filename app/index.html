@@ -76,14 +76,6 @@
     user-select: none;
   }
 
-  #topbar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 10px;
-    background: var(--panel);
-    border-bottom: 1px solid var(--panel-edge);
-  }
   .brand {
     font-weight: 600;
     letter-spacing: .4px;
@@ -114,7 +106,7 @@
     width: 52px; font: inherit; color: var(--text);
     background: var(--btn); border: 1px solid var(--btn-edge); border-radius: 4px; padding: 3px 6px;
   }
-  #topbar button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .y2kisland button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
   #fileinfo { color: var(--text-dim); font-size: 12px; }
 
   #middle { flex: 1; display: flex; min-height: 0; }
@@ -191,6 +183,50 @@
     overflow-y: auto;
   }
   #layerlist, #matlist, #actorlist { flex: 1; min-height: 40px; }
+
+  /* toolpanel ISLANDS: floating, composable clusters of xPanels that
+     persist across every workspace — drag the island bar to move it,
+     drag a panel's ⠿ between islands or to empty space for a new one */
+  #islands {
+    position: fixed; inset: 0; z-index: 46;
+    pointer-events: none;
+  }
+  .y2kisland {
+    position: absolute; pointer-events: auto;
+    display: flex; flex-direction: column; gap: 4px;
+    background: var(--panel);
+    border: 1px solid var(--panel-edge); border-radius: 8px;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.18);
+    padding: 0 6px 6px;
+    user-select: none;
+  }
+  .y2kisland.dropready { outline: 2px solid var(--accent); }
+  .y2kislandgrip {
+    height: 14px; margin: 0 -6px 0;
+    display: flex; align-items: center; justify-content: center;
+    cursor: grab; color: var(--text-dim);
+    border-bottom: 1px solid var(--row-edge);
+  }
+  .y2kislandgrip::before {
+    content: ""; width: 40px; height: 3px; border-radius: 2px;
+    background: var(--text-dim); opacity: 0.5;
+  }
+  .y2kisland .y2kxpanel { background: var(--field); }
+  .y2kxpanel.islanddrag {
+    position: fixed; z-index: 260; pointer-events: none;
+    opacity: 0.85; box-shadow: 0 6px 18px rgba(0,0,0,0.3);
+  }
+  #tophandle {
+    flex: none; height: 12px; cursor: ns-resize;
+    background: var(--panel);
+    border-bottom: 1px solid var(--panel-edge);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #tophandle::before {
+    content: ""; width: 44px; height: 3px; border-radius: 2px;
+    background: var(--text-dim); opacity: 0.55;
+  }
+  #tophandle:hover::before { background: var(--accent); opacity: 1; }
 
   /* xToolbars: scrollable strips of grouped xPanels — drag ⠿ to
      rearrange; the strip scrolls sideways when panels overflow */
@@ -289,11 +325,11 @@
     background: var(--panel);
     overflow: hidden; /* partial pulls clip smoothly, never jump */
   }
-  /* the toolbars themselves pull the drawers: drag down on the top
-     toolbar / up on the bottom one (buttons still click normally);
+  /* the faces themselves pull the drawers: drag down on the top
+     handle / up on the bottom toolbar (buttons still click normally);
      every xToolbar scrolls freely left-to-right (trailing overscroll) */
   .y2kxbar { padding-right: 45vw; }
-  #topbar, #xbar-bottom { cursor: ns-resize; }
+  #xbar-bottom { cursor: ns-resize; }
   .y2kxbar button, .y2kxbar input, .y2kxbar select,
   .y2kxbar .y2kxgrip { cursor: pointer; }
   .y2kxbar input[type="number"], .y2kxbar select { cursor: auto; }
@@ -593,6 +629,7 @@
     border: 1px solid var(--panel-edge); border-radius: 3px;
     padding: 2px 6px; width: 150px;
   }
+  #exp-panel input[type="checkbox"] { width: auto; margin-right: 134px; }
   #exp-note { color: var(--text-dim); font-size: 10px; }
   #exp-actions { display: flex; gap: 8px; justify-content: flex-end; }
   #exp-progress { color: var(--text-dim); min-height: 14px; }
@@ -1126,14 +1163,19 @@
     </div>
   </div>
 
-  <div id="topbar" class="y2kxbar" data-xbar="top">
+  <div id="tophandle"
+       title="Drag down to pull out the shared scratchpad"></div>
+  </div>
+  <div class="y2kdockspace" id="dockspace-top"></div>
+  <div id="islands"></div>
+  <div id="panel-nursery" style="display:none">
     <div class="y2kxpanel" data-panel="file">
       <span class="y2kxgrip" title="Drag to rearrange">⠿</span>
       <button id="btn-open" title="Open .swf or .y2kvector (legacy .vbd) (Ctrl+O)">Open…</button>
       <button id="btn-save" title="Save as compact .y2kvector">Save .y2kvector</button>
       <button id="btn-save-swf" title="Export as SWF v7 (opens in Flash MX 2004)">Save .swf</button>
       <button id="btn-log" title="Export the action log (deterministic bug repro)">Save log</button>
-      <button id="btn-export-video" title="Export the sequence as a WebM video">🎞 Export…</button>
+      <button id="btn-export-video" title="Export the sequence as an MP4/WebM video">🎞 Export…</button>
     </div>
     <div class="y2kxpanel" data-panel="edit">
       <span class="y2kxgrip" title="Drag to rearrange">⠿</span>
@@ -1185,11 +1227,7 @@
         ⟳<input type="number" id="sel-rotation" value="0" step="1" style="width:56px" disabled>°
       </label>
     </div>
-    <div class="spacer"></div>
-    <div id="fileinfo">no file loaded</div>
   </div>
-  </div>
-  <div class="y2kdockspace" id="dockspace-top"></div>
 
   <div id="workspace-stub">
     <div>
@@ -1392,6 +1430,7 @@
     <span id="status-est" title="OperationEstimator (debug)"></span>
     <span class="spacer"></span>
     <span id="status-msg"></span>
+    <span id="fileinfo">no file loaded</span>
   </div>
 
   <input type="file" id="file-input" accept=".swf,.y2kvector,.vbd,.ttf,.ttc" style="display:none">
