@@ -195,6 +195,7 @@
     if (VB.WritingView) VB.WritingView.refresh();
     if (VB.PitchView) VB.PitchView.refresh();
     if (VB.BoardsView) VB.BoardsView.refresh();
+    if (VB.AudioView) VB.AudioView.refresh();
     app.debugPin = -1;
     app.debugHover = -1;
     refreshDebugPanel();

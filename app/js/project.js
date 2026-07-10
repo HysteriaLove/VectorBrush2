@@ -65,6 +65,10 @@
     // The object LIBRARY (library.js): symbols (converted selections)
     // and backgrounds — global containers for instantiation later.
     this.library = [];
+    // Audio (audio.js): imported stems (bytes live in the package as
+    // units; entries here are metadata only) and tracks of clips, all
+    // in integer milliseconds. Rides the journal.
+    this.audio = { assets: [], tracks: [] };
     // Actor edit mode (Flash's symbol-edit): when set, scene()/stage()/
     // activeCell() resolve to the targeted actor cell, so every tool,
     // renderer, and journaled art op follows. Set ONLY through the

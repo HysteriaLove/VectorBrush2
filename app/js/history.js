@@ -124,6 +124,8 @@
         return { id: e.id, kind: e.kind, name: e.name,
                  cell: snapshotDoc(e.cell) };
       }),
+      audio: JSON.parse(JSON.stringify(
+        target.audio || { assets: [], tracks: [] })),
       pitch: {
         cur: (target.pitch || {}).cur || 0,
         slides: ((target.pitch || {}).slides || []).map(function (s) {
@@ -190,6 +192,8 @@
       restoreDoc(cell, e.cell);
       return { id: e.id, kind: e.kind, name: e.name, cell: cell };
     });
+    target.audio = JSON.parse(JSON.stringify(
+      snap.audio || { assets: [], tracks: [] }));
     target.pitch = {
       cur: (snap.pitch || {}).cur || 0,
       slides: ((snap.pitch || {}).slides || []).map(function (s) {

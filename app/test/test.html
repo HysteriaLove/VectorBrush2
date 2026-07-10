@@ -49,6 +49,7 @@
 <script src="../js/project.js"></script>
 <script src="../js/actors.js"></script>
 <script src="../js/library.js"></script>
+<script src="../js/audio.js"></script>
 <script src="../js/thumbs.js"></script>
 <script src="../js/brainstorm.js"></script>
 <script src="../js/pitch.js"></script>
@@ -3741,6 +3742,113 @@
   } catch (err) {
     fail++;
     log("  LIBRARY EXCEPTION: " + (err && err.stack || err), "fail");
+  }
+
+  // ================================ audio =====================================
+  // The Audio section (audio.js, docs/AudioResearch.md): stems are
+  // package units referenced by id — ops carry only integer-ms
+  // structure, so the journal replays byte-exact with or without the
+  // bytes. Plus the WAV codec that bakes the master.
+  log("");
+  log("audio:");
+  try {
+    var aue = new VB.Session({ width: 11000, height: 8000 });
+    aue.exec({ op: "trackAdd", id: "au_t1" });
+    aue.exec({ op: "trackAdd", id: "au_t2", name: "Dialogue" });
+    aue.exec({ op: "audioImport", id: "au_a1", name: "rain",
+               unit: "assets/audio/au_a1", duration: 4000,
+               sampleRate: 48000, channels: 2 });
+    check("tracks and stems land with auto/explicit names",
+      aue.project.audio.tracks.length === 2 &&
+      aue.project.audio.tracks[0].name === "Track 01" &&
+      aue.project.audio.tracks[1].name === "Dialogue" &&
+      aue.project.audio.assets.length === 1 &&
+      aue.project.audio.assets[0].duration === 4000);
+
+    aue.exec({ op: "clipAdd", id: "au_c1", track: "au_t1",
+               asset: "au_a1", at: 1000 });
+    var auC1 = VB.audioClipById(aue.project, "au_c1");
+    check("clipAdd defaults to the whole stem at gain 1",
+      auC1 && auC1.clip.at === 1000 && auC1.clip.offset === 0 &&
+      auC1.clip.duration === 4000 && auC1.clip.gain === 1 &&
+      VB.audioEndMs(aue.project) === 5000,
+      JSON.stringify(auC1 && auC1.clip));
+
+    aue.exec({ op: "clipMove", id: "au_c1", at: 500, track: "au_t2" });
+    auC1 = VB.audioClipById(aue.project, "au_c1");
+    check("clipMove crosses tracks",
+      auC1.trackIndex === 1 && auC1.clip.at === 500 &&
+      aue.project.audio.tracks[0].clips.length === 0);
+
+    // trim: final values in the op; duration clamps to the stem tail
+    aue.exec({ op: "clipTrim", id: "au_c1", at: 700,
+               offset: 200, duration: 9999 });
+    auC1 = VB.audioClipById(aue.project, "au_c1");
+    check("clipTrim clamps duration to the stem tail",
+      auC1.clip.at === 700 && auC1.clip.offset === 200 &&
+      auC1.clip.duration === 3800,
+      JSON.stringify(auC1.clip));
+
+    aue.exec({ op: "clipGain", id: "au_c1", gain: 5 });
+    check("clipGain clamps to [0,2]",
+      VB.audioClipById(aue.project, "au_c1").clip.gain === 2);
+
+    // replay byte-exact through every structural op
+    var auRep = await VB.replayJournal(JSON.parse(JSON.stringify(aue.journal)));
+    check("audio structure replays byte-exact",
+      JSON.stringify(auRep.project.audio) ===
+      JSON.stringify(aue.project.audio));
+
+    // removing a stem removes its clips — ONE journaled undo restores
+    aue.exec({ op: "clipAdd", id: "au_c2", track: "au_t1",
+               asset: "au_a1", at: 0, duration: 1000 });
+    aue.exec({ op: "audioRemove", id: "au_a1" });
+    check("audioRemove cascades to every clip",
+      aue.project.audio.assets.length === 0 &&
+      aue.project.audio.tracks[0].clips.length === 0 &&
+      aue.project.audio.tracks[1].clips.length === 0);
+    aue.exec({ op: "undo" });
+    check("undo restores the stem and both clips",
+      aue.project.audio.assets.length === 1 &&
+      aue.project.audio.tracks[0].clips.length === 1 &&
+      VB.audioClipById(aue.project, "au_c1").clip.duration === 3800);
+    var auRep2 = await VB.replayJournal(JSON.parse(JSON.stringify(aue.journal)));
+    check("remove/undo replays byte-exact",
+      JSON.stringify(auRep2.project.audio) ===
+      JSON.stringify(aue.project.audio));
+
+    // WAV codec: header + decode roundtrip through the real decoder
+    var auN = 4800, auRate = 48000;
+    var auSig = new Float32Array(auN);
+    for (var auI = 0; auI < auN; auI++) {
+      auSig[auI] = Math.sin(auI / auN * Math.PI * 2 * 10) * 0.5;
+    }
+    var auWav = VB.wavEncode([auSig], auRate);
+    var auV = new DataView(auWav);
+    check("wav header is well-formed",
+      auWav.byteLength === 44 + auN * 2 &&
+      auV.getUint32(4, true) === 36 + auN * 2 &&
+      auV.getUint16(20, true) === 1 &&      // PCM
+      auV.getUint16(22, true) === 1 &&      // mono
+      auV.getUint32(24, true) === auRate &&
+      auV.getUint16(34, true) === 16,
+      auWav.byteLength + " bytes");
+    var auOC = new OfflineAudioContext(1, 1, auRate);
+    var auDecoded = await new Promise(function (res, rej) {
+      auOC.decodeAudioData(auWav.slice(0), res, rej);
+    });
+    var auOut = auDecoded.getChannelData(0);
+    var auErr = 0;
+    for (var auJ = 0; auJ < auN; auJ++) {
+      auErr = Math.max(auErr, Math.abs(auOut[auJ] - auSig[auJ]));
+    }
+    check("wav roundtrips through decodeAudioData",
+      auDecoded.length === auN && auDecoded.sampleRate === auRate &&
+      auErr < 1e-3,
+      auDecoded.length + " samples, err " + auErr.toFixed(6));
+  } catch (err) {
+    fail++;
+    log("  AUDIO EXCEPTION: " + (err && err.stack || err), "fail");
   }
 
   // =========================== streaming skeleton ============================

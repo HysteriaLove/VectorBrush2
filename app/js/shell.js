@@ -37,7 +37,9 @@
     writing: { el: "writing-view",
                view: function () { return VB.WritingView; } },
     storyboards: { el: "boards-view",
-                   view: function () { return VB.BoardsView; } }
+                   view: function () { return VB.BoardsView; } },
+    audio: { el: "audio-view",
+             view: function () { return VB.AudioView; } }
   };
 
   // Tab names decided 2026-07-10 (Architecture §2); internal ids stay
@@ -47,8 +49,7 @@
     { id: "pitch", label: "Pitch", mount: "pitch", note: "" },
     { id: "writing", label: "Story", mount: "writing", note: "" },
     { id: "storyboards", label: "Boards", mount: "storyboards", note: "" },
-    { id: "audio", label: "Audio",
-      note: "Stems → edits → the baked master track — Architecture §6.5." },
+    { id: "audio", label: "Audio", mount: "audio", note: "" },
     { id: "roughs", label: "Roughs", editor: true, note: "" },
     { id: "actors", label: "Actors", editor: true, note: "" },
     { id: "compositing", label: "Composite",
@@ -139,6 +140,27 @@
         function (s) { store = s; return s; },
         function () { return null; })
     : Promise.resolve(null);
+
+  // Binary asset I/O for the ACTIVE package (audio stems etc. — bytes
+  // never ride the journal). Scratch sessions fall back to an
+  // in-memory map so imports still play; they simply don't persist
+  // until the work lives in a real project package.
+  var scratchAssets = new Map();
+  VB.projectAssets = {
+    put: async function (path, bytes) {
+      scratchAssets.set(path, bytes);
+      if (activeProjectId && store) {
+        await store.open(activeProjectId).writeUnit(path, bytes);
+      }
+    },
+    get: async function (path) {
+      if (scratchAssets.has(path)) return scratchAssets.get(path);
+      if (activeProjectId && store) {
+        return store.open(activeProjectId).readUnit(path);
+      }
+      return null;
+    }
+  };
 
   // ---- persistence (Implementation.md phase 6) ---------------------------------
   // The journal IS the project: a debounced flush writes the journal's
