@@ -223,21 +223,25 @@
   #xbar-bottom button:hover { background: var(--btn-hover); }
   #xbar-bottom button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 
-  /* thin tool columns — floating icon clusters, centered against the
-     canvas edge; they disappear off to their side */
+  /* thin tool columns — floating icon clusters OVER the canvas: no
+     column div, no grey strip; only the pill is real */
   .y2kxcol {
-    flex: none; display: flex; flex-direction: column; align-items: center;
-    width: 56px;
-    background: transparent;
+    position: absolute; top: 0; bottom: 0; width: 56px;
+    display: flex; flex-direction: column; align-items: center;
+    pointer-events: none; /* the canvas lives underneath */
+    z-index: 6;
     user-select: none;
   }
+  #xcol-left { left: 6px; }
+  #xcol-right { right: 6px; }
   #xcol-left #tools {
     border-right: none; background: none; width: auto; padding: 0;
   }
   .y2kxcolbody {
     flex: none; max-height: 80%;
-    margin: auto 4px; /* the cluster floats mid-column */
+    margin: auto 0; /* the cluster floats mid-column */
     overflow-y: auto;
+    pointer-events: auto; /* only the pill is interactive */
     display: flex; flex-direction: column; align-items: center; gap: 10px;
     padding: 10px 5px;
     background: var(--panel);
@@ -1122,50 +1126,50 @@
     </div>
     <div class="y2krackreveal" data-side="left"
          title="Drag to pull the left panels open"></div>
-    <div id="xcol-left" class="y2kxcol">
-    <div class="y2kxcolbody">
-    <div id="tools">
-      <button data-tool="select" class="active" title="Selection tool (V)">➤</button>
-      <button data-tool="transform" title="Free Transform (Q)">▣</button>
-      <button data-tool="lasso" title="Lasso (L)">➰</button>
-      <button data-tool="pencil" title="Pencil tool (P)">✎</button>
-      <button data-tool="line" title="Line tool (N)">╱</button>
-      <button data-tool="oval" title="Oval tool (O)">◯</button>
-      <button data-tool="rect" title="Rectangle tool (R)">▭</button>
-      <button data-tool="text" title="Text tool (T)">T</button>
-      <button data-tool="brush" title="Brush (B)">🖌</button>
-      <button data-tool="bucket" title="Paint bucket (K)">🪣</button>
-      <button data-tool="eraser" title="Eraser (E)">🧽</button>
-    </div>
-    </div>
-    </div>
     <div id="canvaswrap">
       <canvas id="stage-canvas"></canvas>
+      <div id="xcol-left" class="y2kxcol">
+      <div class="y2kxcolbody">
+      <div id="tools">
+        <button data-tool="select" class="active" title="Selection tool (V)">➤</button>
+        <button data-tool="transform" title="Free Transform (Q)">▣</button>
+        <button data-tool="lasso" title="Lasso (L)">➰</button>
+        <button data-tool="pencil" title="Pencil tool (P)">✎</button>
+        <button data-tool="line" title="Line tool (N)">╱</button>
+        <button data-tool="oval" title="Oval tool (O)">◯</button>
+        <button data-tool="rect" title="Rectangle tool (R)">▭</button>
+        <button data-tool="text" title="Text tool (T)">T</button>
+        <button data-tool="brush" title="Brush (B)">🖌</button>
+        <button data-tool="bucket" title="Paint bucket (K)">🪣</button>
+        <button data-tool="eraser" title="Eraser (E)">🧽</button>
+      </div>
+      </div>
+      </div>
+      <div id="xcol-right" class="y2kxcol">
+        <div class="y2kxcolbody">
+          <label class="ctl" title="Stroke color">
+            ✎<input type="color" id="stroke-color" value="#000000">
+          </label>
+          <label class="ctl" title="Stroke width (px)">
+            <input type="number" id="stroke-width" value="1" min="0.05" max="10" step="0.25">
+          </label>
+          <label class="ctl" title="Fill color (brush + bucket)">
+            🪣<input type="color" id="fill-color" value="#66ccff">
+          </label>
+          <label class="ctl" title="Brush size (px)">
+            🖌<input type="number" id="brush-size" value="10" min="1" max="100" step="1">
+          </label>
+          <label class="ctl" title="Eraser size (px)">
+            🧽<input type="number" id="eraser-size" value="20" min="2" max="100" step="2">
+          </label>
+        </div>
+      </div>
       <div id="editcrumb" class="hidden">
         <button id="crumb-back" title="Back to the scene">◀ Scene</button>
         <span id="crumb-label"></span>
       </div>
       <div id="ctxmenu" class="hidden"></div>
       <div id="toast"></div>
-    </div>
-    <div id="xcol-right" class="y2kxcol">
-      <div class="y2kxcolbody">
-        <label class="ctl" title="Stroke color">
-          ✎<input type="color" id="stroke-color" value="#000000">
-        </label>
-        <label class="ctl" title="Stroke width (px)">
-          <input type="number" id="stroke-width" value="1" min="0.05" max="10" step="0.25">
-        </label>
-        <label class="ctl" title="Fill color (brush + bucket)">
-          🪣<input type="color" id="fill-color" value="#66ccff">
-        </label>
-        <label class="ctl" title="Brush size (px)">
-          🖌<input type="number" id="brush-size" value="10" min="1" max="100" step="1">
-        </label>
-        <label class="ctl" title="Eraser size (px)">
-          🧽<input type="number" id="eraser-size" value="20" min="2" max="100" step="2">
-        </label>
-      </div>
     </div>
     <div id="rack-right" class="y2krack">
       <div class="y2krackedge" data-side="right" title="Drag to resize the rack"></div>
