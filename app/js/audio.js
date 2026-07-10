@@ -841,54 +841,24 @@
   function makeCenterCard() {
     var root = document.createElement("div");
     root.className = "bdcard au-bcard";
-    function headField(label) {
-      var box = document.createElement("div");
-      box.className = "bdheadfield";
-      var lab = document.createElement("span");
-      lab.className = "bdheadlab";
-      lab.textContent = label;
-      box.appendChild(lab);
-      var val = document.createElement("span");
-      val.className = "bdheadval";
-      box.appendChild(val);
-      return { box: box, val: val };
-    }
-    var head = document.createElement("div");
-    head.className = "bdhead";
-    var fScene = headField("Scene");
-    var fPanel = headField("Panel");
-    var fTime = headField("Time");
-    var fFrames = headField("Frames");
-    head.appendChild(fScene.box);
-    head.appendChild(fPanel.box);
-    head.appendChild(fTime.box);
-    head.appendChild(fFrames.box);
-    root.appendChild(head);
-    var title = document.createElement("div");
-    title.className = "bdtitle";
-    root.appendChild(title);
     var cvs = document.createElement("canvas");
     cvs.className = "bdframe";
     root.appendChild(cvs);
     var dialog = document.createElement("div");
     dialog.className = "bddialog";
-    var dlab = document.createElement("span");
-    dlab.className = "bddialoglab";
-    dlab.textContent = "Dialog";
-    dialog.appendChild(dlab);
+    var title = document.createElement("div");
+    title.className = "bdtitle";
+    dialog.appendChild(title);
     var lines = document.createElement("div");
     lines.className = "bdlines";
     dialog.appendChild(lines);
     root.appendChild(dialog);
-    return { root: root, cvs: cvs, title: title, lines: lines,
-             scene: fScene.val, num: fPanel.val, time: fTime.val,
-             frames: fFrames.val };
+    return { root: root, cvs: cvs, title: title, lines: lines };
   }
 
   function updateCenterCard(cur, force) {
     var project = view.app.project;
     var c = view.bmain;
-    var fps = project.fps || 24;
     var hash = VB.pixiHashCell ? VB.pixiHashCell(cur.panel.cell) : 0;
     var changed = view.bcenterId !== cur.panel.id ||
                   view.bcenterHash !== hash;
@@ -896,15 +866,6 @@
     if (!changed && !force) return;
     view.bcenterId = cur.panel.id;
     view.bcenterHash = hash;
-    var runOf = 1;
-    VB.spineSceneRuns(project).forEach(function (run, ri) {
-      if (cur.index >= run.from && cur.index <= run.to) runOf = ri + 1;
-    });
-    c.scene.textContent = String(runOf);
-    c.num.textContent = String(cur.index + 1);
-    c.time.textContent =
-      ((cur.endMs - cur.startMs) / 1000).toFixed(1) + "s";
-    c.frames.textContent = String(cur.panel.duration);
     var action = null;
     cur.panel.rows.forEach(function (r) {
       if (!action && r.kind === "action") action = r;

@@ -183,19 +183,6 @@
 
   // ---- card construction + reconcile ------------------------------------------------
 
-  function headField(label) {
-    var box = document.createElement("div");
-    box.className = "bdheadfield";
-    var lab = document.createElement("span");
-    lab.className = "bdheadlab";
-    lab.textContent = label;
-    box.appendChild(lab);
-    var val = document.createElement("span");
-    val.className = "bdheadval";
-    box.appendChild(val);
-    return { box: box, val: val };
-  }
-
   function createCard(panel) {
     var app = view.app;
     var pid = panel.id;
@@ -212,61 +199,8 @@
     root.className = "bdcard";
     root.dataset.panel = pid;
 
-    // header strip: Scene · Panel · Time · Frames (the paper form)
-    var head = document.createElement("div");
-    head.className = "bdhead";
-    var fScene = headField("Scene");
-    var fPanel = headField("Panel");
-    var fTime = headField("Time");
-    var fFrames = headField("Frames");
-    fFrames.val.remove();
-    var frames = document.createElement("input");
-    frames.type = "number";
-    frames.min = "1";
-    frames.max = "9999";
-    frames.className = "bdframesin";
-    frames.title = "Hold this panel for N frames (at the project fps)";
-    frames.addEventListener("change", function () {
-      var v = parseInt(frames.value, 10);
-      if (isFinite(v)) exec({ op: "panelDuration", id: pid, frames: v });
-    });
-    frames.addEventListener("keydown", function (ev) {
-      ev.stopPropagation();
-    });
-    fFrames.box.appendChild(frames);
-    head.appendChild(fScene.box);
-    head.appendChild(fPanel.box);
-    head.appendChild(fTime.box);
-    head.appendChild(fFrames.box);
-    root.appendChild(head);
-
-    // the ACTION as the board's TITLE (user spec) — the same script
-    // row the Story editor renders, op-routed through writing.*
-    var action = document.createElement("div");
-    action.className = "bdtitle";
-    action.contentEditable = "true";
-    action.dataset.ph = "action — the board's title…";
-    action.addEventListener("blur", function () {
-      var val = action.innerText.replace(/\n+$/, "");
-      var hit = panelById(app.project, pid);
-      if (!hit) return;
-      var row = actionRowOf(hit.panel);
-      if (row) {
-        if (val !== (row.content || "")) {
-          exec({ op: "blockEdit", block: row.id, content: val });
-        }
-      } else if (val.trim() !== "") {
-        exec({ op: "blockAdd", id: VB.actorNewId("blk"), panel: pid,
-               index: 0, kind: "action", content: val });
-      }
-    });
-    action.addEventListener("keydown", function (ev) {
-      if (ev.key === "Escape") action.blur();
-      ev.stopPropagation();
-    });
-    root.appendChild(action);
-
-    // the self-contained drawable frame
+    // the self-contained drawable frame — no header form (the program
+    // already knows scene/panel/time; timing edits live in Audio)
     var cvs = document.createElement("canvas");
     cvs.className = "bdframe";
     root.appendChild(cvs);
@@ -311,14 +245,34 @@
     cvs.addEventListener("pointercancel", function (ev) { endStroke(ev, true); });
     cvs.style.touchAction = "none";
 
-    // the Dialog box: the panel's dialogue rows, edited in place
-    // (the action lives above the frame as the TITLE)
+    // below the drawing: the ACTION as the title (slightly larger),
+    // then the dialogue rows — all the same script rows the Story
+    // editor renders, op-routed through writing.*
     var dialog = document.createElement("div");
     dialog.className = "bddialog";
-    var dlab = document.createElement("span");
-    dlab.className = "bddialoglab";
-    dlab.textContent = "Dialog";
-    dialog.appendChild(dlab);
+    var action = document.createElement("div");
+    action.className = "bdtitle";
+    action.contentEditable = "true";
+    action.dataset.ph = "action…";
+    action.addEventListener("blur", function () {
+      var val = action.innerText.replace(/\n+$/, "");
+      var hit = panelById(app.project, pid);
+      if (!hit) return;
+      var row = actionRowOf(hit.panel);
+      if (row) {
+        if (val !== (row.content || "")) {
+          exec({ op: "blockEdit", block: row.id, content: val });
+        }
+      } else if (val.trim() !== "") {
+        exec({ op: "blockAdd", id: VB.actorNewId("blk"), panel: pid,
+               index: 0, kind: "action", content: val });
+      }
+    });
+    action.addEventListener("keydown", function (ev) {
+      if (ev.key === "Escape") action.blur();
+      ev.stopPropagation();
+    });
+    dialog.appendChild(action);
     var lines = document.createElement("div");
     lines.className = "bdlines";
     dialog.appendChild(lines);
@@ -335,9 +289,7 @@
     dialog.appendChild(add);
     root.appendChild(dialog);
 
-    var card = { root: root, cvs: cvs, frames: frames, action: action,
-                 lines: lines, scene: fScene.val, num: fPanel.val,
-                 time: fTime.val };
+    var card = { root: root, cvs: cvs, action: action, lines: lines };
     view.cards[pid] = card;
     return card;
   }
@@ -402,16 +354,8 @@
   }
 
   function updateCard(card, panel, index, sceneNo, isCur) {
-    var fps = view.app.project.fps || 24;
     card.root.classList.toggle("cur", isCur);
     card.root.classList.toggle("alt", index % 2 === 1);
-    card.scene.textContent = String(sceneNo);
-    card.num.textContent = String(index + 1);
-    card.time.textContent =
-      (Math.max(1, panel.duration | 0) / fps).toFixed(1) + "s";
-    if (document.activeElement !== card.frames) {
-      card.frames.value = String(panel.duration);
-    }
     if (document.activeElement !== card.action) {
       var row = actionRowOf(panel);
       card.action.innerText = row ? (row.content || "") : "";

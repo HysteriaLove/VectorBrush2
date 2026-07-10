@@ -829,47 +829,22 @@
   .bdcard.alt { background: #f5f2e6; } /* subtle panel alternation */
   /* the CURRENT panel is a logic target (insert-after, move, delete,
      draw) but carries NO visual highlight (user decision) */
-  /* the ACTION as the board's title */
+  /* the ACTION as the board's title — slightly larger, above the
+     dialogue (no header form, no "Dialog" label: less is more) */
   .bdtitle {
     outline: none; min-height: 1.2em; user-select: text;
     -webkit-user-select: text; white-space: pre-wrap;
-    padding: 3px 8px;
-    font: 700 13px/1.35 "Segoe Print", "Comic Sans MS", cursive;
-    border-bottom: 1px solid #202327;
-    background: #fff;
+    padding: 2px 0 3px;
+    font: 700 15px/1.35 "Segoe Print", "Comic Sans MS", cursive;
   }
   .bdtitle:empty::before { content: attr(data-ph); color: #b0ada0; }
-  .bdhead {
-    display: flex; border-bottom: 1.5px solid #202327;
-    background: #fff;
-  }
-  .bdheadfield {
-    flex: 1; min-width: 0; padding: 2px 6px 3px;
-    border-right: 1px solid #202327;
-    display: flex; flex-direction: column;
-  }
-  .bdheadfield:last-child { border-right: none; }
-  .bdheadlab {
-    font: 8px/1.4 system-ui, sans-serif; text-transform: capitalize;
-    color: #6b6f76;
-  }
-  .bdheadval { font: 600 14px/1.2 "Segoe Print", "Comic Sans MS", cursive; }
-  .bdframesin {
-    width: 100%; border: none; background: none; outline: none;
-    font: 600 14px/1.2 "Segoe Print", "Comic Sans MS", cursive;
-    color: inherit; padding: 0;
-  }
   .bdframe {
     width: 100%; aspect-ratio: 16 / 9; display: block;
     background: #ffffff; border-bottom: 1.5px solid #202327;
     touch-action: none;
   }
   #bd-grid.drawing .bdframe { cursor: crosshair; }
-  .bddialog { min-height: 34px; padding: 2px 8px 6px; }
-  .bddialoglab {
-    display: block;
-    font: 8px/1.6 system-ui, sans-serif; color: #6b6f76;
-  }
+  .bddialog { min-height: 34px; padding: 4px 10px 8px; }
   /* screenplay-form dialogue: WHO centered, the speech a wrapping
      block below — rows EXPAND DOWNWARD and the card grows with them */
   .bdlines { margin-top: 2px; }
