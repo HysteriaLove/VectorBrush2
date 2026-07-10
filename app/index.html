@@ -980,48 +980,72 @@
   .wrbody { min-height: 360px; white-space: pre-wrap; }
   .wredit:empty::before { content: attr(data-ph); color: #9a988c; }
   .wrtext { font: 14px/1.5 Georgia, "Times New Roman", serif; }
-  /* the SCRIPT editor: the spine rendered as prose — slugs → beats;
-     the rail marks each beat's Boards frames (the interchange seam) */
+  /* the SCRIPT editor: the spine rendered as a SCREENPLAY — panel
+     paragraphs under derived scene headings; the rail numbers the
+     frames (the interchange seam). Chrome stays hidden until a row is
+     hovered or holds the caret — the page must read as prose. */
   .wrscript { font: 14px/1.5 Georgia, "Times New Roman", serif; }
   .wrslug {
     font: 700 13px/1.5 system-ui, sans-serif; letter-spacing: 0.08em;
     text-transform: uppercase; color: #1b1b1b;
-    margin: 18px 0 8px; padding-bottom: 2px;
+    margin: 20px 0 10px; padding-bottom: 3px;
     border-bottom: 1px solid #d8d4c6;
   }
   .wrslug:first-child { margin-top: 0; }
-  .wrbeat { display: flex; gap: 10px; margin-bottom: 6px; }
+  .wrbeat {
+    display: flex; gap: 8px; margin: 0 -8px;
+    padding: 3px 8px; border-radius: 3px;
+  }
+  .wrbeat:hover, .wrbeat:focus-within { background: #00000006; }
   .wrrail {
     flex: none; width: 30px; text-align: right;
-    font: 10px/1.9 system-ui, sans-serif; color: #9a988c;
+    font: 9px/2.1 system-ui, sans-serif; color: #c3bfae;
     cursor: default; user-select: none;
   }
-  .wrbeat:hover .wrrail { color: #4a6fa5; }
+  .wrbeat:hover .wrrail, .wrbeat:focus-within .wrrail { color: #4a6fa5; }
   .wrbeatbody { flex: 1; min-width: 0; }
   .wraction { white-space: pre-wrap; }
-  .wrline { padding: 2px 44px 0; }
-  .wrsay { font: 14px/1.45 Georgia, "Times New Roman", serif; margin: 0 28px; }
+  /* dialogue: screenplay form — character centered small-caps, the
+     speech in a narrower centered column, left-aligned */
+  .wrline { width: 72%; margin: 1px auto 0; }
+  .wrchar {
+    text-align: center; font: 700 11px/1.6 system-ui, sans-serif;
+    text-transform: uppercase; letter-spacing: 0.08em; color: #3a3a3a;
+  }
+  .wrsay {
+    text-align: left; font: 14px/1.45 Georgia, "Times New Roman", serif;
+    margin: 0 9%;
+  }
   .wrnote {
     font: italic 12px/1.5 Georgia, serif; color: #7a7666;
     margin: 2px 0;
   }
   .wradd {
     background: none; border: 1px dashed #c9c5b6; border-radius: 3px;
-    color: #9a988c; font-size: 11px; padding: 2px 10px;
-    cursor: pointer; margin: 2px 0 10px 40px;
+    color: #9a988c; font-size: 10px; padding: 0 8px;
+    cursor: pointer;
   }
   .wradd:hover { color: #4a6fa5; border-color: #4a6fa5; background: none; }
-  .wraddscene { display: block; margin: 14px auto 0; }
+  .wraddscene {
+    display: block; margin: 16px auto 0;
+    font-size: 11px; padding: 2px 12px;
+  }
   .wrhint { color: #9a988c; text-align: center; padding: 24px 0 8px; }
+  /* the row's tools live in a slim reserved strip, invisible until
+     the row is engaged — no reflow, no button wall */
   .wrtools {
     display: flex; align-items: center; gap: 6px;
+    height: 18px; margin-top: 1px;
+    visibility: hidden;
   }
-  .wrtools .wradd { margin: 2px 0 8px 40px; }
+  .wrbeat:hover .wrtools, .wrbeat:focus-within .wrtools {
+    visibility: visible;
+  }
   .wrsetchip {
-    font: 10px/1.6 system-ui, sans-serif; letter-spacing: 0.05em;
+    font: 9px/1.7 system-ui, sans-serif; letter-spacing: 0.05em;
     text-transform: uppercase; color: #7a7666;
     border: 1px dashed #c9c5b6; border-radius: 3px;
-    padding: 0 8px; margin-bottom: 6px; min-width: 60px;
+    padding: 0 8px; min-width: 40px;
   }
   .wrsetchip:focus { border-style: solid; border-color: #4a6fa5; }
   .wr-line { padding: 0 44px; }
