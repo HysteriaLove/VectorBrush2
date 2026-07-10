@@ -432,6 +432,14 @@
 
     var bar = document.createElement("div");
     bar.id = "pt-tools";
+    bar.className = "y2kxbar";
+    function xpanel(name) {
+      if (app.xpanel) return app.xpanel(bar, name);
+      var p = document.createElement("div");
+      p.className = "y2kxpanel";
+      bar.appendChild(p);
+      return p;
+    }
     function toolBtn(label, title, fn) {
       var b = document.createElement("button");
       b.textContent = label;
@@ -439,7 +447,8 @@
       b.addEventListener("click", fn);
       return b;
     }
-    bar.appendChild(toolBtn("＋ Slide", "Add a slide after the current one",
+    var slidesPanel = xpanel("slides");
+    slidesPanel.appendChild(toolBtn("＋ Slide", "Add a slide after the current one",
       function () {
         var pitch = pitchOf(app.project);
         var id = VB.actorNewId("slide");
@@ -448,17 +457,17 @@
         if (view.drawMode) retargetDraw();
         refresh();
       }));
-    bar.appendChild(toolBtn("⇤", "Move slide left", function () {
+    slidesPanel.appendChild(toolBtn("⇤", "Move slide left", function () {
       var pitch = pitchOf(app.project);
       var s = pitch.slides[pitch.cur];
       if (s) { app.exec({ op: "pitchSlideMove", id: s.id, index: pitch.cur - 1 }); refresh(); }
     }));
-    bar.appendChild(toolBtn("⇥", "Move slide right", function () {
+    slidesPanel.appendChild(toolBtn("⇥", "Move slide right", function () {
       var pitch = pitchOf(app.project);
       var s = pitch.slides[pitch.cur];
       if (s) { app.exec({ op: "pitchSlideMove", id: s.id, index: pitch.cur + 1 }); refresh(); }
     }));
-    bar.appendChild(toolBtn("🗑", "Remove the current slide", function () {
+    slidesPanel.appendChild(toolBtn("🗑", "Remove the current slide", function () {
       var pitch = pitchOf(app.project);
       var s = pitch.slides[pitch.cur];
       if (!s) return;
@@ -468,9 +477,10 @@
       refresh();
     }));
 
+    var drawPanel = xpanel("draw");
     view.drawBtn = toolBtn("✎ Draw", "Draw on the slide with the stage tools",
       function () { setDrawMode(!view.drawMode); });
-    bar.appendChild(view.drawBtn);
+    drawPanel.appendChild(view.drawBtn);
 
     var strip = document.createElement("span");
     strip.id = "pt-toolstrip";
@@ -488,17 +498,19 @@
       strip.appendChild(b);
     });
     view.toolStrip = strip;
-    bar.appendChild(strip);
+    drawPanel.appendChild(strip);
 
+    var showPanel = xpanel("present");
     view.presentBtn = toolBtn("▶ Present", "Present the deck (arrows navigate, Esc exits)",
       function () { setPresent(!view.present); });
-    bar.appendChild(view.presentBtn);
+    showPanel.appendChild(view.presentBtn);
 
     var hint = document.createElement("span");
     hint.id = "pt-hint";
     hint.textContent = "←/→ change slides · Draw paints with the stage tools";
     bar.appendChild(hint);
     host.appendChild(bar);
+    if (app.wireXbar) app.wireXbar("ws-pitch", bar);
 
     var body = document.createElement("div");
     body.id = "pt-body";

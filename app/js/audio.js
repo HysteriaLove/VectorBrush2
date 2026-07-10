@@ -753,6 +753,14 @@
 
     var bar = document.createElement("div");
     bar.id = "au-tools";
+    bar.className = "y2kxbar";
+    function xpanel(name) {
+      if (app.xpanel) return app.xpanel(bar, name);
+      var p = document.createElement("div");
+      p.className = "y2kxpanel";
+      bar.appendChild(p);
+      return p;
+    }
     function toolBtn(label, title, fn) {
       var b = document.createElement("button");
       b.textContent = label;
@@ -769,19 +777,21 @@
       importFiles(fileInput.files || []);
       fileInput.value = "";
     });
-    bar.appendChild(toolBtn("⭱ Import", "Import audio stems (WAV/MP3/AAC/FLAC)",
+    var stemsPanel = xpanel("stems");
+    stemsPanel.appendChild(toolBtn("⭱ Import", "Import audio stems (WAV/MP3/AAC/FLAC)",
       function () { fileInput.click(); }));
-    bar.appendChild(fileInput);
+    stemsPanel.appendChild(fileInput);
     view.playBtn = toolBtn("▶", "Play / stop (Space)", togglePlay);
-    bar.appendChild(view.playBtn);
+    var transPanel = xpanel("transport");
+    transPanel.appendChild(view.playBtn);
     view.timeEl = document.createElement("span");
     view.timeEl.id = "au-time";
     view.timeEl.textContent = fmtMs(rig.masterMs);
-    bar.appendChild(view.timeEl);
-    bar.appendChild(toolBtn("＋ Track", "Add a track", function () {
+    transPanel.appendChild(view.timeEl);
+    stemsPanel.appendChild(toolBtn("＋ Track", "Add a track", function () {
       exec({ op: "trackAdd", id: VB.actorNewId("track") });
     }));
-    bar.appendChild(toolBtn("⤓ Bake", "Render the master (48kHz WAV into the package)",
+    xpanel("bake").appendChild(toolBtn("⤓ Bake", "Render the master (48kHz WAV into the package)",
       function () {
         view.app.setMsg("baking the master…");
         bakeMaster(view.app.project).then(function (wav) {
@@ -802,6 +812,7 @@
       "drag edges to trim · Space plays · wheel zooms · middle-drag pans";
     bar.appendChild(hint);
     host.appendChild(bar);
+    if (app.wireXbar) app.wireXbar("ws-audio", bar);
 
     var body = document.createElement("div");
     body.id = "au-body";

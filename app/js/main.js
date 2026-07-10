@@ -1863,9 +1863,19 @@
         if (!drawer) return;
         var d = state.drawers[which];
         drawer.classList.toggle("closed", !d.open);
-        if (d.open) { // pulled as far as the user likes
+        if (d.open) { // an OVERLAY, anchored to its toolbar
           drawer.style.height =
             Math.max(which === "top" ? 60 : 120, d.h | 0) + "px";
+          if (which === "top") {
+            var tb = document.getElementById("topbar");
+            drawer.style.top = tb
+              ? Math.round(tb.getBoundingClientRect().bottom) + "px" : "64px";
+          } else {
+            var xb = document.getElementById("xbar-bottom");
+            drawer.style.bottom = xb
+              ? Math.round(window.innerHeight -
+                           xb.getBoundingClientRect().top) + "px" : "56px";
+          }
         }
       });
       persist();
@@ -2107,6 +2117,9 @@
     // rearrange, wheel scrolls an overflowing strip sideways
     function wireXbar(key, barEl) {
       if (!barEl) return;
+      if (!state.toolbars[key]) {
+        state.toolbars[key] = { scroll: 0, panels: [], order: [] };
+      }
       var spacer = barEl.querySelector(".spacer");
       function panels() {
         return Array.prototype.slice.call(
@@ -2163,6 +2176,22 @@
     }
     wireXbar("top", document.getElementById("topbar"));
     wireXbar("bottom", document.getElementById("xbar-bottom"));
+    // workspaces turn their hardcoded toolbars into xToolbars of
+    // toolpanels through these seams (Phase B)
+    app.wireXbar = wireXbar;
+    app.xpanel = function (bar, name) {
+      var p = document.createElement("div");
+      p.className = "y2kxpanel";
+      p.dataset.panel = name;
+      var g = document.createElement("span");
+      g.className = "y2kxgrip";
+      g.textContent = "⠿";
+      g.title = "Drag to rearrange";
+      p.appendChild(g);
+      bar.appendChild(p);
+      return p;
+    };
+    window.addEventListener("resize", function () { applyShell(); });
 
     // rack column wheel scroll + edge resize
     ["left", "right"].forEach(function (side) {
@@ -3056,11 +3085,8 @@
   // transport started elsewhere (Space in another tab, the Audio ▶):
   // the strip's playhead follows the shared master clock
   VB.audioTickHook = function () {
-    if (!seqPlay.playing && seqView.canvas &&
-        !document.body.classList.contains("ws-mount-mode") &&
-        !document.body.classList.contains("ws-stub-mode")) {
-      renderSeqStrip();
-    }
+    // the strip is visible in EVERY workspace now — keep it sweeping
+    if (!seqPlay.playing && seqView.canvas) renderSeqStrip();
   };
 
   // ---- Actors panel (actors.js; Architecture §6.6, step-2 beat 2) --------------

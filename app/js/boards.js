@@ -582,6 +582,15 @@
 
     var bar = document.createElement("div");
     bar.id = "bd-tools";
+    bar.className = "y2kxbar";
+    function xpanel(name) {
+      if (app.xpanel) return app.xpanel(bar, name);
+      var p = document.createElement("div");
+      p.className = "y2kxpanel";
+      bar.appendChild(p);
+      return p;
+    }
+    var panelsPanel = xpanel("panels");
     function toolBtn(label, title, fn) {
       var b = document.createElement("button");
       b.textContent = label;
@@ -589,7 +598,7 @@
       b.addEventListener("click", fn);
       return b;
     }
-    bar.appendChild(toolBtn("＋ Panel", "Add a panel after the current one",
+    panelsPanel.appendChild(toolBtn("＋ Panel", "Add a panel after the current one",
       function () {
         commitCaption();
         var beat = ensureBeat();
@@ -597,17 +606,17 @@
                index: boardsOf(app.project).cur.panel + 1 });
         if (view.drawMode) retargetDraw();
       }));
-    bar.appendChild(toolBtn("⇤", "Move panel earlier", function () {
+    panelsPanel.appendChild(toolBtn("⇤", "Move panel earlier", function () {
       var panel = currentPanel(app.project);
       var hit = panel && panelById(app.project, panel.id);
       if (hit) exec({ op: "panelMove", id: panel.id, index: hit.index - 1 });
     }));
-    bar.appendChild(toolBtn("⇥", "Move panel later", function () {
+    panelsPanel.appendChild(toolBtn("⇥", "Move panel later", function () {
       var panel = currentPanel(app.project);
       var hit = panel && panelById(app.project, panel.id);
       if (hit) exec({ op: "panelMove", id: panel.id, index: hit.index + 1 });
     }));
-    bar.appendChild(toolBtn("🗑", "Remove the current panel", function () {
+    panelsPanel.appendChild(toolBtn("🗑", "Remove the current panel", function () {
       var panel = currentPanel(app.project);
       if (!panel) return;
       if (!confirm("Remove this panel?")) return;
@@ -632,12 +641,13 @@
     });
     durLabel.appendChild(durInput);
     durLabel.appendChild(document.createTextNode(" frames"));
-    bar.appendChild(durLabel);
+    panelsPanel.appendChild(durLabel);
     view.durInput = durInput;
 
     view.drawBtn = toolBtn("✎ Draw", "Draw on the panel with the stage tools",
       function () { setDrawMode(!view.drawMode); });
-    bar.appendChild(view.drawBtn);
+    var drawPanel = xpanel("draw");
+    drawPanel.appendChild(view.drawBtn);
 
     var strip = document.createElement("span");
     strip.id = "bd-toolstrip";
@@ -655,9 +665,9 @@
       strip.appendChild(b);
     });
     view.toolStrip = strip;
-    bar.appendChild(strip);
+    drawPanel.appendChild(strip);
 
-    bar.appendChild(toolBtn("▶ Animatic", "Play the whole board as an animatic",
+    xpanel("animatic").appendChild(toolBtn("▶ Animatic", "Play the whole board as an animatic",
       function () {
         if (view.animatic.playing) stopAnimatic(); else startAnimatic();
       }));
@@ -667,6 +677,7 @@
     hint.textContent = "←/→ change panels · the text below plays as the panel's subtitle";
     bar.appendChild(hint);
     host.appendChild(bar);
+    if (app.wireXbar) app.wireXbar("ws-boards", bar);
 
     var body = document.createElement("div");
     body.id = "bd-body";

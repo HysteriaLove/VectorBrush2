@@ -268,14 +268,25 @@
 
   /* y2kshell drawers: the properties bar and the sequencing stack
      collapse behind slim handles */
-  .y2kdrawer { flex: none; display: flex; flex-direction: column; }
+  /* drawers OVERLAY the canvas (user spec): pulling one slides it over
+     the workspace — the canvas never moves or resizes under it */
+  .y2kdrawer {
+    position: fixed; left: 0; right: 0; z-index: 40;
+    display: flex; flex-direction: column;
+    background: var(--panel);
+  }
+  #drawer-top { box-shadow: 0 10px 26px rgba(0,0,0,0.20); }
+  #drawer-bottom { box-shadow: 0 -10px 26px rgba(0,0,0,0.20); }
   .y2kdrawer.closed { display: none; }
   /* the toolbars themselves pull the drawers: drag down on the top
-     toolbar / up on the bottom one (buttons still click normally) */
-  .y2kxbar { cursor: ns-resize; }
+     toolbar / up on the bottom one (buttons still click normally);
+     every xToolbar scrolls freely left-to-right (trailing overscroll) */
+  .y2kxbar { padding-right: 45vw; }
+  #topbar, #xbar-bottom { cursor: ns-resize; }
   .y2kxbar button, .y2kxbar input, .y2kxbar select,
   .y2kxbar .y2kxgrip { cursor: pointer; }
   .y2kxbar input[type="number"], .y2kxbar select { cursor: auto; }
+  .y2kxbar [id$="-hint"] { margin-left: 12px !important; }
   /* the shared scratchpad drawer: one infinite vector canvas every
      workspace can see — pull the toolbar below it to extend it */
   #scratchwrap {
@@ -495,8 +506,6 @@
   }
   /* stub workspaces: future sections mount here; the editor hides */
   #workspace-stub { display: none; }
-  body.ws-stub-mode #drawer-bottom,
-  body.ws-stub-mode #xbar-bottom,
   body.ws-stub-mode #middle { display: none; }
   body.ws-stub-mode #workspace-stub {
     display: flex; flex: 1;
@@ -509,8 +518,6 @@
 
   /* mounted workspaces (brainstorm, writing, …): the active container
      covers the editor chrome */
-  body.ws-mount-mode #drawer-bottom,
-  body.ws-mount-mode #xbar-bottom,
   body.ws-mount-mode #middle { display: none; }
   #brainstorm-board, #writing-view, #pitch-view, #boards-view,
   #audio-view { display: none; }

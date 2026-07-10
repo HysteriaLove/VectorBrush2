@@ -409,8 +409,17 @@
     view.app = app;
     host.innerHTML = "";
 
+    // the workspace toolbar IS an xToolbar of toolpanels (y2kshell)
     var bar = document.createElement("div");
     bar.id = "bb-tools";
+    bar.className = "y2kxbar";
+    function xpanel(name) {
+      if (app.xpanel) return app.xpanel(bar, name);
+      var p = document.createElement("div");
+      p.className = "y2kxpanel";
+      bar.appendChild(p);
+      return p;
+    }
     function toolBtn(label, title, fn) {
       var b = document.createElement("button");
       b.textContent = label;
@@ -418,7 +427,8 @@
       b.addEventListener("click", fn);
       return b;
     }
-    bar.appendChild(toolBtn("＋ Note", "Add a text note", addTextAtCenter));
+    var itemsPanel = xpanel("items");
+    itemsPanel.appendChild(toolBtn("＋ Note", "Add a text note", addTextAtCenter));
     var imgInput = document.createElement("input");
     imgInput.type = "file";
     imgInput.accept = "image/*";
@@ -433,14 +443,17 @@
         y: (rect.height / 2 - view.pan.y) / view.zoom - 80
       });
     });
-    bar.appendChild(toolBtn("＋ Image", "Add an image (or drop one on the board)",
+    itemsPanel.appendChild(toolBtn("＋ Image",
+      "Add an image (or drop one on the board)",
       function () { imgInput.click(); }));
-    bar.appendChild(imgInput);
-    bar.appendChild(toolBtn("＋ Sketch", "Add an ink sketch patch", addSketchAtCenter));
+    itemsPanel.appendChild(imgInput);
+    itemsPanel.appendChild(toolBtn("＋ Sketch", "Add an ink sketch patch",
+      addSketchAtCenter));
 
+    var drawPanel = xpanel("draw");
     view.drawBtn = toolBtn("✎ Draw", "Vector draw mode: paint on the board " +
       "with the stage tools", function () { setDrawMode(!view.drawMode); });
-    bar.appendChild(view.drawBtn);
+    drawPanel.appendChild(view.drawBtn);
 
     var strip = document.createElement("span");
     strip.id = "bb-toolstrip";
@@ -458,13 +471,14 @@
       strip.appendChild(b);
     });
     view.toolStrip = strip;
-    bar.appendChild(strip);
+    drawPanel.appendChild(strip);
 
     var hint = document.createElement("span");
     hint.id = "bb-hint";
     hint.textContent = "middle-drag pans · wheel zooms · left-drag selects · double-click text edits";
     bar.appendChild(hint);
     host.appendChild(bar);
+    if (app.wireXbar) app.wireXbar("ws-brainstorm", bar);
 
     var board = document.createElement("div");
     board.id = "bb-canvas";

@@ -246,18 +246,13 @@
 
     var bar = document.createElement("div");
     bar.id = "wr-tools";
-    function toolBtn(label, title, fn) {
-      var b = document.createElement("button");
-      b.textContent = label;
-      b.title = title;
-      b.addEventListener("click", fn);
-      return b;
-    }
+    bar.className = "y2kxbar";
     var hint = document.createElement("span");
     hint.id = "wr-hint";
     hint.textContent = "the story — one flowing document; dialogue ids get assigned to text later";
     bar.appendChild(hint);
     host.appendChild(bar);
+    if (app.wireXbar) app.wireXbar("ws-writing", bar);
 
     var body = document.createElement("div");
     body.id = "wr-body";
