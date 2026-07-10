@@ -959,4 +959,14 @@
   VB.audioAssetById = assetById;
   VB.audioClipById = clipById;
   VB.audioBakeMaster = bakeMaster;
+  // the shared transport — the Boards animatic (and later the master
+  // timeline) plays the project's audio through the SAME rig, so there
+  // is exactly one thing making sound at a time
+  VB.audioHasClips = function (project) {
+    return audioOf(project).tracks.some(function (tr) {
+      return tr.clips.length > 0;
+    });
+  };
+  VB.audioPlay = startPlayback;
+  VB.audioStop = stopPlayback;
 })();

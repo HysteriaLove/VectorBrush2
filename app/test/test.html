@@ -3765,8 +3765,12 @@
       aue.project.audio.assets.length === 1 &&
       aue.project.audio.assets[0].duration === 4000);
 
+    check("audioHasClips is false before any clip",
+      VB.audioHasClips(aue.project) === false);
     aue.exec({ op: "clipAdd", id: "au_c1", track: "au_t1",
                asset: "au_a1", at: 1000 });
+    check("audioHasClips sees the clip (the animatic's audio gate)",
+      VB.audioHasClips(aue.project) === true);
     var auC1 = VB.audioClipById(aue.project, "au_c1");
     check("clipAdd defaults to the whole stem at gain 1",
       auC1 && auC1.clip.at === 1000 && auC1.clip.offset === 0 &&

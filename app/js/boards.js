@@ -227,7 +227,8 @@
     host: null, app: null, stage: null, strip: null, captionEl: null,
     toolStrip: null, drawBtn: null, durInput: null, ro: null,
     drawMode: false,
-    animatic: { playing: false, raf: 0, last: 0, acc: 0, at: 0, frame: 0 }
+    animatic: { playing: false, raf: 0, last: 0, ms: 0, at: 0, frame: 0,
+                audio: false }
   };
 
   function stageMetrics() {
@@ -426,6 +427,10 @@
 
   // ---- animatic ----------------------------------------------------------------
 
+  // The reel plays panels against a millisecond clock. When the project
+  // has audio clips, the AUDIO is the master clock (drift-free leica
+  // reel); the performance clock covers projects without sound and the
+  // silent tail after the audio ends. Looping restarts both together.
   function startAnimatic() {
     var flat = flattenPanels(view.app.project);
     if (view.animatic.playing || flat.length === 0) return;
@@ -435,35 +440,48 @@
     an.playing = true;
     an.at = 0;
     an.frame = 0;
+    an.ms = 0;
     an.last = performance.now();
-    an.acc = 0;
+    an.audio = false;
     view.host.classList.add("animatic");
     drawPanelToStage(flat[0].panel, subtitleFor(flat[0].panel));
+    function startAudio() {
+      if (!(VB.audioHasClips && VB.audioHasClips(view.app.project))) return;
+      an.audio = true;
+      VB.audioPlay(view.app.project, 0, function (ms) {
+        if (an.playing) an.ms = ms;         // audio drives the clock
+      }, function () {
+        an.audio = false;                   // silent tail: raf clock resumes
+      });
+    }
+    startAudio();
     function tick(now) {
       if (!an.playing) return;
-      an.acc += now - an.last;
+      var dt = now - an.last;
       an.last = now;
-      var msPerFrame = 1000 / (view.app.project.fps || 24);
-      var advanced = false;
-      while (an.acc >= msPerFrame) {
-        an.acc -= msPerFrame;
-        an.frame++;
-        advanced = true;
+      if (!an.audio) an.ms += dt;
+      var f = flattenPanels(view.app.project);
+      if (!f.length) { stopAnimatic(); return; }
+      var frame = Math.floor(an.ms * (view.app.project.fps || 24) / 1000);
+      var remaining = frame;
+      var idx = 0;
+      while (idx < f.length &&
+             remaining >= Math.max(1, f[idx].panel.duration | 0)) {
+        remaining -= Math.max(1, f[idx].panel.duration | 0);
+        idx++;
       }
-      if (advanced) {
-        var f = flattenPanels(view.app.project);
-        if (!f.length) { stopAnimatic(); return; }
-        var remaining = an.frame;
-        var idx = 0;
-        while (idx < f.length &&
-               remaining >= Math.max(1, f[idx].panel.duration | 0)) {
-          remaining -= Math.max(1, f[idx].panel.duration | 0);
-          idx++;
-        }
-        if (idx >= f.length) { an.frame = 0; idx = 0; } // loop
+      if (idx >= f.length) { // loop the reel; the audio restarts with it
+        an.ms = 0;
+        frame = 0;
+        idx = 0;
+        if (VB.audioStop) VB.audioStop();
+        startAudio();
+      }
+      if (idx !== an.at || !frame) {
         an.at = idx;
         drawPanelToStage(f[idx].panel, subtitleFor(f[idx].panel));
       }
+      an.frame = frame;
       an.raf = requestAnimationFrame(tick);
     }
     an.raf = requestAnimationFrame(tick);
@@ -473,6 +491,8 @@
     var an = view.animatic;
     if (!an.playing) return;
     an.playing = false;
+    an.audio = false;
+    if (VB.audioStop) VB.audioStop();
     cancelAnimationFrame(an.raf);
     view.host.classList.remove("animatic");
     // pin the landing panel so replay agrees with what was on screen
