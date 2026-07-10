@@ -24,12 +24,16 @@
     return {
       cell: CELL,
       racks: {
-        left:  { width: 0, scroll: 0, modules: [] },
-        right: { width: RACK_DEFAULT, scroll: 0, modules: [] }
+        left:  { width: RACK_DEFAULT, scroll: 0, open: true, modules: [] },
+        right: { width: RACK_DEFAULT, scroll: 0, open: true, modules: [] }
+      },
+      cols: { // the thin tool columns — collapse off to their side
+        left:  { open: true },
+        right: { open: true }
       },
       toolbars: {
-        top:    { scroll: 0, panels: [] },
-        bottom: { scroll: 0, panels: [] }
+        top:    { scroll: 0, panels: [], order: [] },
+        bottom: { scroll: 0, panels: [], order: [] }
       },
       drawers: {
         top:    { open: true },
@@ -122,6 +126,47 @@
     return mods;
   }
 
+  // ---- packed stacking (the shell's positioning mode) -----------------------------
+  // Panels never float (user decision): they always collapse together,
+  // packed from the top in order. Dragging picks an INSERTION INDEX;
+  // everything closes up around it. solveIsland stays exported for
+  // hosts that want the reference's free positioning.
+
+  function packRack(state, side) {
+    var y = 0;
+    state.racks[side].modules.forEach(function (m) {
+      m.y = y;
+      y += moduleHeight(m);
+    });
+    return y;
+  }
+
+  /** Which slot a pointer at content-space y means. */
+  function insertionIndexAt(state, side, y) {
+    var mods = state.racks[side].modules;
+    var acc = 0;
+    for (var i = 0; i < mods.length; i++) {
+      var h = moduleHeight(mods[i]);
+      if (y < acc + h / 2) return i;
+      acc += h;
+    }
+    return mods.length;
+  }
+
+  /** Reorder (or move across racks) to an index; both columns repack.
+   *  Landing on a closed rack opens it. */
+  function reorderModule(state, id, side, index) {
+    var hit = moduleById(state, id);
+    if (!hit) return;
+    state.racks[hit.side].modules.splice(hit.index, 1);
+    var mods = state.racks[side].modules;
+    mods.splice(Math.max(0, Math.min(mods.length, index | 0)), 0, hit.mod);
+    if (!state.racks[side].width) state.racks[side].width = RACK_DEFAULT;
+    state.racks[side].open = true;
+    packRack(state, "left");
+    packRack(state, "right");
+  }
+
   // ---- rack modules --------------------------------------------------------------
 
   function addModule(state, side, mod) {
@@ -186,10 +231,14 @@
   function setRackWidth(state, side, width, shellWidth) {
     var other = side === "left" ? "right" : "left";
     var max = Math.min(RACK_MAX,
-      Math.max(0, (shellWidth || Infinity) -
+      Math.max(RACK_MIN, (shellWidth || Infinity) -
         state.racks[other].width - CENTER_MIN));
+    if (width < RACK_MIN / 2) { // dragged shut: disappears to its side
+      state.racks[side].open = false;
+      return state.racks[side].width;
+    }
     var w = Math.max(RACK_MIN, Math.min(max, width));
-    if (width < RACK_MIN / 2) w = 0; // collapse under half-min: a drawer
+    state.racks[side].open = true;
     state.racks[side].width = w;
     return w;
   }
@@ -268,9 +317,21 @@
           if (data.racks[side]) state.racks[side] = data.racks[side];
         });
       }
+      if (data && data.cols) state.cols = data.cols;
       if (data && data.toolbars) state.toolbars = data.toolbars;
       if (data && data.drawers) state.drawers = data.drawers;
     } catch (e) { /* fresh defaults */ }
+    // normalize fields older persisted states lack
+    ["left", "right"].forEach(function (side) {
+      var rack = state.racks[side];
+      if (rack.open === undefined) rack.open = true;
+      if (!rack.width) rack.width = RACK_DEFAULT;
+      if (!state.cols[side]) state.cols[side] = { open: true };
+    });
+    ["top", "bottom"].forEach(function (key) {
+      if (!state.toolbars[key]) state.toolbars[key] = { scroll: 0, panels: [], order: [] };
+      if (!state.toolbars[key].order) state.toolbars[key].order = [];
+    });
     return state;
   }
 
@@ -281,6 +342,9 @@
     defaults: defaults,
     moduleById: moduleById,
     moduleHeight: moduleHeight,
+    packRack: packRack,
+    insertionIndexAt: insertionIndexAt,
+    reorderModule: reorderModule,
     addModule: addModule,
     toggleModule: toggleModule,
     dragModule: dragModule,

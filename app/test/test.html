@@ -4064,9 +4064,11 @@
     check("rack width clamps against the shell",
       sh.racks.right.width <= Sh.RACK_MAX);
     Sh.setRackWidth(sh, "right", 30, 1200);
-    check("dropping under half-min collapses the rack",
-      sh.racks.right.width === 0);
+    check("dragging under half-min disappears the rack to its side",
+      sh.racks.right.open === false &&
+      sh.racks.right.width >= Sh.RACK_MIN); // width survives for reopen
     Sh.setRackWidth(sh, "right", Sh.RACK_DEFAULT, 1200);
+    check("a real width reopens the rack", sh.racks.right.open === true);
     sh.racks.right.scroll = 9999;
     Sh.clampRackScroll(sh, "right", 100);
     check("column scroll clamps to the content",
@@ -4084,12 +4086,41 @@
     check("toolbar drop settles without overlap",
       p2.x >= sh.toolbars.top.panels[0].x + 128);
 
+    // packed stacking — the shell's ACTUAL positioning (user decision:
+    // panels always collapse together; no free positions)
+    var pk = Sh.defaults();
+    Sh.addModule(pk, "right", { id: "a", h: 100 });
+    Sh.addModule(pk, "right", { id: "b", h: 100 });
+    Sh.addModule(pk, "right", { id: "c", h: 100 });
+    Sh.toggleModule(pk, "b"); // collapsed tab
+    Sh.packRack(pk, "right");
+    var pkById = function (id) { return Sh.moduleById(pk, id).mod; };
+    check("packing stacks with collapsed tabs at tab height",
+      pkById("a").y === 0 && pkById("b").y === 100 &&
+      pkById("c").y === 100 + Sh.TAB_H &&
+      Sh.rackContentHeight(pk, "right") === 200 + Sh.TAB_H);
+    check("insertion index halves on module midlines",
+      Sh.insertionIndexAt(pk, "right", 0) === 0 &&
+      Sh.insertionIndexAt(pk, "right", 60) === 1 &&
+      Sh.insertionIndexAt(pk, "right", 9999) === 3);
+    Sh.reorderModule(pk, "c", "right", 0);
+    check("reorder repacks the stack",
+      pkById("c").y === 0 && pkById("a").y === 100 &&
+      pkById("b").y === 200);
+    pk.racks.left.open = false;
+    Sh.reorderModule(pk, "a", "left", 0);
+    check("moving into a closed rack opens it packed",
+      Sh.moduleById(pk, "a").side === "left" &&
+      pk.racks.left.open === true && pkById("a").y === 0 &&
+      pkById("c").y === 0 && pkById("b").y === 100);
+
     // persistence roundtrip (view state, never the journal)
     var sh2 = Sh.restore(Sh.serialize(sh));
     check("shell state roundtrips",
       Sh.serialize(sh2) === Sh.serialize(sh));
     check("garbage restores to defaults",
-      Sh.restore("{oops").racks.right.width === Sh.RACK_DEFAULT);
+      Sh.restore("{oops").racks.right.width === Sh.RACK_DEFAULT &&
+      Sh.restore("{oops").cols.left.open === true);
   } catch (err) {
     fail++;
     log("  Y2KSHELL EXCEPTION: " + (err && err.stack || err), "fail");

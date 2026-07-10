@@ -189,6 +189,74 @@
   }
   #layerlist, #matlist, #actorlist { flex: 1; min-height: 40px; }
 
+  /* xToolbars: scrollable strips of grouped xPanels — drag ⠿ to
+     rearrange; the strip scrolls sideways when panels overflow */
+  .y2kxbar { overflow-x: auto; scrollbar-width: none; }
+  .y2kxbar::-webkit-scrollbar { display: none; }
+  .y2kxpanel {
+    flex: none; display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 8px 3px 4px;
+    border: 1px solid var(--panel-edge); border-radius: 4px;
+    background: var(--field);
+  }
+  .y2kxpanel.dragging { opacity: 0.7; }
+  .y2kxgrip {
+    color: var(--text-dim); cursor: grab; font-size: 11px;
+    touch-action: none; user-select: none;
+  }
+  #xbar-bottom {
+    flex: none; display: flex; align-items: center; gap: 8px;
+    padding: 4px 10px;
+    background: var(--panel);
+    border-top: 1px solid var(--panel-edge);
+    font-size: 12px; color: var(--text);
+  }
+  #xbar-bottom button {
+    background: var(--field); color: var(--text);
+    border: 1px solid var(--panel-edge); border-radius: 3px;
+    height: 24px; min-width: 26px; cursor: pointer; padding: 0 6px;
+  }
+  #xbar-bottom button:hover { background: var(--btn-hover); }
+  #xbar-bottom button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  /* thin tool columns — they disappear off to their side */
+  .y2kxcol {
+    flex: none; display: flex; flex-direction: column;
+    background: var(--panel);
+    user-select: none;
+  }
+  #xcol-left { border-right: 1px solid var(--panel-edge); }
+  #xcol-right { border-left: 1px solid var(--panel-edge); width: 56px; }
+  #xcol-left #tools { border-right: none; }
+  .y2kxcolbody {
+    flex: 1; min-height: 0; overflow-y: auto;
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    padding: 8px 4px;
+  }
+  #xcol-right .ctl { flex-direction: column; gap: 2px; }
+  #xcol-right .ctl input[type="number"] { width: 44px; }
+  .y2kxcol.closed { width: 16px !important; }
+  .y2kxcol.closed .y2kxcolbody { display: none; }
+  .y2kxcoltoggle {
+    flex: none; height: 20px; width: 100%; padding: 0;
+    background: none; border: none; color: var(--text-dim);
+    cursor: pointer; font-size: 9px;
+  }
+  .y2kxcoltoggle:hover { color: var(--accent); background: var(--hover); }
+
+  /* collapsed racks leave a slim reveal strip at their side */
+  .y2krack.closed { display: none; }
+  .y2krackreveal {
+    flex: none; width: 14px; display: none;
+    align-items: center; justify-content: center;
+    background: var(--panel); color: var(--text-dim);
+    cursor: pointer; font-size: 9px;
+  }
+  .y2krackreveal.show { display: flex; }
+  .y2krackreveal[data-side="left"] { border-right: 1px solid var(--panel-edge); }
+  .y2krackreveal[data-side="right"] { border-left: 1px solid var(--panel-edge); }
+  .y2krackreveal:hover { color: var(--accent); background: var(--hover); }
+
   /* y2kshell drawers: the properties bar and the sequencing stack
      collapse behind slim handles */
   .y2kdrawer { flex: none; display: flex; flex-direction: column; }
@@ -408,6 +476,7 @@
   #workspace-stub { display: none; }
   body.ws-stub-mode #drawer-top,
   body.ws-stub-mode #drawer-bottom,
+  body.ws-stub-mode #xbar-bottom,
   body.ws-stub-mode #middle { display: none; }
   body.ws-stub-mode #workspace-stub {
     display: flex; flex: 1;
@@ -422,6 +491,7 @@
      covers the editor chrome */
   body.ws-mount-mode #drawer-top,
   body.ws-mount-mode #drawer-bottom,
+  body.ws-mount-mode #xbar-bottom,
   body.ws-mount-mode #middle { display: none; }
   #brainstorm-board, #writing-view, #pitch-view, #boards-view,
   #audio-view { display: none; }
@@ -916,39 +986,32 @@
         moves them as .y2kproj packages.</div>
     </div>
   </div>
-  <div id="topbar">
+  <div id="topbar" class="y2kxbar" data-xbar="top">
     <div class="brand">Vector<span>Brush</span></div>
-    <button id="btn-open" title="Open .swf or .y2kvector (legacy .vbd) (Ctrl+O)">Open…</button>
-    <button id="btn-save" title="Save as compact .y2kvector">Save .y2kvector</button>
-    <button id="btn-save-swf" title="Export as SWF v7 (opens in Flash MX 2004)">Save .swf</button>
-    <button id="btn-log" title="Export the action log (deterministic bug repro)">Save log</button>
-    <div class="sep"></div>
-    <button id="btn-undo" title="Undo (Ctrl+Z)" disabled>↶</button>
-    <button id="btn-redo" title="Redo (Ctrl+Y)" disabled>↷</button>
-    <button id="btn-delete" title="Delete selection (Del)">🗑</button>
-    <div class="sep"></div>
-    <label class="ctl" title="Stroke color">
-      ✎<input type="color" id="stroke-color" value="#000000">
-    </label>
-    <label class="ctl" title="Stroke width (px)">
-      <input type="number" id="stroke-width" value="1" min="0.05" max="10" step="0.25">px
-    </label>
-    <label class="ctl" title="Fill color (brush + bucket)">
-      🪣<input type="color" id="fill-color" value="#66ccff">
-    </label>
-    <label class="ctl" title="Brush size (px)">
-      🖌<input type="number" id="brush-size" value="10" min="1" max="100" step="1">px
-    </label>
-    <label class="ctl" title="Eraser size (px)">
-      🧽<input type="number" id="eraser-size" value="20" min="2" max="100" step="2">px
-    </label>
-    <div class="sep"></div>
-    <button id="btn-zoom-out" title="Zoom out">−</button>
-    <button id="btn-zoom-100" title="Zoom to 100%">100%</button>
-    <button id="btn-zoom-in" title="Zoom in">+</button>
-    <button id="btn-fit" title="Fit stage in window">Fit</button>
-    <div class="sep"></div>
-    <button id="btn-debug" title="Vector debug view (D)">Debug</button>
+    <div class="y2kxpanel" data-panel="file">
+      <span class="y2kxgrip" title="Drag to rearrange">⠿</span>
+      <button id="btn-open" title="Open .swf or .y2kvector (legacy .vbd) (Ctrl+O)">Open…</button>
+      <button id="btn-save" title="Save as compact .y2kvector">Save .y2kvector</button>
+      <button id="btn-save-swf" title="Export as SWF v7 (opens in Flash MX 2004)">Save .swf</button>
+      <button id="btn-log" title="Export the action log (deterministic bug repro)">Save log</button>
+    </div>
+    <div class="y2kxpanel" data-panel="edit">
+      <span class="y2kxgrip" title="Drag to rearrange">⠿</span>
+      <button id="btn-undo" title="Undo (Ctrl+Z)" disabled>↶</button>
+      <button id="btn-redo" title="Redo (Ctrl+Y)" disabled>↷</button>
+      <button id="btn-delete" title="Delete selection (Del)">🗑</button>
+    </div>
+    <div class="y2kxpanel" data-panel="zoom">
+      <span class="y2kxgrip" title="Drag to rearrange">⠿</span>
+      <button id="btn-zoom-out" title="Zoom out">−</button>
+      <button id="btn-zoom-100" title="Zoom to 100%">100%</button>
+      <button id="btn-zoom-in" title="Zoom in">+</button>
+      <button id="btn-fit" title="Fit stage in window">Fit</button>
+    </div>
+    <div class="y2kxpanel" data-panel="debug">
+      <span class="y2kxgrip" title="Drag to rearrange">⠿</span>
+      <button id="btn-debug" title="Vector debug view (D)">Debug</button>
+    </div>
     <div class="spacer"></div>
     <div id="fileinfo">no file loaded</div>
   </div>
@@ -1001,6 +1064,10 @@
   <div id="audio-view"></div>
 
   <div id="middle">
+    <div id="xcol-left" class="y2kxcol">
+    <button class="y2kxcoltoggle" data-col="left"
+            title="Collapse / expand the tool column">⯇</button>
+    <div class="y2kxcolbody">
     <div id="tools">
       <button data-tool="select" class="active" title="Selection tool (V)">➤</button>
       <button data-tool="transform" title="Free Transform (Q)">▣</button>
@@ -1014,9 +1081,13 @@
       <button data-tool="bucket" title="Paint bucket (K)">🪣</button>
       <button data-tool="eraser" title="Eraser (E)">🧽</button>
     </div>
+    </div>
+    </div>
     <div id="rack-left" class="y2krack empty">
       <div class="y2krackedge" data-side="left" title="Drag to resize the rack"></div>
     </div>
+    <div class="y2krackreveal" data-side="left"
+         title="Open the left rack">⯈</div>
     <div id="canvaswrap">
       <canvas id="stage-canvas"></canvas>
       <div id="editcrumb" class="hidden">
@@ -1112,6 +1183,29 @@
         </div>
       </div>
     </div>
+    <div class="y2krackreveal" data-side="right"
+         title="Open the right rack">⯇</div>
+    <div id="xcol-right" class="y2kxcol">
+      <button class="y2kxcoltoggle" data-col="right"
+              title="Collapse / expand the color column">⯈</button>
+      <div class="y2kxcolbody">
+        <label class="ctl" title="Stroke color">
+          ✎<input type="color" id="stroke-color" value="#000000">
+        </label>
+        <label class="ctl" title="Stroke width (px)">
+          <input type="number" id="stroke-width" value="1" min="0.05" max="10" step="0.25">
+        </label>
+        <label class="ctl" title="Fill color (brush + bucket)">
+          🪣<input type="color" id="fill-color" value="#66ccff">
+        </label>
+        <label class="ctl" title="Brush size (px)">
+          🖌<input type="number" id="brush-size" value="10" min="1" max="100" step="1">
+        </label>
+        <label class="ctl" title="Eraser size (px)">
+          🧽<input type="number" id="eraser-size" value="20" min="2" max="100" step="2">
+        </label>
+      </div>
+    </div>
     <div id="debugpanel" class="hidden">
       <div id="dbg-est"></div>
       <div id="dbg-edge"></div>
@@ -1126,17 +1220,28 @@
   <div id="seqbar"></div>
 
   <div id="timebar">
-    <button id="tl-play" title="Play / stop (Enter)">▶</button>
-    <button id="tl-add" title="Add a blank frame to the active layer (F7)">＋</button>
-    <button id="tl-del" title="Remove the current frame from the active layer">－</button>
-    <button id="tl-onion" title="Onion skin (previous/next frame ghosts)">🧅</button>
-    <label class="ctl" title="Frames per second">
-      <input type="number" id="tl-fps" value="24" min="1" max="120" step="1"
-             style="width:44px"> fps
-    </label>
-    <span id="tl-counter">1 / 1</span>
     <div id="tl-frames"></div>
   </div>
+  </div>
+
+  <div id="xbar-bottom" class="y2kxbar" data-xbar="bottom">
+    <div class="y2kxpanel" data-panel="transport">
+      <span class="y2kxgrip" title="Drag to rearrange">⠿</span>
+      <span id="seq-play-slot"></span>
+      <button id="tl-play" title="Play / stop the scene loop (Enter)">▶</button>
+      <button id="tl-add" title="Add a blank frame to the active layer (F7)">＋</button>
+      <button id="tl-del" title="Remove the current frame from the active layer">－</button>
+      <button id="tl-onion" title="Onion skin (previous/next frame ghosts)">🧅</button>
+    </div>
+    <div class="y2kxpanel" data-panel="clock">
+      <span class="y2kxgrip" title="Drag to rearrange">⠿</span>
+      <label class="ctl" title="Frames per second">
+        <input type="number" id="tl-fps" value="24" min="1" max="120" step="1"
+               style="width:44px"> fps
+      </label>
+      <span id="tl-counter">1 / 1</span>
+    </div>
+    <div class="spacer"></div>
   </div>
 
   <div id="statusbar">

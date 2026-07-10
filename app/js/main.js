@@ -1830,13 +1830,22 @@
     }
 
     function applyShell() {
+      S.packRack(state, "left");   // panels always group together
+      S.packRack(state, "right");  // (user decision — no free positions)
       ["left", "right"].forEach(function (side) {
         var el = racks[side];
         if (!el) return;
         var rack = state.racks[side];
-        el.classList.toggle("empty", rack.modules.length === 0);
-        if (rack.modules.length) {
-          el.style.width = Math.max(S.RACK_MIN, rack.width || S.RACK_DEFAULT) + "px";
+        var closed = !rack.open || rack.modules.length === 0;
+        el.classList.toggle("closed", closed);
+        el.classList.remove("empty");
+        el.style.width = Math.max(S.RACK_MIN, rack.width || S.RACK_DEFAULT) + "px";
+        var reveal = document.querySelector(
+          '.y2krackreveal[data-side="' + side + '"]');
+        if (reveal) {
+          reveal.classList.toggle("show",
+            closed && rack.modules.length > 0);
+          reveal.textContent = side === "left" ? "⯈" : "⯇";
         }
         S.clampRackScroll(state, side, el.clientHeight || 600);
         rack.modules.forEach(function (m) {
@@ -1848,6 +1857,17 @@
           dom.classList.toggle("collapsed", !m.expanded);
         });
       });
+      ["left", "right"].forEach(function (side) {
+        var col = document.getElementById("xcol-" + side);
+        if (!col) return;
+        var open = state.cols[side].open;
+        col.classList.toggle("closed", !open);
+        var btn = col.querySelector(".y2kxcoltoggle");
+        if (btn) {
+          btn.textContent = side === "left"
+            ? (open ? "⯇" : "⯈") : (open ? "⯈" : "⯇");
+        }
+      });
       ["top", "bottom"].forEach(function (which) {
         var drawer = document.getElementById("drawer-" + which);
         if (drawer) drawer.classList.toggle("closed", !state.drawers[which].open);
@@ -1855,52 +1875,55 @@
       persist();
     }
 
-    // module tab: click toggles, drag rearranges (and crosses sides)
+    // module tab: click toggles; drag chooses an INSERTION SLOT (the
+    // packed stack closes up around it) — crossing the canvas midline
+    // drops the module into the other rack
     Object.keys(moduleDom).forEach(function (id) {
       var tab = moduleDom[id].querySelector(".y2kmodtab");
       tab.addEventListener("pointerdown", function (ev) {
         if (ev.button !== 0) return;
         ev.preventDefault();
         tab.setPointerCapture(ev.pointerId);
-        var hit = S.moduleById(state, id);
-        var side0 = hit.side;
-        var startY = hit.mod.y;
-        var starts = {};
-        state.racks[side0].modules.forEach(function (m) { starts[m.id] = m.y; });
         var p0 = { x: ev.clientX, y: ev.clientY };
-        var moved = false, lastY = ev.clientY;
+        var moved = false;
         function onMove(e2) {
-          var dy = e2.clientY - p0.y;
-          if (!moved && Math.abs(dy) < 5 && Math.abs(e2.clientX - p0.x) < 5) return;
+          if (!moved && Math.abs(e2.clientY - p0.y) < 5 &&
+              Math.abs(e2.clientX - p0.x) < 5) return;
           moved = true;
           moduleDom[id].classList.add("dragging");
-          // crossing the canvas midline moves the module to the other rack
-          var mid = racks.left && racks.right
-            ? (racks.right.getBoundingClientRect().left +
-               (racks.left.getBoundingClientRect().right || 0)) / 2
-            : 0;
-          var side = e2.clientX < mid ? "left" : "right";
-          var cur = S.moduleById(state, id);
-          if (cur.side !== side) {
-            starts = {};
-            state.racks[side].modules.forEach(function (m) { starts[m.id] = m.y; });
-            starts[id] = startY;
+          var midX = window.innerWidth / 2;
+          var side = e2.clientX < midX ? "left" : "right";
+          var host = racks[side];
+          if (!host) return;
+          if (!state.racks[side].open &&
+              state.racks[side].modules.length === 0) {
+            state.racks[side].open = true; // dropping opens an empty rack
           }
-          S.dragModule(state, id, side, starts, startY + dy,
-                       e2.clientY - lastY >= 0 ? 1 : -1);
-          lastY = e2.clientY;
-          applyShell();
+          var r = host.getBoundingClientRect();
+          var contentY = e2.clientY - r.top + state.racks[side].scroll;
+          // slot over the stack WITHOUT the dragged module
+          var others = state.racks[side].modules.filter(function (m) {
+            return m.id !== id;
+          });
+          var acc = 0, idx = others.length;
+          for (var i = 0; i < others.length; i++) {
+            var h = S.moduleHeight(others[i]);
+            if (contentY < acc + h / 2) { idx = i; break; }
+            acc += h;
+          }
+          var cur = S.moduleById(state, id);
+          var curIdx = cur.side === side ? cur.index : -1;
+          if (cur.side !== side || idx !== curIdx) {
+            S.reorderModule(state, id, side, idx);
+            applyShell();
+          }
         }
         function onUp() {
           tab.removeEventListener("pointermove", onMove);
           tab.removeEventListener("pointerup", onUp);
           tab.removeEventListener("pointercancel", onUp);
           moduleDom[id].classList.remove("dragging");
-          if (!moved) {
-            S.toggleModule(state, id); // plain click: collapse / expand
-          } else {
-            S.endModuleDrag(state, S.moduleById(state, id).side);
-          }
+          if (!moved) S.toggleModule(state, id); // click: collapse/expand
           applyShell();
         }
         tab.addEventListener("pointermove", onMove);
@@ -1908,6 +1931,84 @@
         tab.addEventListener("pointercancel", onUp);
       });
     });
+
+    // rack reveal strips + thin column toggles
+    document.querySelectorAll(".y2krackreveal").forEach(function (strip) {
+      strip.addEventListener("click", function () {
+        state.racks[strip.dataset.side].open = true;
+        applyShell();
+        requestRender();
+      });
+    });
+    document.querySelectorAll(".y2kxcoltoggle").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var side = btn.dataset.col;
+        state.cols[side].open = !state.cols[side].open;
+        applyShell();
+        requestRender();
+      });
+    });
+
+    // xToolbars: panels group left-to-right; drag the ⠿ grip to
+    // rearrange, wheel scrolls an overflowing strip sideways
+    function wireXbar(key, barEl) {
+      if (!barEl) return;
+      var spacer = barEl.querySelector(".spacer");
+      function panels() {
+        return Array.prototype.slice.call(
+          barEl.querySelectorAll(".y2kxpanel"));
+      }
+      // apply the persisted order
+      (state.toolbars[key].order || []).forEach(function (pid) {
+        var el = panels().filter(function (p) {
+          return p.dataset.panel === pid;
+        })[0];
+        if (el) barEl.insertBefore(el, spacer);
+      });
+      function persistOrder() {
+        state.toolbars[key].order = panels().map(function (p) {
+          return p.dataset.panel;
+        });
+        persist();
+      }
+      panels().forEach(function (el) {
+        var grip = el.querySelector(".y2kxgrip");
+        if (!grip) return;
+        grip.addEventListener("pointerdown", function (ev) {
+          if (ev.button !== 0) return;
+          ev.preventDefault();
+          grip.setPointerCapture(ev.pointerId);
+          el.classList.add("dragging");
+          function onMove(e2) {
+            var before = null;
+            panels().forEach(function (sib) {
+              if (sib === el || before) return;
+              var r = sib.getBoundingClientRect();
+              if (e2.clientX < r.left + r.width / 2) before = sib;
+            });
+            barEl.insertBefore(el, before || spacer);
+          }
+          function onUp() {
+            grip.removeEventListener("pointermove", onMove);
+            grip.removeEventListener("pointerup", onUp);
+            grip.removeEventListener("pointercancel", onUp);
+            el.classList.remove("dragging");
+            persistOrder();
+          }
+          grip.addEventListener("pointermove", onMove);
+          grip.addEventListener("pointerup", onUp);
+          grip.addEventListener("pointercancel", onUp);
+        });
+      });
+      barEl.addEventListener("wheel", function (ev) {
+        if (barEl.scrollWidth > barEl.clientWidth + 2) {
+          ev.preventDefault();
+          barEl.scrollLeft += ev.deltaY;
+        }
+      }, { passive: false });
+    }
+    wireXbar("top", document.getElementById("topbar"));
+    wireXbar("bottom", document.getElementById("xbar-bottom"));
 
     // rack column wheel scroll + edge resize
     ["left", "right"].forEach(function (side) {
@@ -2176,7 +2277,10 @@
     play.addEventListener("click", function () {
       if (seqPlay.playing) stopSeqPlay(); else startSeqPlay();
     });
-    bar.appendChild(play);
+    // the transport lives on the bottom xToolbar (always visible, even
+    // with the sequencing drawer collapsed); older layouts keep it here
+    var slot = document.getElementById("seq-play-slot");
+    (slot || bar).appendChild(play);
     var cvs = document.createElement("canvas");
     cvs.id = "seq-strip";
     bar.appendChild(cvs);
