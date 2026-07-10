@@ -36,10 +36,13 @@
         bottom: { scroll: 0, panels: [], order: [] }
       },
       drawers: {
-        // the scratchpad drawer starts tucked; h is the user's pull
+        // drawers remember how far the user pulled them
         top:    { open: false, h: 220 },
-        bottom: { open: true } // the animation timeline starts out
-      }
+        bottom: { open: true, h: 130 } // the animation timeline
+      },
+      // the step sequencer's own view (the scene timeline keeps its
+      // zoom/pan inside the strip itself)
+      step: { cellW: 13 }
     };
   }
 
@@ -305,7 +308,8 @@
 
   function serialize(state) {
     return JSON.stringify({
-      racks: state.racks, toolbars: state.toolbars, drawers: state.drawers
+      racks: state.racks, toolbars: state.toolbars,
+      drawers: state.drawers, step: state.step
     });
   }
 
@@ -321,6 +325,7 @@
       if (data && data.cols) state.cols = data.cols;
       if (data && data.toolbars) state.toolbars = data.toolbars;
       if (data && data.drawers) state.drawers = data.drawers;
+      if (data && data.step) state.step = data.step;
     } catch (e) { /* fresh defaults */ }
     // normalize fields older persisted states lack
     ["left", "right"].forEach(function (side) {
@@ -335,6 +340,8 @@
       if (!state.drawers[key]) state.drawers[key] = { open: key === "bottom" };
     });
     if (state.drawers.top.h === undefined) state.drawers.top.h = 220;
+    if (state.drawers.bottom.h === undefined) state.drawers.bottom.h = 130;
+    if (!state.step || !(state.step.cellW > 0)) state.step = { cellW: 13 };
     return state;
   }
 

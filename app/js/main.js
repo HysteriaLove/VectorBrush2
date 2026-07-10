@@ -1863,8 +1863,9 @@
         if (!drawer) return;
         var d = state.drawers[which];
         drawer.classList.toggle("closed", !d.open);
-        if (which === "top" && d.open) { // pulled as far as the user likes
-          drawer.style.height = Math.max(60, d.h | 0) + "px";
+        if (d.open) { // pulled as far as the user likes
+          drawer.style.height =
+            Math.max(which === "top" ? 60 : 120, d.h | 0) + "px";
         }
       });
       persist();
@@ -1936,9 +1937,8 @@
       });
     });
 
-    // the toolbars PULL their drawers (user spec): drag down on the top
-    // toolbar to reveal the workspace drawer, drag up on the bottom one
-    // to pull out the animation timeline — the reverse pushes it shut.
+    // the toolbars PULL their drawers (user spec) — CONTINUOUSLY: the
+    // drawer follows the drag and stays wherever it is released.
     // Panels, buttons, and inputs keep their own gestures.
     function wireDrawerPull(barEl, which, openDir) {
       if (!barEl) return;
@@ -1948,53 +1948,18 @@
         if (t !== barEl && !(t.classList &&
             t.classList.contains("spacer"))) return;
         barEl.setPointerCapture(ev.pointerId);
-        var y0 = ev.clientY, done = false;
-        function onMove(e2) {
-          if (done) return;
-          var pull = (e2.clientY - y0) * openDir;
-          if (pull > 18) {
-            state.drawers[which].open = true;
-            done = true;
-          } else if (pull < -18) {
-            state.drawers[which].open = false;
-            done = true;
-          }
-          if (done) {
-            applyShell();
-            requestRender();
-          }
-        }
-        function onUp() {
-          barEl.removeEventListener("pointermove", onMove);
-          barEl.removeEventListener("pointerup", onUp);
-          barEl.removeEventListener("pointercancel", onUp);
-        }
-        barEl.addEventListener("pointermove", onMove);
-        barEl.addEventListener("pointerup", onUp);
-        barEl.addEventListener("pointercancel", onUp);
-      });
-    }
-    // the TOP toolbar sits under the scratchpad drawer and pulls it
-    // open continuously — drag down extends it as far as you like
-    (function wireScratchPull() {
-      var barEl = document.getElementById("topbar");
-      if (!barEl) return;
-      barEl.addEventListener("pointerdown", function (ev) {
-        if (ev.button !== 0) return;
-        var t = ev.target;
-        if (t !== barEl && !(t.classList &&
-            t.classList.contains("spacer"))) return;
-        barEl.setPointerCapture(ev.pointerId);
-        var d = state.drawers.top;
+        var d = state.drawers[which];
         var y0 = ev.clientY;
         var h0 = d.open ? (d.h | 0) : 0;
+        var minH = which === "top" ? 60 : 120;
         function onMove(e2) {
           var h = Math.min(Math.round(window.innerHeight * 0.7),
-                           h0 + (e2.clientY - y0));
+                           h0 + (e2.clientY - y0) * openDir);
           d.open = h > 40;
-          if (d.open) d.h = Math.max(60, h);
+          if (d.open) d.h = Math.max(minH, h);
           applyShell();
-          renderScratch();
+          if (which === "top") renderScratch();
+          else { renderSeqStrip(); refreshTimeline(); }
         }
         function onUp() {
           barEl.removeEventListener("pointermove", onMove);
@@ -2006,8 +1971,24 @@
         barEl.addEventListener("pointerup", onUp);
         barEl.addEventListener("pointercancel", onUp);
       });
-    })();
+    }
+    wireDrawerPull(document.getElementById("topbar"), "top", 1);
     wireDrawerPull(document.getElementById("xbar-bottom"), "bottom", -1);
+
+    // the step sequencer keeps its OWN view: wheel zooms its cells
+    // (the scene timeline zooms independently inside its strip)
+    var tlFrames = document.getElementById("tl-frames");
+    if (tlFrames) {
+      tlFrames.addEventListener("wheel", function (ev) {
+        ev.preventDefault();
+        var factor = ev.deltaY < 0 ? 1.2 : 1 / 1.2;
+        state.step.cellW = Math.max(6, Math.min(40,
+          Math.round(state.step.cellW * factor)));
+        persist();
+        refreshTimeline();
+      }, { passive: false });
+    }
+    app.shellState = state; // the timeline views read step.cellW
 
     // ---- the shared scratchpad --------------------------------------------------
     // The drawer is another VIEW of the Sketchbook's shared vector cell
@@ -2854,6 +2835,9 @@
     document.getElementById("tl-onion").classList.toggle("active", !!app.onion);
     var strip = document.getElementById("tl-frames");
     strip.innerHTML = "";
+    var cellW = (app.shellState && app.shellState.step &&
+                 app.shellState.step.cellW) || 13; // the step view's zoom
+    var curCell = null;
     for (var i = 0; i < total; i++) {
       var cell = document.createElement("div");
       var own = i < layer.frames.length;
@@ -2861,7 +2845,9 @@
         (i === cur ? " cur" : "") +
         (!own ? " hold" : (layer.frames[i].edges.length ||
                            (layer.frames[i].texts || []).length ? " filled" : ""));
+      cell.style.width = cellW + "px";
       cell.title = "Frame " + (i + 1) + (own ? "" : " (hold)");
+      if (i === cur) curCell = cell;
       (function (idx) {
         cell.addEventListener("pointerdown", function () {
           stopPlay();
@@ -2871,6 +2857,10 @@
         });
       })(i);
       strip.appendChild(cell);
+    }
+    // the step playhead follows playback into view
+    if (curCell && (seqPlay.playing || playback.playing)) {
+      curCell.scrollIntoView({ block: "nearest", inline: "nearest" });
     }
   }
 

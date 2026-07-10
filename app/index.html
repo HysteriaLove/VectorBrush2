@@ -866,13 +866,21 @@
   }
   .tlcell.filled { background: var(--cell-filled); }
   .tlcell.hold { opacity: 0.45; }
-  .tlcell.cur { border-color: var(--accent); background: var(--accent); }
+  /* the step sequencer's playhead — a COLUMN cursor, deliberately
+     distinct from the scene timeline's thin red line */
+  .tlcell.cur {
+    border-color: var(--accent); background: var(--accent);
+    height: 26px; margin-top: -4px;
+    box-shadow: 0 0 0 1px var(--accent);
+  }
 
   /* the master timeline (sequence.js) — the reference's NLE scene lane
      at the BOTTOM of the editor: frame-proportional blocks, ruler,
      playhead, boundary drags */
   #seqbar {
-    flex: none; height: 84px; /* ruler + scene blocks + the audio band */
+    /* base height; inside the drawer it FLEXES — pulling the bottom
+       toolbar up grows the scene timeline */
+    flex: 1 1 84px; min-height: 84px; height: auto;
     display: flex; align-items: stretch; gap: 6px;
     padding: 4px 8px;
     background: var(--panel);
