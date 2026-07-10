@@ -24,7 +24,7 @@
     view: { zoom: 1, panX: 40, panY: 40, dpr: window.devicePixelRatio || 1 },
     strokeColor: { r: 0, g: 0, b: 0, a: 255 },
     strokeWidth: 20,          // twips (1 px), Flash's default pencil width
-    fillColor: { r: 102, g: 204, b: 255, a: 255 },
+    fillColor: { r: 0, g: 0, b: 0, a: 255 }, // brush paints BLACK (user spec)
     fillMaterial: null,       // selected 2DMaterial — overrides fillColor
     eraserWidth: 20,          // eraser diameter, px
     brushWidth: 10,           // brush diameter, px
@@ -172,6 +172,15 @@
       } else {
         VB.renderProject(ctx, app.project, app.view);
       }
+      // stage FRAME: a hairline outline keeps the canvas bounds
+      // readable — the white stage vanishes on the white page
+      // otherwise (user spec)
+      var stg = app.project.stage();
+      ctx.save();
+      ctx.strokeStyle = "rgba(32,35,39,0.55)";
+      ctx.lineWidth = VB.TWIPS / app.view.zoom; // 1 CSS px
+      ctx.strokeRect(0, 0, stg.width, stg.height);
+      ctx.restore();
       // board REFERENCE (roughs): the storyboard panel under the
       // current frame, drawn across the stage at 2× — boards are half
       // the stage by decree. Opacity comes from the roughbar slider.
@@ -196,15 +205,17 @@
       // workflow); skipped during playback and inside actor cells
       if (app.onion && !playback.playing && !app.project.editTarget) {
         var oLayer = app.project.activeLayer();
-        var oFrame = app.project.cur.frame || 0;
+        // neighbors are the adjacent DRAWINGS, not adjacent timeline
+        // frames — a held drawing ghosts its previous/next cells
+        var oCell = VB.frameIndexAt(oLayer, app.project.cur.frame || 0);
         ctx.save();
-        if (oFrame > 0 && oLayer.frames[oFrame - 1]) {
+        if (oCell > 0 && oLayer.frames[oCell - 1]) {
           ctx.globalAlpha = 0.3;
-          VB.renderDocContent(ctx, oLayer.frames[oFrame - 1], app.view);
+          VB.renderDocContent(ctx, oLayer.frames[oCell - 1], app.view);
         }
-        if (oLayer.frames[oFrame + 1]) {
+        if (oLayer.frames[oCell + 1]) {
           ctx.globalAlpha = 0.18;
-          VB.renderDocContent(ctx, oLayer.frames[oFrame + 1], app.view);
+          VB.renderDocContent(ctx, oLayer.frames[oCell + 1], app.view);
         }
         ctx.restore();
       }
@@ -3396,9 +3407,10 @@
           var fx = xOf(f);
           if (fx + cw < 0) continue;
           if (fx > w) break;
-          var own = f < layer.frames.length;
-          var filled = own && (layer.frames[f].edges.length ||
-                               (layer.frames[f].texts || []).length);
+          var own = f < VB.layerSpan(layer);
+          var fCell = own && VB.frameCell(layer, f);
+          var filled = own && (fCell.edges.length ||
+                               (fCell.texts || []).length);
           ctx.fillStyle = own ? (filled ? C.filled : C.field) : C.bg;
           ctx.strokeStyle = C.edge;
           ctx.beginPath();

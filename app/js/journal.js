@@ -130,6 +130,27 @@
     c.project.selectFrame(op.index);
     c.sync();
   });
+  // The roughs timeline's boundary drag: a drawing's EXPOSURE
+  // (layer.holds) changes and its right neighbor compensates — the
+  // zone-preserving panelBoundary discipline, so downstream drawings
+  // keep their audio sync. The last drawing's boundary moves freely.
+  defineOp("frameBoundary", function (c, op) {
+    if (c.project.editTarget) return; // actor cells have no timeline
+    var layers = c.project.scene().layers;
+    var l = layers[Math.min(op.layer || 0, layers.length - 1)];
+    var spans = VB.frameSpans(l); // materializes holds
+    var i = op.cell | 0;
+    if (i < 0 || i >= l.frames.length) return;
+    c.history.push(c.project);
+    var want = Math.max(1, op.frames | 0);
+    if (i < l.frames.length - 1) {
+      var pair = spans[i].frames + spans[i + 1].frames;
+      want = Math.min(want, pair - 1);
+      l.holds[i + 1] = pair - want;
+    }
+    l.holds[i] = want;
+    c.sync();
+  });
   defineOp("fpsSet", function (c, op) {
     c.project.fps = Math.max(1, Math.min(120, op.fps | 0)) || 24;
   });

@@ -509,7 +509,7 @@
    "sceneSelect", "materialAdd", "materialEdit",
    // structure/bookkeeping ops from the section workspaces — none touch
    // planar geometry
-   "frameAdd", "frameRemove", "frameSelect", "fpsSet",
+   "frameAdd", "frameRemove", "frameSelect", "frameBoundary", "fpsSet",
    "sceneRename", "sceneInstAdd", "sceneInstRemove", "sceneInstMove",
    "sceneInstDuration", "sceneInstLock", "sceneBoundarySet",
    "sceneBoundaryDrag",

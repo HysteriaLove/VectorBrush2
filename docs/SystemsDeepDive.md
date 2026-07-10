@@ -152,7 +152,7 @@ package units to read ranges from.
 | `width, height` | stage twips (default 1600×1200 px × 20; storyboards mint at exactly 0.5× = 800×600) — SWF frame definition only, canvases are infinite |
 | `fps` | 24; `fpsSet` op |
 | `background` | `{r,g,b,a}` |
-| `scenes` | `[Scene]`; `Scene = {id, name, layers:[Layer], cast:[], tracks:[]}`; `Layer = {name, visible, locked, frames:[cell]}`; **layers[0] is TOP** (JSFL convention) |
+| `scenes` | `[Scene]`; `Scene = {id, name, layers:[Layer], cast:[], tracks:[]}`; `Layer = {name, visible, locked, frames:[cell], holds:[int]}` — `holds[i]` is drawing i's exposure in timeline frames (roughs block model; `VB.frameCell/frameIndexAt/frameSpans/layerSpan` map through it); **layers[0] is TOP** (JSFL convention) |
 | `cur` | `{scene, layer, frame}` — shared edit cursor |
 | `sequence` | `[{id, scene, duration, locked}]` — the master timeline |
 | `materials` | global 2DMaterial library |

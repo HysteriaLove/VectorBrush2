@@ -72,7 +72,7 @@
   function sceneSpanFor(project, scene) {
     var span = 1;
     (scene.layers || []).forEach(function (l) {
-      span = Math.max(span, l.frames.length);
+      span = Math.max(span, VB.layerSpan ? VB.layerSpan(l) : l.frames.length);
     });
     (project.sequence || []).forEach(function (si) {
       if (si.scene === scene.id) {

@@ -154,7 +154,7 @@ replay needs no context and cross-resolution paste stays honest. A
 50 px brush on the stage and a 50 px brush on a board read as the same
 weight when the board is referenced at 2× over the canvas.
 
-### The Roughs timeline (roughtl.js — SHIPPED)
+### The Roughs timeline (roughtl.js — SHIPPED, block model)
 
 Roughs swaps the editor's scene strip + step sequencer (`body.ws-roughs`
 hides `#seqbar`/`#timebar`, shows `#roughbar`; Actors keeps the classic
@@ -163,12 +163,19 @@ pair) for a three-lane view on the SAME T1 ms axis as Audio
 
 - **BOARDS** — the storyboard filmstrip, read-only here (clicks seek,
   never edit; board lengths are still cut in Audio);
-- **MASTER** — the stems' mixdown envelope, read-only (same per-pixel
+- **AUDIO** — the stems' mixdown envelope, read-only (same per-pixel
   peak sum as the Audio lane);
-- **ROUGH** — the one editable track: the current scene's active layer,
-  frame by frame, positioned at the scene's first sequence-instance
-  start. Scrubbing any lane drives `cur.frame` live and pins one
-  `frameSelect` on release.
+- **ROUGH** — the one editable track, and NOT a step grid (user
+  decision): each drawing is a duration BLOCK, sequenced exactly like
+  the storyboard lane. The data is `layer.holds[i]` — drawing i's
+  EXPOSURE in frames (Flash's frame-hold as data; `VB.frameCell` maps
+  timeline frame → covering drawing, `VB.frameSpans`/`VB.layerSpan`
+  expose the blocks). Boundary drags emit one journaled
+  `frameBoundary` op: zone-preserving between pairs (the right
+  neighbor compensates, downstream drawings keep their audio sync),
+  free at the last drawing. Scrubbing any lane drives `cur.frame`
+  live and pins one `frameSelect` on release. Onion skin ghosts the
+  adjacent DRAWINGS (not adjacent timeline frames).
 
 The BOARD REFERENCE: a slider on the bar (persisted,
 `vb-roughref`) sets `app.boardRefAlpha`; the render loop draws the

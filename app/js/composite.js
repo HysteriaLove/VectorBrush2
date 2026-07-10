@@ -180,8 +180,8 @@
     var frame = project.cur.frame || 0;
     var sig = project.cur.scene + "|";
     scene.layers.forEach(function (l) {
-      sig += (l.visible
-        ? Math.min(frame, l.frames.length - 1) : "x") + ",";
+      // key by the DRAWING shown (exposure-aware), not the raw frame
+      sig += (l.visible ? VB.frameIndexAt(l, frame) : "x") + ",";
     });
     sig += "|";
     (scene.cast || []).forEach(function (inst) {

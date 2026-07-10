@@ -3569,6 +3569,78 @@
         return l.frames.length;
       }).join(",") === framesBefore);
     fse.exec({ op: "editTargetClear" });
+
+    // ---- exposure (the roughs timeline): drawings are duration
+    // BLOCKS (layer.holds), sequenced like storyboards — pair
+    // boundaries are zone-preserving, the last extends freely
+    var hse = new VB.Session({ width: 32000, height: 24000 });
+    hse.exec({ op: "pencil",
+               points: [{ x: 1000, y: 1000 }, { x: 5000, y: 1200 }],
+               style: { width: 20, color: { r: 0, g: 0, b: 0, a: 255 } } });
+    hse.exec({ op: "frameAdd", layer: 0 });
+    hse.exec({ op: "frameAdd", layer: 0 });
+    var hl = hse.project.scene().layers[0];
+    check("drawings default to 1-frame exposure",
+      VB.layerSpan(hl) === 3 && hl.holds.join(",") === "1,1,1",
+      hl.holds.join(","));
+    hse.exec({ op: "frameBoundary", layer: 0, cell: 2, frames: 6 });
+    check("the last drawing's boundary extends freely",
+      hl.holds.join(",") === "1,1,6" && hse.project.frameCount() === 8,
+      hl.holds.join(","));
+    hse.exec({ op: "frameBoundary", layer: 0, cell: 1, frames: 4 });
+    check("mid boundaries re-time the pair (zone-preserving)",
+      hl.holds.join(",") === "1,4,3" && hse.project.frameCount() === 8,
+      hl.holds.join(","));
+    hse.exec({ op: "frameBoundary", layer: 0, cell: 1, frames: 99 });
+    check("a pair boundary clamps to leave the neighbor one frame",
+      hl.holds.join(",") === "1,6,1" && hse.project.frameCount() === 8,
+      hl.holds.join(","));
+    hse.exec({ op: "frameBoundary", layer: 0, cell: 1, frames: 0 });
+    check("exposure floors at one frame",
+      hl.holds.join(",") === "1,1,6", hl.holds.join(","));
+    check("frameCell maps timeline frames through the holds",
+      VB.frameCell(hl, 0) === hl.frames[0] &&
+      VB.frameCell(hl, 1) === hl.frames[1] &&
+      VB.frameCell(hl, 2) === hl.frames[2] &&
+      VB.frameCell(hl, 7) === hl.frames[2] &&
+      VB.frameIndexAt(hl, 99) === 2);
+    hse.exec({ op: "frameSelect", index: 5 });
+    hse.exec({ op: "brush",
+               points: [{ x: 2000, y: 4000 }, { x: 6000, y: 4400 }],
+               radius: 300, color: { r: 220, g: 40, b: 40, a: 255 } });
+    check("art through a held frame lands on the covering drawing",
+      hl.frames[2].edges.length > 0 && hl.frames[1].edges.length === 0,
+      hl.frames.map(function (c) { return c.edges.length; }).join(","));
+    var heldEdges = hl.frames[2].edges.length;
+    hse.exec({ op: "frameRemove", layer: 0, index: 4 });
+    check("frameRemove by timeline frame drops the covering drawing",
+      hl.frames.length === 2 && hl.holds.join(",") === "1,1",
+      hl.holds.join(","));
+    hse.exec({ op: "undo" }); // journaled — replay must agree
+    hl = hse.project.scene().layers[0]; // undo rebuilt the objects
+    check("undo restores the drawing WITH its exposure",
+      hl.holds.join(",") === "1,1,6" &&
+      hl.frames[2].edges.length === heldEdges,
+      hl.holds.join(","));
+    hse.exec({ op: "frameBoundary", layer: 0, cell: 2, frames: 4 });
+    var hRep = await VB.replayJournal(JSON.parse(JSON.stringify(hse.journal)));
+    var holdSig = function (p) {
+      return p.scene().layers.map(function (l) {
+        return (l.holds || []).join(",") + "/" +
+          l.frames.map(function (cell) {
+            return JSON.stringify(cell.edges);
+          }).join("#");
+      }).join("|") + "@" + p.cur.frame;
+    };
+    check("exposure ops replay byte-exact",
+      holdSig(hRep.project) === holdSig(hse.project));
+    hse.exec({ op: "actorAdd", id: "ha1", poseId: "hp1" });
+    hse.exec({ op: "editTargetSet", target: { actor: "ha1", pose: "hp1" } });
+    hse.exec({ op: "frameBoundary", layer: 0, cell: 0, frames: 9 });
+    check("frameBoundary is a no-op inside actor edit mode",
+      hse.project.scenes[0].layers[0].holds.join(",") === "1,1,4",
+      hse.project.scenes[0].layers[0].holds.join(","));
+    hse.exec({ op: "editTargetClear" });
   } catch (err) {
     fail++;
     log("  FRAMES EXCEPTION: " + (err && err.stack || err), "fail");

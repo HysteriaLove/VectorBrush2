@@ -162,6 +162,8 @@
           layers: sc.layers.map(function (l) {
             return {
               name: l.name, visible: l.visible, locked: l.locked,
+              holds: (l.holds || l.frames.map(function () { return 1; }))
+                .slice(),
               frames: l.frames.map(snapshotDoc)
             };
           })
@@ -238,6 +240,8 @@
         layers: sc.layers.map(function (l) {
           return {
             name: l.name, visible: l.visible, locked: l.locked,
+            holds: (l.holds || l.frames.map(function () { return 1; }))
+              .slice(),
             frames: l.frames.map(function (cellSnap) {
               var d = new VB.Y2KVectorDocument();
               restoreDoc(d, cellSnap);

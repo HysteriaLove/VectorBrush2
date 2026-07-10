@@ -3,9 +3,12 @@
  *
  *   BOARDS   the storyboard filmstrip, READ-ONLY here (a reference:
  *            clicking seeks; editing lives in Boards/Audio)
- *   MASTER   the stems' mixdown envelope, READ-ONLY (sync surface)
- *   ROUGH    the frame-by-frame animation track — ONE track: the
- *            current scene's active layer; click a cell to land on it
+ *   AUDIO    the stems' mixdown envelope, READ-ONLY (sync surface)
+ *   ROUGH    the frame-by-frame animation track — EDITABLE, and NOT a
+ *            step grid: each drawing is a duration BLOCK (layer.holds),
+ *            sequenced exactly like the storyboard lane — boundary
+ *            drags re-time a pair (zone-preserving frameBoundary op),
+ *            the last boundary moves freely
  *
  * The playhead is rig.masterMs like every other timeline. The board
  * reference OVERLAY on the canvas (opacity slider, top-right) draws
@@ -15,7 +18,8 @@
 (function () {
   "use strict";
 
-  var RULER_H = 20, BOARDS_H = 46, MASTER_H = 28, FRAMES_H = 34;
+  var RULER_H = 20, BOARDS_H = 46, MASTER_H = 28, FRAMES_H = 46;
+  var BOUNDARY_TOL = 5; // px: boundary grab zone on the rough lane
 
   var view = {
     host: null, app: null, cvs: null, alphaEl: null, ro: null,
@@ -45,6 +49,12 @@
     return 0;
   }
 
+  function roughLayer() {
+    var project = view.app.project;
+    var scene = project.scenes[project.cur.scene];
+    return scene && scene.layers[project.cur.layer];
+  }
+
   function lanes() {
     return {
       ruler: 0,
@@ -58,6 +68,21 @@
   function theme(name, fallback) {
     var v = getComputedStyle(document.body).getPropertyValue(name).trim();
     return v || fallback;
+  }
+
+  /** The rough-lane boundary under x, or null. Every block's RIGHT
+   *  edge is draggable (the last one moves freely). */
+  function boundaryAt(x) {
+    var layer = roughLayer();
+    if (!layer) return null;
+    var start = sceneStartMs();
+    var fm = frameMs();
+    var spans = VB.frameSpans(layer);
+    for (var i = 0; i < spans.length; i++) {
+      var bx = xOf(start + (spans[i].start + spans[i].frames) * fm);
+      if (Math.abs(x - bx) <= BOUNDARY_TOL) return { index: i };
+    }
+    return null;
   }
 
   function render() {
@@ -98,8 +123,8 @@
     if (frameMs() * view.pxPerMs > 4) {
       for (var f = Math.max(0, Math.floor(view.panMs / frameMs()) * frameMs());
            xOf(f) < w; f += frameMs()) {
-        var fx = Math.round(xOf(f)) + 0.5;
-        ctx.moveTo(fx, RULER_H - 4); ctx.lineTo(fx, RULER_H);
+        var fx0 = Math.round(xOf(f)) + 0.5;
+        ctx.moveTo(fx0, RULER_H - 4); ctx.lineTo(fx0, RULER_H);
       }
     }
     ctx.stroke();
@@ -154,7 +179,7 @@
     ctx.moveTo(0, L.master + 0.5); ctx.lineTo(w, L.master + 0.5);
     ctx.stroke();
 
-    // MASTER lane — the mixdown envelope (read-only sync surface)
+    // AUDIO lane — the mixdown envelope (read-only sync surface)
     ctx.fillStyle = "#2f3350";
     ctx.fillRect(0, L.master, w, MASTER_H);
     ctx.fillStyle = "#7b86e8";
@@ -187,38 +212,94 @@
     }
     ctx.fillStyle = "#aab2f0";
     ctx.font = "9px system-ui";
-    ctx.fillText("master", 6, L.master + 10);
+    ctx.fillText("audio", 6, L.master + 10);
 
-    // ROUGH frames lane — THE editable track: the current scene's
-    // active layer, frame by frame
+    // ROUGH lane — the editable track: the current scene's active
+    // layer as duration BLOCKS (storyboard-lane sequencing, not a
+    // step grid)
     ctx.fillStyle = C.bg;
     ctx.fillRect(0, L.frames, w, FRAMES_H);
-    var scene = project.scenes[project.cur.scene];
-    var layer = scene && scene.layers[project.cur.layer];
+    var layer = roughLayer();
     if (layer) {
       var start = sceneStartMs();
-      var span = project.sceneSpan();
       var fm = frameMs();
-      for (var i = 0; i < span; i++) {
-        var cx = xOf(start + i * fm);
-        var cw = fm * view.pxPerMs;
-        if (cx + cw < 0 || cx > w) continue;
-        var drawn = i < layer.frames.length;
-        var has = drawn && (layer.frames[i].edges.length > 0 ||
-                            layer.frames[i].texts.length > 0);
-        ctx.fillStyle = !drawn ? C.bg : has ? "#b6c2d2" : C.field;
-        ctx.fillRect(cx + 0.5, L.frames + 4, Math.max(1, cw - 1),
-                     FRAMES_H - 8);
-        ctx.strokeStyle = i === (project.cur.frame || 0)
-          ? C.accent : C.edge;
-        ctx.lineWidth = i === (project.cur.frame || 0) ? 2 : 1;
-        ctx.strokeRect(cx + 0.5, L.frames + 4, Math.max(1, cw - 1),
-                       FRAMES_H - 8);
+      var fspans = VB.frameSpans(layer);
+      var curCell = VB.frameIndexAt(layer, project.cur.frame || 0);
+      var d = view.drag;
+      fspans.forEach(function (fs) {
+        var fx = xOf(start + fs.start * fm);
+        var fw = fs.frames * fm * view.pxPerMs;
+        if (d && d.kind === "fboundary") {
+          // live ghost: the dragged boundary re-times this pair
+          if (fs.index === d.index) {
+            fw = d.frames * fm * view.pxPerMs;
+          } else if (fs.index === d.index + 1 && d.nextFrames0 !== null) {
+            fx = xOf(start + fs.start * fm) +
+              (d.frames - d.frames0) * fm * view.pxPerMs;
+            fw = (d.frames0 + d.nextFrames0 - d.frames) * fm * view.pxPerMs;
+          }
+        }
+        if (fx + fw < 0 || fx > w) return;
+        var isCur = fs.index === curCell;
+        var has = layer.frames[fs.index].edges.length > 0 ||
+                  (layer.frames[fs.index].texts || []).length > 0;
+        ctx.fillStyle = has ? C.field : "#f2f4f7";
+        ctx.strokeStyle = isCur ? C.accent : C.edge;
+        ctx.lineWidth = isCur ? 2 : 1;
+        ctx.beginPath();
+        ctx.roundRect(fx + 1, L.frames + 4, Math.max(2, fw - 2),
+                      FRAMES_H - 8, 2);
+        ctx.fill(); ctx.stroke();
         ctx.lineWidth = 1;
+        if (fw > 22 && has && VB.thumbGet) {
+          var key = "rough:" + project.cur.scene + ":" +
+                    project.cur.layer + ":" + fs.index;
+          var cell = layer.frames[fs.index];
+          var rth = FRAMES_H - 12;
+          var rtw = rth * 4 / 3; // the stage's shape
+          var rc = VB.thumbGet(key, cell);
+          if (rc) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(fx + 2, L.frames + 6, Math.max(1, fw - 4), rth);
+            ctx.clip();
+            ctx.drawImage(rc, fx + 2, L.frames + 6, rtw, rth);
+            ctx.restore();
+          } else if (VB.thumbRequest) {
+            VB.thumbRequest(key, cell, 96, 72, fs.index)
+              .then(function () { if (view.host) render(); });
+          }
+        }
+        if (fw > 14) {
+          ctx.fillStyle = "#5a6472";
+          ctx.font = "9px system-ui";
+          ctx.textAlign = "right";
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(fx, L.frames, Math.max(2, fw), FRAMES_H);
+          ctx.clip();
+          ctx.fillText(String(fs.index + 1),
+                       fx + fw - 4, L.frames + FRAMES_H - 8);
+          ctx.restore();
+          ctx.textAlign = "left";
+        }
+      });
+      // the scene's remaining span: the last drawing HOLDS (dim tint)
+      var spanEnd = VB.layerSpan(layer);
+      var total = project.sceneSpan();
+      if (total > spanEnd) {
+        var hx = xOf(start + spanEnd * fm);
+        var hw = (total - spanEnd) * fm * view.pxPerMs;
+        if (hx < w && hx + hw > 0) {
+          ctx.fillStyle = "rgba(120,128,140,0.10)";
+          ctx.fillRect(Math.max(0, hx), L.frames + 4,
+                       Math.min(w, hx + hw) - Math.max(0, hx),
+                       FRAMES_H - 8);
+        }
       }
       ctx.fillStyle = C.dim;
       ctx.font = "9px system-ui";
-      ctx.fillText("rough · " + layer.name, 6, L.frames + FRAMES_H - 8);
+      ctx.fillText("rough · " + layer.name, 6, L.frames + FRAMES_H - 4);
     }
 
     // the ONE playhead
@@ -254,7 +335,7 @@
     var cvs = view.cvs;
     cvs.addEventListener("pointerdown", function (ev) {
       var r = cvs.getBoundingClientRect();
-      var x = ev.clientX - r.left;
+      var x = ev.clientX - r.left, y = ev.clientY - r.top;
       if (ev.button === 1) {
         ev.preventDefault();
         capture(cvs, ev);
@@ -264,16 +345,50 @@
       if (ev.button !== 0) return;
       if (view.app.stopPlayback) view.app.stopPlayback();
       capture(cvs, ev);
+      var L = lanes();
+      if (y >= L.frames && y < L.end) {
+        var bd = boundaryAt(x);
+        if (bd) {
+          var layer = roughLayer();
+          var fs = VB.frameSpans(layer);
+          view.drag = {
+            kind: "fboundary", index: bd.index, x0: x,
+            frames0: fs[bd.index].frames,
+            nextFrames0: bd.index < fs.length - 1
+              ? fs[bd.index + 1].frames : null,
+            frames: fs[bd.index].frames
+          };
+          render();
+          return;
+        }
+      }
       scrubTo(msOf(x));
       view.drag = { kind: "seek" };
     });
     cvs.addEventListener("pointermove", function (ev) {
-      if (!view.drag) return;
       var r = cvs.getBoundingClientRect();
-      var x = ev.clientX - r.left;
+      var x = ev.clientX - r.left, y = ev.clientY - r.top;
+      if (!view.drag) {
+        // boundary hover feedback on the rough lane
+        var L2 = lanes();
+        cvs.style.cursor = (y >= L2.frames && y < L2.end && boundaryAt(x))
+          ? "ew-resize" : "";
+        return;
+      }
       if (view.drag.kind === "pan") {
         view.panMs = Math.max(-100 / view.pxPerMs,
           view.drag.pan0 - (x - view.drag.x0) / view.pxPerMs);
+        render();
+        return;
+      }
+      if (view.drag.kind === "fboundary") {
+        var d = view.drag;
+        var dFrames = Math.round((x - d.x0) / view.pxPerMs / frameMs());
+        var want = Math.max(1, d.frames0 + dFrames);
+        if (d.nextFrames0 !== null) {
+          want = Math.min(want, d.frames0 + d.nextFrames0 - 1);
+        }
+        d.frames = want;
         render();
         return;
       }
@@ -282,7 +397,17 @@
     function endDrag() {
       var was = view.drag;
       view.drag = null;
-      if (was && was.kind === "seek") {
+      if (!was) return;
+      if (was.kind === "fboundary") {
+        if (was.frames !== was.frames0) {
+          view.app.exec({ op: "frameBoundary",
+                          layer: view.app.project.cur.layer,
+                          cell: was.index, frames: was.frames });
+        }
+        render();
+        return;
+      }
+      if (was.kind === "seek") {
         // pin the landing frame (clamps identically live and in replay)
         view.app.exec({ op: "frameSelect",
                         index: view.app.project.cur.frame || 0 });

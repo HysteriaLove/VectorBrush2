@@ -25,6 +25,53 @@
     this.visible = true;
     this.locked = false;
     this.frames = [cell];
+    // per-drawing EXPOSURE (Flash's frame-hold as data): frames[i]
+    // covers holds[i] timeline frames. The roughs timeline edits these
+    // via the frameBoundary op; everything reads through frameCell.
+    this.holds = [1];
+  }
+
+  /** holds[], defaulting to all-1s for layers minted before the roughs
+   *  exposure model (actor virtual scenes, wrapped file loads). */
+  function holdsOf(layer) {
+    if (!layer.holds || layer.holds.length !== layer.frames.length) {
+      layer.holds = layer.frames.map(function (f, i) {
+        return layer.holds && layer.holds[i] >= 1 ? layer.holds[i] | 0 : 1;
+      });
+    }
+    return layer.holds;
+  }
+
+  /** Total timeline frames the layer's drawings cover. */
+  function layerSpan(layer) {
+    return holdsOf(layer).reduce(function (n, d) {
+      return n + Math.max(1, d | 0);
+    }, 0);
+  }
+
+  /** Which DRAWING (cell index) shows at playhead `frame` — the last
+   *  one holds beyond the span (Flash's frame-hold). */
+  function frameIndexAt(layer, frame) {
+    var holds = holdsOf(layer);
+    var f = frame || 0, at = 0;
+    for (var i = 0; i < holds.length; i++) {
+      at += Math.max(1, holds[i] | 0);
+      if (f < at) return i;
+    }
+    return holds.length - 1;
+  }
+
+  /** The drawings as timeline blocks: {index, start, frames}. */
+  function frameSpans(layer) {
+    var holds = holdsOf(layer);
+    var out = [];
+    var at = 0;
+    for (var i = 0; i < holds.length; i++) {
+      var d = Math.max(1, holds[i] | 0);
+      out.push({ index: i, start: at, frames: d });
+      at += d;
+    }
+    return out;
   }
 
   function Scene(name, cell, id) {
@@ -258,29 +305,36 @@
   Project.prototype.activeCell = function () {
     return VB.frameCell(this.activeLayer(), this.cur.frame || 0);
   };
-  /** Longest sub-timeline in the active scene (≥ 1). */
+  /** Longest sub-timeline in the active scene (≥ 1), in timeline
+   *  frames (drawings × their holds). */
   Project.prototype.frameCount = function () {
     return this.scene().layers.reduce(function (n, l) {
-      return Math.max(n, l.frames.length);
+      return Math.max(n, layerSpan(l));
     }, 1);
   };
-  /** Appends a blank frame cell to a layer and moves the playhead to
-   *  it. Shorter layers keep holding their last frame. */
+  /** Appends a blank drawing (hold 1) to a layer and moves the
+   *  playhead onto it. Shorter layers keep holding their last frame. */
   Project.prototype.addFrame = function (layerIndex) {
     if (this.editTarget) return this.cur.frame; // actor cells have no timeline yet
     var layers = this.scene().layers;
     var l = layers[Math.min(layerIndex || 0, layers.length - 1)];
+    holdsOf(l); // materialize before the parallel push
     l.frames.push(this.newCell());
-    this.cur.frame = l.frames.length - 1;
+    l.holds.push(1);
+    this.cur.frame = layerSpan(l) - 1;
     return this.cur.frame;
   };
+  /** Removes the drawing under timeline frame `index`. */
   Project.prototype.removeFrame = function (layerIndex, index) {
     if (this.editTarget) return false;
     var layers = this.scene().layers;
     var l = layers[Math.min(layerIndex || 0, layers.length - 1)];
     if (l.frames.length <= 1) return false; // a layer never goes frameless
-    if (index < 0 || index >= l.frames.length) return false;
-    l.frames.splice(index, 1);
+    if (index < 0 || index >= layerSpan(l)) return false;
+    var cell = frameIndexAt(l, index);
+    holdsOf(l); // materialize before the parallel splice
+    l.frames.splice(cell, 1);
+    l.holds.splice(cell, 1);
     this.cur.frame = Math.min(this.cur.frame, this.frameCount() - 1);
     return true;
   };
@@ -398,15 +452,18 @@
     return p;
   }
 
-  /** The cell a layer SHOWS at playhead `frame`: its own frame, or its
-   *  last one held (Flash's frame-hold). */
+  /** The cell a layer SHOWS at playhead `frame`: the drawing whose
+   *  exposure covers it, or the last one held (Flash's frame-hold). */
   function frameCell(layer, frame) {
-    return layer.frames[Math.min(frame || 0, layer.frames.length - 1)];
+    return layer.frames[frameIndexAt(layer, frame)];
   }
 
   window.VB = window.VB || {};
   VB.Project = Project;
   VB.wrapDoc = wrapDoc;
   VB.frameCell = frameCell;
+  VB.frameIndexAt = frameIndexAt;
+  VB.frameSpans = frameSpans;
+  VB.layerSpan = layerSpan;
   VB.projectCollectMaterials = collectMaterials;
 })();
