@@ -270,13 +270,32 @@
       jsons.push(await handle.readUnitText(segPaths[i]));
     }
     var ops = VB.joinJournalSegments(jsons);
-    var res = await VB.replayJournal(JSON.parse(JSON.stringify(ops)));
+    var statusEl = document.getElementById("home-status");
+    var res;
+    try {
+      res = await VB.replayJournal(JSON.parse(JSON.stringify(ops)), {
+        // yields per chunk (the tab stays responsive) and shows the
+        // work — a big journal must read as loading, not a hang
+        onProgress: function (done, total) {
+          if (statusEl) {
+            statusEl.textContent =
+              "Opening — " + done + " / " + total + " ops…";
+          }
+        }
+      });
+    } finally {
+      if (statusEl) statusEl.textContent = "";
+    }
     var sess = new VB.Session({});
     ops.forEach(function (op) { sess.journal.push(op); });
     sess.project = res.project;
     var st = persistState(sess);
     st.flushedOps = ops.length;
     st.segCount = Math.ceil(ops.length / SEG_OPS);
+    // the undo history does not survive reopen — journal the marker so
+    // replay clears its rebuilt stack at the same spot (an undo pressed
+    // right after opening is a no-op in BOTH live and replay)
+    sess.journal.push({ op: "sessionOpen" });
     return sess;
   }
 

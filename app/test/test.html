@@ -3646,6 +3646,60 @@
     log("  FRAMES EXCEPTION: " + (err && err.stack || err), "fail");
   }
 
+  // ============================== reopen (sessionOpen) ==========================
+  // Opening a saved project journals a sessionOpen marker: the undo
+  // history does NOT survive reopen, live and replay agree, and replay
+  // itself stays responsive (progress yields) and pinpoints bad ops.
+  log("");
+  log("reopen:");
+  try {
+    var ose = new VB.Session({ width: 32000, height: 24000 });
+    ose.exec({ op: "pencil",
+               points: [{ x: 1000, y: 1000 }, { x: 9000, y: 1400 }],
+               style: { width: 20, color: { r: 0, g: 0, b: 0, a: 255 } } });
+    var oEdges = ose.project.activeCell().edges.length;
+    ose.exec({ op: "sessionOpen" }); // the reopen boundary
+    ose.exec({ op: "undo" });        // must be a NO-OP now
+    check("undo after sessionOpen is a no-op (history cleared)",
+      ose.project.activeCell().edges.length === oEdges,
+      ose.project.activeCell().edges.length + " vs " + oEdges);
+    var oRep = await VB.replayJournal(JSON.parse(JSON.stringify(ose.journal)));
+    check("sessionOpen replays byte-exact (replay clears its rebuilt stack)",
+      JSON.stringify(oRep.project.activeCell().edges) ===
+      JSON.stringify(ose.project.activeCell().edges),
+      oRep.project.activeCell().edges.length + " edges");
+
+    // progress hook: fires per chunk with yields — the shell's open
+    // indicator depends on it
+    var progressCalls = [];
+    var pOps = [{ op: "new", width: 32000, height: 24000 }];
+    for (var pi = 0; pi < 70; pi++) {
+      pOps.push({ op: "frameSelect", index: 0 });
+    }
+    await VB.replayJournal(pOps, {
+      onProgress: function (done, total) {
+        progressCalls.push(done + "/" + total);
+      }
+    });
+    check("replay reports progress per chunk",
+      progressCalls.length >= 2 && progressCalls[0] === "32/71",
+      progressCalls.join(", "));
+
+    // a bad op REJECTS with its position — the shell's failed-to-load
+    // alert becomes actionable
+    var badMsg = "";
+    try {
+      await VB.replayJournal([{ op: "new", width: 100, height: 100 },
+                              { op: "definitely-not-an-op" }]);
+    } catch (e) { badMsg = e.message; }
+    check("replay errors pinpoint the failing op",
+      badMsg.indexOf("op #2") >= 0 &&
+      badMsg.indexOf("definitely-not-an-op") >= 0, badMsg);
+  } catch (err) {
+    fail++;
+    log("  REOPEN EXCEPTION: " + (err && err.stack || err), "fail");
+  }
+
   // ============================== Actors =====================================
   // Step-2 beat 1 (Implementation.md §2): the pose → symbol → drawing
   // tree as journaled ops (ids carried IN the op — live and replay build

@@ -317,6 +317,15 @@
     c.history.redo(c.project);
     c.sync();
   });
+  // Journaled at every package open (shell.js): the undo history does
+  // NOT survive a close/reopen. Live this clears a fresh (empty)
+  // session — a no-op; replay clears its REBUILT stack at the same
+  // spot, so an undo pressed right after opening is a no-op in both.
+  // (Before this marker existed, that undo did nothing live but undid
+  // real work on the next replay — silent divergence on reopen.)
+  defineOp("sessionOpen", function (c) {
+    c.history.clear();
+  });
 
   /**
    * Replays a journal through the real tool code paths — the SAME
@@ -333,20 +342,65 @@
    * single-layer project — identical behavior.
    */
   async function replayJournal(ops, hooks) {
+    var real = new VB.History();
+    var skip = false;
     var ctx = {
       project: new VB.Project(),
-      history: new VB.History(),
+      // pushes route through the skip gate; everything else is real
+      history: {
+        push: function (doc) { if (!skip) real.push(doc); },
+        undo: function (doc) { return real.undo(doc); },
+        redo: function (doc) { return real.redo(doc); },
+        canUndo: function () { return real.canUndo(); },
+        canRedo: function () { return real.canRedo(); },
+        clear: function () { real.clear(); },
+        get undoStack() { return real.undoStack; },
+        get redoStack() { return real.redoStack; }
+      },
       doc: null,
       sync: function () { ctx.doc = ctx.project.activeCell(); }
     };
     ctx.sync();
 
+    // A snapshot push only matters while an undo/redo can still consume
+    // it: the backward scan marks, per op, whether one lies ahead before
+    // the next history-clearing op (new/load/sessionOpen). Skipping the
+    // rest removes replay's dominant deep-copy cost — for a reopened
+    // project everything before the last sessionOpen marker replays
+    // snapshot-free. Correctness is guarded by the suite's byte-exact
+    // replay checks.
+    var needSnap = new Array(ops.length);
+    var ahead = false;
+    for (var b = ops.length - 1; b >= 0; b--) {
+      needSnap[b] = ahead;
+      var nm = ops[b].op;
+      if (nm === "undo" || nm === "redo") ahead = true;
+      else if (nm === "new" || nm === "load" || nm === "sessionOpen") {
+        ahead = false;
+      }
+    }
+
     for (var i = 0; i < ops.length; i++) {
-      await applyOp(ctx, ops[i]);
+      skip = !needSnap[i];
+      try {
+        await applyOp(ctx, ops[i]);
+      } catch (err) {
+        // pinpoint the failing op — this message reaches the shell's
+        // "Project failed to load" alert
+        throw new Error("op #" + (i + 1) + " of " + ops.length + " (" +
+                        ops[i].op + "): " + (err && err.message));
+      }
       if (hooks && hooks.onOp) hooks.onOp(i, ops[i], ctx.doc);
+      if (hooks && hooks.onProgress && i % 32 === 31) {
+        hooks.onProgress(i + 1, ops.length);
+        // yield a macrotask so the page paints and stays responsive —
+        // a big journal must never hard-block the tab (user report:
+        // "opening saved projects causes a crash or a hang")
+        await new Promise(function (r) { setTimeout(r, 0); });
+      }
     }
     return { doc: ctx.project.activeCell(), project: ctx.project,
-             history: ctx.history };
+             history: real };
   }
 
   // Standard integrity sweep used by the replay harness and tests.

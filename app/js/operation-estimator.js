@@ -504,7 +504,8 @@
   });
 
   // trivial ops: valid low-cost profiles, never null
-  ["undo", "redo", "new", "load", "layerAdd", "layerDelete", "layerMove",
+  ["undo", "redo", "new", "load", "sessionOpen",
+   "layerAdd", "layerDelete", "layerMove",
    "layerRename", "layerSelect", "layerVisible", "layerLock", "sceneAdd",
    "sceneSelect", "materialAdd", "materialEdit",
    // structure/bookkeeping ops from the section workspaces — none touch

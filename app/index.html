@@ -1350,6 +1350,10 @@
   #home-brand span { color: var(--accent); }
   #home-brand em { color: var(--text-dim); font-style: normal; font-size: 13px; }
   #home-new { margin-bottom: 12px; }
+  #home-status {
+    min-height: 18px; margin: 4px 0 8px;
+    font-size: 12px; color: var(--accent);
+  }
   .home-row {
     display: flex; align-items: center; gap: 8px;
     padding: 8px 10px; margin-bottom: 6px;
@@ -1378,6 +1382,9 @@
       <input type="file" id="home-import-file" accept=".y2kproj,.zip"
              style="display:none">
       <div id="home-projects"></div>
+      <!-- live open progress: replaying a big journal takes a while
+           and must read as WORK, not a hang -->
+      <div id="home-status"></div>
       <div id="home-hint">Rung-0 prototype shell — projects autosave to
         this browser's package store as journaled ops; export/import
         moves them as .y2kproj packages.</div>

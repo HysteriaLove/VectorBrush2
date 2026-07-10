@@ -498,6 +498,21 @@ AssetCache lets audio decodes evict render caches under pressure
 10. **Flood gate harness** is not in the repo (expired scratchpad) —
     recreate as `app/test/flood.html` so the 5-gate battery is fully
     reproducible from a checkout.
+11. **Open-at-scale (partially fixed 2026-07-10)**: replaying a big
+    journal blocked the main thread for its whole duration ("opening
+    saved projects crashes or hangs"). Shipped: replay yields per
+    32-op chunk with a homescreen progress line; per-op error
+    pinpointing (the failed-to-load alert now names the op); a
+    journaled `sessionOpen` marker at every package open (undo history
+    does not survive reopen — live and replay now agree; before, an
+    undo pressed right after opening silently diverged on the next
+    replay); snapshot pushes are SKIPPED for every op that no
+    undo/redo ahead can consume (backward scan, reset at
+    new/load/sessionOpen) — on reopen the entire pre-history replays
+    snapshot-free. REMAINING (the definitive fix): checkpoint units —
+    persist the history.js whole-project snapshot at flush and open by
+    restore + empty tail, with full-replay fallback when the
+    checkpoint's op count mismatches the journal.
 
 ### 5.2 Open implementation questions
 
