@@ -240,6 +240,32 @@
     head.appendChild(fFrames.box);
     root.appendChild(head);
 
+    // the ACTION as the board's TITLE (user spec) — the same script
+    // row the Story editor renders, op-routed through writing.*
+    var action = document.createElement("div");
+    action.className = "bdtitle";
+    action.contentEditable = "true";
+    action.dataset.ph = "action — the board's title…";
+    action.addEventListener("blur", function () {
+      var val = action.innerText.replace(/\n+$/, "");
+      var hit = panelById(app.project, pid);
+      if (!hit) return;
+      var row = actionRowOf(hit.panel);
+      if (row) {
+        if (val !== (row.content || "")) {
+          exec({ op: "blockEdit", block: row.id, content: val });
+        }
+      } else if (val.trim() !== "") {
+        exec({ op: "blockAdd", id: VB.actorNewId("blk"), panel: pid,
+               index: 0, kind: "action", content: val });
+      }
+    });
+    action.addEventListener("keydown", function (ev) {
+      if (ev.key === "Escape") action.blur();
+      ev.stopPropagation();
+    });
+    root.appendChild(action);
+
     // the self-contained drawable frame
     var cvs = document.createElement("canvas");
     cvs.className = "bdframe";
@@ -285,36 +311,14 @@
     cvs.addEventListener("pointercancel", function (ev) { endStroke(ev, true); });
     cvs.style.touchAction = "none";
 
-    // the Dialog box: the panel's script rows, edited in place
+    // the Dialog box: the panel's dialogue rows, edited in place
+    // (the action lives above the frame as the TITLE)
     var dialog = document.createElement("div");
     dialog.className = "bddialog";
     var dlab = document.createElement("span");
     dlab.className = "bddialoglab";
     dlab.textContent = "Dialog";
     dialog.appendChild(dlab);
-    var action = document.createElement("div");
-    action.className = "bdaction";
-    action.contentEditable = "true";
-    action.dataset.ph = "action…";
-    action.addEventListener("blur", function () {
-      var val = action.innerText.replace(/\n+$/, "");
-      var hit = panelById(app.project, pid);
-      if (!hit) return;
-      var row = actionRowOf(hit.panel);
-      if (row) {
-        if (val !== (row.content || "")) {
-          exec({ op: "blockEdit", block: row.id, content: val });
-        }
-      } else if (val.trim() !== "") {
-        exec({ op: "blockAdd", id: VB.actorNewId("blk"), panel: pid,
-               index: 0, kind: "action", content: val });
-      }
-    });
-    action.addEventListener("keydown", function (ev) {
-      if (ev.key === "Escape") action.blur();
-      ev.stopPropagation();
-    });
-    dialog.appendChild(action);
     var lines = document.createElement("div");
     lines.className = "bdlines";
     dialog.appendChild(lines);
@@ -338,6 +342,9 @@
     return card;
   }
 
+  // dialogue rows take the screenplay form and EXPAND DOWNWARD (user
+  // spec): the character centered, the speech a wrapping editable
+  // block below it — cards grow to fit their lines
   function renderCardLines(card, panel) {
     var project = view.app.project;
     if (card.lines.contains(document.activeElement)) return;
@@ -346,6 +353,8 @@
       if (b.kind !== "line") return;
       var row = document.createElement("div");
       row.className = "bdline";
+      var head = document.createElement("div");
+      head.className = "bdlinehead";
       var entry = VB.spineCharacterById(project, b.character);
       var who = document.createElement("input");
       who.value = entry ? entry.name : "";
@@ -359,20 +368,9 @@
                  character: characterIdFor(v) });
         }
       });
-      var say = document.createElement("input");
-      say.value = VB.lineTextOf(b);
-      say.placeholder = "dialogue…";
-      say.className = "bdsay";
-      say.addEventListener("blur", function () {
-        if (say.value !== VB.lineTextOf(b)) {
-          exec({ op: "blockEdit", block: b.id, text: say.value });
-        }
-      });
-      [who, say].forEach(function (inp) {
-        inp.addEventListener("keydown", function (ev) {
-          if (ev.key === "Enter" || ev.key === "Escape") inp.blur();
-          ev.stopPropagation();
-        });
+      who.addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter" || ev.key === "Escape") who.blur();
+        ev.stopPropagation();
       });
       var del = document.createElement("button");
       del.textContent = "✕";
@@ -380,9 +378,25 @@
       del.addEventListener("click", function () {
         exec({ op: "blockRemove", block: b.id });
       });
-      row.appendChild(who);
+      head.appendChild(who);
+      head.appendChild(del);
+      row.appendChild(head);
+      var say = document.createElement("div");
+      say.className = "bdsay";
+      say.contentEditable = "true";
+      say.innerText = VB.lineTextOf(b);
+      say.dataset.ph = "dialogue…";
+      say.addEventListener("blur", function () {
+        var v = say.innerText.replace(/\n+$/, "");
+        if (v !== VB.lineTextOf(b)) {
+          exec({ op: "blockEdit", block: b.id, text: v });
+        }
+      });
+      say.addEventListener("keydown", function (ev) {
+        if (ev.key === "Escape") say.blur();
+        ev.stopPropagation();
+      });
       row.appendChild(say);
-      row.appendChild(del);
       card.lines.appendChild(row);
     });
   }
@@ -390,6 +404,7 @@
   function updateCard(card, panel, index, sceneNo, isCur) {
     var fps = view.app.project.fps || 24;
     card.root.classList.toggle("cur", isCur);
+    card.root.classList.toggle("alt", index % 2 === 1);
     card.scene.textContent = String(sceneNo);
     card.num.textContent = String(index + 1);
     card.time.textContent =

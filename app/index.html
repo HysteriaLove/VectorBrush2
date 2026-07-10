@@ -750,7 +750,7 @@
   #bd-grid {
     flex: 1; min-height: 0; overflow-y: auto;
     display: flex; flex-wrap: wrap; gap: 16px;
-    align-content: flex-start;
+    align-content: flex-start; align-items: flex-start;
     padding: 18px;
   }
   #bd-grid.empty::before {
@@ -763,7 +763,18 @@
     border: 1.5px solid #202327; border-radius: 2px;
     box-shadow: 0 2px 10px rgba(0,0,0,0.14);
   }
+  .bdcard.alt { background: #f5f2e6; } /* subtle panel alternation */
   .bdcard.cur { outline: 2px solid var(--accent); outline-offset: 1px; }
+  /* the ACTION as the board's title */
+  .bdtitle {
+    outline: none; min-height: 1.2em; user-select: text;
+    -webkit-user-select: text; white-space: pre-wrap;
+    padding: 3px 8px;
+    font: 700 13px/1.35 "Segoe Print", "Comic Sans MS", cursive;
+    border-bottom: 1px solid #202327;
+    background: #fff;
+  }
+  .bdtitle:empty::before { content: attr(data-ph); color: #b0ada0; }
   .bdhead {
     display: flex; border-bottom: 1.5px solid #202327;
     background: #fff;
@@ -790,32 +801,36 @@
     touch-action: none;
   }
   .bdcard.cur .bdframe { cursor: crosshair; }
-  .bddialog { min-height: 58px; padding: 2px 8px 6px; }
+  .bddialog { min-height: 34px; padding: 2px 8px 6px; }
   .bddialoglab {
     display: block;
     font: 8px/1.6 system-ui, sans-serif; color: #6b6f76;
   }
-  .bdaction {
-    outline: none; min-height: 1.3em; user-select: text;
-    -webkit-user-select: text; white-space: pre-wrap;
-    font: 13px/1.4 "Segoe Print", "Comic Sans MS", cursive;
-  }
-  .bdaction:empty::before { content: attr(data-ph); color: #b0ada0; }
+  /* screenplay-form dialogue: WHO centered, the speech a wrapping
+     block below — rows EXPAND DOWNWARD and the card grows with them */
   .bdlines { margin-top: 2px; }
-  .bdline {
-    display: flex; align-items: center; gap: 4px;
-    padding: 1px 0;
+  .bdline { padding: 2px 0; }
+  .bdlinehead {
+    display: flex; align-items: center; justify-content: center;
+    gap: 2px;
   }
-  .bdline input {
+  .bdwho {
+    width: 110px; text-align: center;
     background: none; border: none; outline: none;
     border-bottom: 1px dotted #d8d4c6;
-    color: inherit; font: 12px/1.4 "Segoe Print", "Comic Sans MS", cursive;
+    color: #3a3a3a; text-transform: uppercase;
+    font: 700 10px/1.5 system-ui, sans-serif; letter-spacing: 0.06em;
   }
-  .bdwho { width: 70px; text-transform: uppercase; font-weight: 700; }
-  .bdsay { flex: 1; min-width: 0; }
+  .bdsay {
+    outline: none; min-height: 1.2em; user-select: text;
+    -webkit-user-select: text; white-space: pre-wrap;
+    margin: 0 12%;
+    font: 12px/1.4 "Segoe Print", "Comic Sans MS", cursive;
+  }
+  .bdsay:empty::before { content: attr(data-ph); color: #b0ada0; }
   .bdline button {
     background: none; border: none; color: #9a988c;
-    cursor: pointer; padding: 0 2px;
+    cursor: pointer; padding: 0 2px; font-size: 10px;
   }
   .bdaddline {
     background: none; border: 1px dashed #c9c5b6;
@@ -1014,7 +1029,8 @@
     display: flex; gap: 8px; margin: 0 -8px;
     padding: 3px 8px; border-radius: 3px;
   }
-  .wrbeat:hover, .wrbeat:focus-within { background: #00000006; }
+  .wrbeat.alt { background: #00000005; } /* subtle panel alternation */
+  .wrbeat:hover, .wrbeat:focus-within { background: #0000000c; }
   .wrrail {
     flex: none; width: 30px; text-align: right;
     font: 9px/2.1 system-ui, sans-serif; color: #c3bfae;

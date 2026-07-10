@@ -241,7 +241,9 @@
   function renderPanel(panel, number) {
     var project = view.app.project;
     var row = document.createElement("div");
-    row.className = "wrbeat";
+    // subtle alternation keeps neighboring panels tellable apart (the
+    // same striping the Boards page uses)
+    row.className = "wrbeat" + (number % 2 === 0 ? " alt" : "");
     row.dataset.panel = panel.id;
 
     // the rail: the panel's NUMBER (presentation — index+1) and its

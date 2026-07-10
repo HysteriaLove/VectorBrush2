@@ -423,7 +423,7 @@
   var view = {
     host: null, app: null, lanes: null, stems: null, timeEl: null,
     playBtn: null, ro: null, board: null,
-    bmain: null, bprev: null, bnext: null,  // the leica viewer slots
+    bmain: null, bsides: [],       // the leica viewer slots
     bcenterId: null, bcenterHash: null,
     pxPerMs: 0.1, panMs: 0,        // 100 px/s default
     sel: null,                     // selected clip id
@@ -586,13 +586,22 @@
       ctx.roundRect(bx + 1, py + 5, Math.max(2, bw - 2), PANEL_LANE_H - 10, 2);
       ctx.fill(); ctx.stroke();
       ctx.lineWidth = 1;
-      // thumbnail when the block affords it, else just the number
+      // the FILMSTRIP: the board's art tiles across its whole span
+      // (NLE clip style — the storyboard's actual look on the track)
       var num = String(sp.index + 1);
-      if (bw > 46 && VB.thumbGet) {
-        var tw = Math.min(58, bw - 8);
+      if (bw > 24 && VB.thumbGet) {
         var cached = VB.thumbGet("panel:" + sp.panel.id, sp.panel.cell);
         if (cached) {
-          ctx.drawImage(cached, bx + 4, py + 8, tw, tw * 9 / 16);
+          var th = PANEL_LANE_H - 14;
+          var tw = th * 16 / 9;
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(bx + 2, py + 7, Math.max(1, bw - 4), th);
+          ctx.clip();
+          for (var tx = bx + 2; tx < bx + bw - 2; tx += tw + 2) {
+            ctx.drawImage(cached, tx, py + 7, tw, th);
+          }
+          ctx.restore();
         } else if (VB.thumbRequest) {
           VB.thumbRequest("panel:" + sp.panel.id, sp.panel.cell,
                           96, 54, sp.index).then(function () {
@@ -843,8 +852,7 @@
     view.board.classList.toggle("empty", spans.length === 0);
     if (!cur) {
       view.bmain.root.style.visibility = "hidden";
-      sideThumb(view.bprev, null, 0);
-      sideThumb(view.bnext, null, 0);
+      view.bsides.forEach(function (s) { sideThumb(s.slot, null, 0); });
       return;
     }
     view.bmain.root.style.visibility = "visible";
@@ -857,8 +865,9 @@
       view.bcenterHash = hash;
       drawPanelInto(view.bmain.cvs, cur.panel);
     }
-    sideThumb(view.bprev, spans[cur.index - 1] || null, cur.index);
-    sideThumb(view.bnext, spans[cur.index + 1] || null, cur.index);
+    view.bsides.forEach(function (s) {
+      sideThumb(s.slot, spans[cur.index + s.off] || null, cur.index);
+    });
   }
 
   /** Warm the caches nearest-first (the §5 contract): stems whose
@@ -1123,14 +1132,23 @@
     view.board.id = "au-board";
     view.board.dataset.ph =
       "the storyboard plays here — panels appear as they are written";
-    view.bprev = makeViewerSlot("au-bside", -1);
+    // more context around the center (user spec): two boards behind,
+    // three ahead
+    view.bsides = [];
+    [-2, -1, 1, 2, 3].forEach(function (off) {
+      view.bsides.push({ off: off,
+                         slot: makeViewerSlot("au-bside", off) });
+    });
     view.bmain = makeViewerSlot("au-bmain", 0);
-    view.bnext = makeViewerSlot("au-bside", 1);
     view.bcenterId = null;
     view.bcenterHash = null;
-    view.board.appendChild(view.bprev.root);
+    view.bsides.forEach(function (s) {
+      if (s.off < 0) view.board.appendChild(s.slot.root);
+    });
     view.board.appendChild(view.bmain.root);
-    view.board.appendChild(view.bnext.root);
+    view.bsides.forEach(function (s) {
+      if (s.off > 0) view.board.appendChild(s.slot.root);
+    });
     host.appendChild(view.board);
 
     var body = document.createElement("div");
@@ -1349,8 +1367,7 @@
     view.stems = null;
     view.board = null;
     view.bmain = null;
-    view.bprev = null;
-    view.bnext = null;
+    view.bsides = [];
     view.bcenterId = null;
     view.bcenterHash = null;
     view.timeEl = null;
