@@ -1,13 +1,19 @@
 # VectorBrush2 — Application Architecture
 
-Status: PLANNING. This document fixes the shape of the full application —
-an iPad-first, team-capable animation suite that takes a production from
-brainstorm to finished export. It records what is DECIDED, what is
-PROPOSED (recommendation, changeable), and what is OPEN (needs a call
-before the section is built). The drawing engine that exists today (planar
-map, paper.js booleans, face-walk mask, pixi renderer, 2DMaterials,
-command journal) is the foundation everything below reuses — nothing here
-replaces it.
+Status: ACTIVE (updated 2026-07-10). This document fixes the shape of the
+full application — an iPad-first, team-capable animation suite that takes
+a production from brainstorm to finished export. It records what is
+DECIDED, what is PROPOSED (recommendation, changeable), and what is OPEN
+(needs a call before the section is built). Rung 0 (the browser
+prototype) is now well past planning: the shell, package store, journal
+persistence, all ten workspaces, the master timeline, audio suite, the
+three.js compositor, and video export exist in first-slice form — §12
+tracks per-system implementation status, and
+[SystemsDeepDive.md](SystemsDeepDive.md) is the audited map of what the
+code actually does (file:line referenced) versus what this document
+specifies. The drawing engine (planar map, paper.js booleans, face-walk
+mask, pixi renderer, 2DMaterials, command journal) is the foundation
+everything reuses — nothing here replaces it.
 
 Workflow reference: `D:\DriveDProjects\Animation Program V2` (PyQt
 prototype). Its concepts — master timeline as a sequence of scene
@@ -150,6 +156,12 @@ Project
 - **Everything has a stable id** (`scene_xxxx`, `actor_xxxx`, `line_xxxx`
   — reference convention). Cross-section references are by id, never by
   index or text, so renames and reorders never break links.
+  ⚠ KNOWN GAP (2026-07-10): scene ids are currently INDEX-DERIVED
+  (`"scene@" + scenes.length` at add time, project.js) — delete-then-add
+  can mint an id that an existing sequence/cast entry already references.
+  Actors, library, writing, boards, and audio all use collision-resistant
+  random ids (`VB.actorNewId`); scenes must migrate to the same scheme
+  (with legacy-id acceptance on replay) before scene deletion ships.
   **Prototype/instance model (DECIDED):** ids follow the Flash symbol
   discipline — a definition (prototype) has a uuid, every placement is an
   INSTANCE with its own uuid pointing at the prototype. Interaction
@@ -220,6 +232,13 @@ MyShow.y2kproj/
 - The package layout is deliberately **streaming-shaped**: many small
   addressable units instead of few big ones, so the streaming layer (§5)
   can pull exactly what a view's window needs.
+- **TODAY (2026-07-10):** the package that actually ships is
+  `manifest.json` + `journal/seg-NNNNN.json` (256 ops/segment) +
+  `assets/audio/*` — the model is reconstructed by FULL journal replay on
+  open, and there are no per-section units yet. The manifest is written
+  (`{format, version, ops, saved}`) but nothing reads it; the tree above
+  is the target the journal-monolith migrates toward (per-unit
+  materialization is the §8 step-1 debt that is still open).
 - Interchange formats stay separate from the package: `.y2kvector`
   (drawing), `.y2kactor` (portable actor, reference format v3 — ids
   regenerate on import), and later `.y2knotes` (NoteObjects, §6.1).
@@ -258,6 +277,17 @@ Shell (homescreen, project rail, section router)
 ---
 
 ## 5. Streaming architecture (REQUIRED — the app breaks without it)
+
+**Implementation status (2026-07-10):** the skeleton from §5.2 EXISTS
+(`app/js/streaming.js`) and half of it carries real weight — `VB.assets`
+(one global LRU AssetCache, 256 MB placeholder budget) already owns the
+pixi raster-sprite cache, matcap paint buffers, decoded audio buffers,
+and thumbnails; `VB.prefetcher` feeds the actors thumbnail wall (the
+first real windowed client). The OTHER half is dormant: `chunkSource`
+range reads are wired to nothing (every consumer whole-loads via
+`readUnit`), decoders are not workerized, no proxy store persists, and
+no view outside thumbnails subscribes to a window. §5 remains the
+contract; the honest gap list lives in SystemsDeepDive.md §1.
 
 Every view in this suite is data-heavy: stems and baked masters in
 Audio, waveform strips under every timeline, onion-skin frame runs in
@@ -353,6 +383,18 @@ of this (multiplatform principle, §1.5).
 6. Journal segmentation size vs streaming granularity — segments should
    align with section files so warm-load of one section doesn't replay
    unrelated ops.
+7. **Journal payload bloat** (found 2026-07-10): the `load` op embeds the
+   whole opened file as base64 and it persists in the journal forever;
+   `paste`/`textCreate` carry sizable payloads too. Needs either
+   asset-unit extraction (like audio already does) or segment compaction
+   before big files are routine.
+8. **Asset unit garbage collection**: `audioRemove` deletes metadata but
+   never the `assets/audio/<id>` unit — removed stems leak bytes into
+   IndexedDB and every `.y2kproj` export. `VB.projectAssets` needs a
+   delete + a sweep.
+9. **Storage durability**: no `navigator.storage.persist()` request and
+   no quota handling — the browser may evict the whole package DB under
+   pressure; flushes on `beforeunload` are un-awaited best-effort.
 
 ---
 
@@ -526,18 +568,29 @@ actually built. The DECIDED/PROPOSED markers below respect that.)
 
 | Today | Becomes |
 | --- | --- |
-| VBDocument planar map + booleans + mask | The y2kvector document engine (renamed), unchanged core |
+| VBDocument planar map + booleans + mask | The y2kvector document engine (renamed — DONE), unchanged core |
 | Tools (pencil/brush/bucket/eraser/arrow/text) | DrawingSurface component, config per section |
 | pixi renderer + Canvas2D oracle + parity gate | DrawingSurface rendering, plus scene compositor base |
 | 2DMaterials + matcaps + estimator | Fill materials everywhere; Post effect model |
-| Command journal + ops registry | Project-wide journal (section-tagged ops) |
-| `.vbd` v4 codec | `.y2kvector` codec (rename + version bump at shell time) |
-| history.js snapshots | Per-section undo over the shared journal |
-| Suite + flood + parity + boot battery | Grows per section; same gate rhythm |
-| Raster sprite / matcap caches | First tenants of the global AssetCache budget (§5.2) |
+| Command journal + ops registry | Project-wide journal — DONE (13 op families across 12 files) |
+| `.vbd` v4 codec | `.y2kvector` codec — DONE (magic Y2KV, legacy VBD1 read forever) |
+| history.js snapshots | Whole-project undo snapshots (per-section undo still future) |
+| Suite + flood + parity + boot battery | 5 gates: suite (794) + flood + parity (23) + boot + shell (23) |
+| Raster sprite / matcap caches | Under `VB.assets` global LRU — DONE (audio buffers + thumbs too) |
 
-The current single-canvas app becomes the DrawingSurface embedded in four
-sections — it is the hardest part of the suite and it is already built.
+Landed since this table was written (all first-slice, browser rung 0):
+Session seam (session.js) · PackageStore on IndexedDB + `.y2kproj` zip
+round-trip (packagestore.js) · journal segmentation + debounced autosave
++ crash-recovery replay (shell.js) · homescreen + hash routing + ten
+workspace tabs (shell.js) · the y2kshell chrome — racks, drawers,
+floating dock/free toolpanels (y2kshell.js + main.js) · sequence master
+timeline + scene strip (sequence.js) · step sequencer cast/tracks
+(stepseq.js) · actors model + panel (actors.js) · object library
+(library.js) · audio suite with master-clock transport (audio.js) ·
+brainstorm/pitch/writing/boards views · three.js compositor with 2D/3D
+camera + export camera (composite.js, vendored r159) · CapCut-style
+MP4/WebM+audio video export (export.js) · thumbnail streaming client
+(thumbs.js).
 
 ---
 
@@ -675,6 +728,32 @@ Still open:
 
 ---
 
+## 12. Implementation status (audited 2026-07-10)
+
+Where each system stands against this document. Full file:line detail,
+defect list, and open implementation questions:
+[SystemsDeepDive.md](SystemsDeepDive.md).
+
+| System | Spec | Status |
+| --- | --- | --- |
+| Vector core (planar map, booleans, mask) | §1.3, §7 | SHIPPED, battle-tested; the suite's foundation |
+| Command journal + op registry | §1.1, §4 | SHIPPED — journal IS the persisted project |
+| Session seam | §4 | SHIPPED (session.js) — store/journal live; clock lives in audio.js, language stub absent |
+| PackageStore + `.y2kproj` | §3 | SHIPPED on IndexedDB; journal-monolith, per-section units NOT started |
+| Streaming layer | §5 | HALF: AssetCache + Prefetcher real with 5 tenants; range reads, workers, proxy store DORMANT |
+| y2kshell UI chrome | §2 | SHIPPED (racks, drawers, float toolpanels, view-state persistence) |
+| Sections (10 tabs) | §6 | ALL MOUNTED first-slice; Export tab is a stub (menu lives in File panel) |
+| Master timeline + clock | §4, §6.6 | SHIPPED — audio rig owns the clock; every timeline repositions one playhead |
+| Step sequencer | §6.7/6.8 | Phases 1–2 shipped (instances + exposure grid); transforms/lip-sync future |
+| Compositor (three.js) | §6.8 | SHIPPED first-slice — planes over placement records (our records stay truth); camera cfg is localStorage, NOT yet journaled |
+| Grading | §6.9 | Placeholder — same view as Composite; pass stack not started |
+| Video export | §6.10 | SHIPPED first-slice (MediaRecorder); deterministic offline render future |
+| Test battery | §1.4 | 5 gates (suite 794 / flood / parity 23 / boot / shell 23); flood harness needs re-vendoring into the repo |
+| Collaboration hooks | §9 | ids + deterministic ops hold; scene-id scheme is the one violation (§3 known gap) |
+| Native shells | §10 | Not started (rung 0 active); concrete rung-1 plan in SystemsDeepDive.md §6 |
+
+---
+
 ## Appendix A — Native-rebuild options for the iPad app (rung 1 study)
 
 What a "true native rebuild" would mean, recorded so the rung-1 decision
@@ -754,3 +833,8 @@ today — this buys Procreate-class pen feel without rewriting the core.
 If the suite outgrows that, option C (Rust core, ruffle-adjacent) is
 the honest end-game, with today's app as its validation oracle rather
 than dead code.
+
+The concrete, phased rung-1 execution plan (prerequisites, bridge
+protocol, scheme-handler ChunkSource, Pencil input, Metal overlay, App
+Store passage — plus the rung-0 iPad-readiness work that should happen
+in the browser first) lives in **SystemsDeepDive.md §6**.
