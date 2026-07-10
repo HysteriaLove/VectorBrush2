@@ -113,46 +113,82 @@ project.spine = {
 writing owns block/line CONTENT;   boards owns panel CONTENT (art, duration)
 ```
 
-### Creation sync (the vice-versa rules)
+### Two personas, one script (the equal-power principle)
+
+Some authors write scripts; others write THROUGH storyboards. Both must
+have the same effect and control over the script — a boards-first
+author is writing, not annotating. The design consequence: **there is
+one script, rendered twice.** A beat's content is its typed block stack
+(action lines, dialogue Lines, notes). The Writing editor renders the
+stacks as a prose document; the Boards view renders the SAME stack
+under each beat's panel group — the full stack, not a one-line caption
+— editable in place, with every edit op-routed to the owning `writing.*`
+family. Nothing script-shaped is reachable from only one side. (The
+"caption" is therefore not a Boards field at all on spine-bound boards:
+what reads as a caption IS the beat's action text.)
+
+A boards-first script naturally reads like a breakdown — terse action
+lines under frames. That is a legitimate draft: a writer can refine the
+prose in place later without breaking anything, because block ids are
+stable and only revisions bump.
+
+### The membrane rules
 
 The key trick is **lazy materialization**: creating a beat from either
 side creates ONLY the beat. The other side renders a beat with no
-native content as a *placeholder* — an empty paragraph slot in Writing,
+native content as a placeholder — an empty paragraph slot in Writing,
 an empty frame in Boards — and the real block/panel entity is minted
 only when someone actually types or draws. No phantom entities, no
 round-trip echo.
 
-1. **Writer starts a new beat** (beat break) → `spineBeatAdd`. Boards
-   immediately shows a new empty frame in story order, captioned by the
-   beat's action text as it is typed. The panel entity appears when the
-   artist first draws (`panelAdd {beat}`).
-2. **Artist adds a panel in a gap between beats** → `spineBeatAdd` +
-   `panelAdd`. Writing immediately shows an empty paragraph slot at the
-   corresponding position; the block entity appears when the writer
-   types.
-3. **Within-beat edits never cross.** A second panel in a beat is
-   camera coverage — no text is created. A second paragraph in a beat
-   is prose detail — no panel is created. This asymmetry is what keeps
-   both tools usable; the beat spine is the only thing that echoes.
-4. **Reorder is one op** (`spineBeatMove`) — both views re-sort. Order
-   lives in the spine, nowhere else.
-5. **Split/merge**: splitting a beat mid-text (`spineBeatSplit {beat,
-   atBlock, newId}`) keeps panels with the FIRST half (deterministic
-   default; artist redistributes after). Merge concatenates both lists.
-6. **Delete** (`spineBeatRemove`) is journaled and undoable; the UI
-   confirms when the other side has content. (A "parked panels" shelf —
-   panels out of the cut but not deleted, standard board practice — is
-   a candidate v2; noted in §5.)
+Determinism note: the journal only ever sees explicit spine/block/panel
+ops. Everything below labeled *default* is an EDITOR GESTURE deciding
+which ops to emit — never a replay-time rule, so segmentation defaults
+can be tuned without touching op semantics.
 
-### Text flows both ways through ownership, not copies
+**Script → Boards (what creates a frame):**
 
-- **Dialogue on panels**: a panel shows chips for the lines its beat
-  contains; editing one issues `writing.lineEdit` (already the spec'd
-  Line mechanism — unchanged).
-- **Captions**: a panel group's caption in Boards IS the beat's first
-  action block, rendered read-write; editing it issues
-  `writingBlockEdit`. One source of truth; the "caption" stops being a
-  separate Boards field for spine-bound boards.
+| Writing act | Boards consequence |
+| --- | --- |
+| Type a slug (scene heading) | new scene group (`spineSceneAdd`) |
+| Start an action paragraph | **new beat** (default) → a new frame appears, showing the text as it is typed; the panel entity is minted when an artist first draws |
+| Enter within a beat (via the beat rail / merge) | same beat — prose detail, NO new frame |
+| Dialogue (character + line) | attaches to the CURRENT beat — dialogue chips on its frame, no new frame; a dialogue run opening a scene mints the beat it lives in |
+| Note block `[[…]]` | visible in the beat's stack; no frame |
+| Merge / split beats (beat-rail gesture) | frames regroup (`spineBeatMerge/Split`; split keeps panels with the first half) |
+
+The *action paragraph = new beat* default is deliberate: it hands
+script-first writers a usable board breakdown for free, and
+over-segmentation is the cheap failure — merging beats on the visible
+beat rail is one gesture, while splitting dense prose later is work.
+
+**Boards → Script (what writes to the script):**
+
+| Boards act | Script consequence |
+| --- | --- |
+| New frame in a gap between beats | new beat (`spineBeatAdd`) → an empty paragraph slot at that position |
+| Type the frame's text (the "caption") | the beat's action block — this IS script prose (`writingBlockAdd/Edit`, op-routed) |
+| Add a dialogue chip (character + text) | a real Line in the beat — a script dialogue block (`writing.*`) |
+| Reorder frames across beats / reorder beats | the script reorders (`spineBeatMove` — one op, both views) |
+| New scene group | `spineSceneAdd` with a placeholder slug ("SCENE 4"); a writer renames it to a proper heading later |
+| Add MORE panels inside a beat | camera coverage — NO script change |
+| Panel art, duration, arrows, composition | Boards-local craft — never generates text |
+| Panel tech notes (camera, fx) | Boards-local by default; explicitly promotable to a script note block |
+| Delete the last panel of a beat | the beat (and its text) SURVIVES — beat deletion is always its own explicit act |
+| Delete a beat (`spineBeatRemove`) | journaled + undoable; UI confirms when the other side has content |
+
+**The invariants under both tables:**
+
+1. STRUCTURE (scene order, beat order, beat existence) is shared — one
+   spine op, both views re-render.
+2. STORY CONTENT (action text, dialogue, notes) is shared and fully
+   editable from both views — always via the owning `writing.*` ops.
+3. CRAFT is local and never crosses: visual craft (art, coverage,
+   duration, composition) stays in Boards; prose craft is just… the
+   blocks, so there is nothing writing-local to leak.
+4. Within-beat additions never create counterparts on the other side —
+   the beat spine is the only thing that echoes.
+
 - Free-form boards (mood boards) and free writing docs (outlines,
   notes) stay unbound — the spine binds ONE canonical screenplay
   structure per project in v1.
@@ -241,3 +277,11 @@ provenance and drift computation.
 5. **Take management** (multiple takes per line, language-tagged takes)
    interacts with the reserved per-language hooks (Architecture §6.3) —
    design when Audio grows recording/import-per-line flows.
+6. **Transitions** (CUT TO:, dissolves): a Fountain transition element
+   that is really a property of the boundary between beats/scenes —
+   model as an optional boundary field when something (the animatic,
+   Composite) consumes it, not before.
+7. **Segmentation default tuning**: *action paragraph = new beat* is
+   the recommended editor default; if real writing sessions show it
+   over-segmenting, the gesture layer can change freely (journal
+   semantics are unaffected by design — see the determinism note).
