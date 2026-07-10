@@ -198,6 +198,7 @@
     padding: 3px 8px 3px 4px;
     border: 1px solid var(--panel-edge); border-radius: 4px;
     background: var(--field);
+    cursor: default;
   }
   .y2kxpanel.dragging { opacity: 0.7; }
   .y2kxgrip {
@@ -242,14 +243,6 @@
   }
   #xcol-right .ctl { flex-direction: column; gap: 2px; }
   #xcol-right .ctl input[type="number"] { width: 44px; }
-  .y2kxcol.closed { width: 16px !important; }
-  .y2kxcol.closed .y2kxcolbody { display: none; }
-  .y2kxcoltoggle {
-    flex: none; height: 20px; width: 100%; padding: 0;
-    background: none; border: none; color: var(--text-dim);
-    cursor: pointer; font-size: 9px;
-  }
-  .y2kxcoltoggle:hover { color: var(--accent); background: var(--hover); }
 
   /* an empty rack stays visible as a drop target */
   .y2krackhint {
@@ -275,23 +268,19 @@
   /* y2kshell drawers: the properties bar and the sequencing stack
      collapse behind slim handles */
   .y2kdrawer { flex: none; display: flex; flex-direction: column; }
-  .y2kdrawer.closed > :not(.y2kdrawerhandle) { display: none !important; }
-  .y2kdrawerhandle {
-    flex: none; height: 13px; cursor: pointer;
+  .y2kdrawer.closed { display: none; }
+  /* the toolbars themselves pull the drawers: drag down on the top
+     toolbar / up on the bottom one (buttons still click normally) */
+  .y2kxbar { cursor: ns-resize; }
+  .y2kxbar button, .y2kxbar input, .y2kxbar select,
+  .y2kxbar .y2kxgrip { cursor: pointer; }
+  .y2kxbar input[type="number"], .y2kxbar select { cursor: auto; }
+  #topdrawer-body {
+    min-height: 72px;
+    display: flex; align-items: center; justify-content: center;
     background: var(--panel);
     border-bottom: 1px solid var(--panel-edge);
-    display: flex; align-items: center; justify-content: center;
-    gap: 8px;
-    color: var(--text-dim); font-size: 8px; line-height: 1;
-    user-select: none;
-  }
-  .y2kdrawerhandle::before, .y2kdrawerhandle::after {
-    content: ""; width: 44px; height: 3px; border-radius: 2px;
-    background: var(--text-dim); opacity: 0.55;
-  }
-  .y2kdrawerhandle:hover { color: var(--accent); }
-  .y2kdrawerhandle:hover::before, .y2kdrawerhandle:hover::after {
-    opacity: 1; background: var(--accent);
+    color: var(--text-dim); font-size: 11px;
   }
   #scenebar {
     display: flex; gap: 4px; padding: 6px;
@@ -443,16 +432,8 @@
     color: var(--text);
   }
   #debugpanel.hidden { display: none; }
-  /* The properties row keeps a CONSTANT height (controls gray out
-     instead of hiding) so the canvas below never jumps. */
-  #propbar {
-    flex: none; height: 34px;
-    display: flex; align-items: center; gap: 10px;
-    padding: 0 10px; overflow: hidden;
-    background: var(--panel);
-    border-bottom: 1px solid var(--panel-edge);
-    font-size: 12px; color: var(--text);
-  }
+  /* text options live as an xPanel on the ONE top toolbar; they gray
+     out instead of hiding so the row never jumps */
   #text-opts { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
   #text-opts.inactive { opacity: 0.35; pointer-events: none; }
   #text-opts .txtstyle {
@@ -482,7 +463,8 @@
     color: var(--text-dim); max-width: 160px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  #ws-tabs { flex: 1; display: flex; gap: 2px; overflow-x: auto; }
+  #ws-tabs { flex: 1; display: flex; gap: 2px; overflow-x: auto;
+             justify-content: center; }
   .wstab {
     flex: none; padding: 4px 12px; cursor: pointer;
     color: var(--text-dim); border-radius: 4px 4px 0 0;
@@ -1033,13 +1015,9 @@
       <span class="y2kxgrip" title="Drag to rearrange">⠿</span>
       <button id="btn-debug" title="Vector debug view (D)">Debug</button>
     </div>
-    <div class="spacer"></div>
-    <div id="fileinfo">no file loaded</div>
-  </div>
-
-  <div id="drawer-top" class="y2kdrawer">
-  <div id="propbar">
-    <span id="text-opts" class="inactive">
+    <div class="y2kxpanel" data-panel="text">
+      <span class="y2kxgrip" title="Drag to rearrange">⠿</span>
+      <span id="text-opts" class="inactive">
       <label class="ctl" title="Font family">
         <select id="text-font" style="max-width:130px"></select>
       </label>
@@ -1062,13 +1040,20 @@
       <label class="ctl" title="Box width (px) — text re-wraps">W<input type="number" id="text-w" step="1" min="10" style="width:56px"></label>
       <label class="ctl" title="Box height (px) — grows the box">H<input type="number" id="text-h" step="1" min="1" style="width:56px"></label>
       <button id="btn-fonts" title="List the system's fonts (or drop a .ttf on the canvas)">Fonts…</button>
-    </span>
-    <label class="ctl" title="Selection rotation (degrees) — type 0 to snap upright">
-      ⟳<input type="number" id="sel-rotation" value="0" step="1" style="width:56px" disabled>°
-    </label>
+      </span>
+    </div>
+    <div class="y2kxpanel" data-panel="rotate">
+      <span class="y2kxgrip" title="Drag to rearrange">⠿</span>
+      <label class="ctl" title="Selection rotation (degrees) — type 0 to snap upright">
+        ⟳<input type="number" id="sel-rotation" value="0" step="1" style="width:56px" disabled>°
+      </label>
+    </div>
+    <div class="spacer"></div>
+    <div id="fileinfo">no file loaded</div>
   </div>
-  <div class="y2kdrawerhandle" data-drawer="top"
-       title="Collapse / expand the properties drawer"></div>
+
+  <div id="drawer-top" class="y2kdrawer closed">
+    <div id="topdrawer-body">workspace drawer — panels arrive here</div>
   </div>
 
   <div id="workspace-stub">
@@ -1092,8 +1077,6 @@
     <div class="y2krackreveal" data-side="left"
          title="Open the left rack">⯈</div>
     <div id="xcol-left" class="y2kxcol">
-    <button class="y2kxcoltoggle" data-col="left"
-            title="Collapse / expand the tool column">⯇</button>
     <div class="y2kxcolbody">
     <div id="tools">
       <button data-tool="select" class="active" title="Selection tool (V)">➤</button>
@@ -1120,8 +1103,6 @@
       <div id="toast"></div>
     </div>
     <div id="xcol-right" class="y2kxcol">
-      <button class="y2kxcoltoggle" data-col="right"
-              title="Collapse / expand the color column">⯈</button>
       <div class="y2kxcolbody">
         <label class="ctl" title="Stroke color">
           ✎<input type="color" id="stroke-color" value="#000000">
@@ -1236,16 +1217,6 @@
     </div>
   </div>
 
-  <div id="drawer-bottom" class="y2kdrawer">
-  <div class="y2kdrawerhandle" data-drawer="bottom"
-       title="Collapse / expand the sequencing drawer"></div>
-  <div id="seqbar"></div>
-
-  <div id="timebar">
-    <div id="tl-frames"></div>
-  </div>
-  </div>
-
   <div id="xbar-bottom" class="y2kxbar" data-xbar="bottom">
     <div class="y2kxpanel" data-panel="transport">
       <span class="y2kxgrip" title="Drag to rearrange">⠿</span>
@@ -1264,6 +1235,14 @@
       <span id="tl-counter">1 / 1</span>
     </div>
     <div class="spacer"></div>
+  </div>
+
+  <div id="drawer-bottom" class="y2kdrawer">
+  <div id="seqbar"></div>
+
+  <div id="timebar">
+    <div id="tl-frames"></div>
+  </div>
   </div>
 
   <div id="statusbar">

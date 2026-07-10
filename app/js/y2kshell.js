@@ -36,8 +36,8 @@
         bottom: { scroll: 0, panels: [], order: [] }
       },
       drawers: {
-        top:    { open: true },
-        bottom: { open: true }
+        top:    { open: false }, // the workspace drawer starts tucked away
+        bottom: { open: true }   // the animation timeline starts out
       }
     };
   }

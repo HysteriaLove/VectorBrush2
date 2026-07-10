@@ -1857,26 +1857,10 @@
           dom.classList.toggle("collapsed", !m.expanded);
         });
       });
-      ["left", "right"].forEach(function (side) {
-        var col = document.getElementById("xcol-" + side);
-        if (!col) return;
-        var open = state.cols[side].open;
-        col.classList.toggle("closed", !open);
-        var btn = col.querySelector(".y2kxcoltoggle");
-        if (btn) {
-          btn.textContent = side === "left"
-            ? (open ? "⯇" : "⯈") : (open ? "⯈" : "⯇");
-        }
-      });
       ["top", "bottom"].forEach(function (which) {
         var drawer = document.getElementById("drawer-" + which);
-        if (!drawer) return;
-        var open = state.drawers[which].open;
-        drawer.classList.toggle("closed", !open);
-        var handle = drawer.querySelector(".y2kdrawerhandle");
-        if (handle) { // the chevron states the action, not the state
-          handle.textContent = which === "top"
-            ? (open ? "▲" : "▼") : (open ? "▼" : "▲");
+        if (drawer) {
+          drawer.classList.toggle("closed", !state.drawers[which].open);
         }
       });
       persist();
@@ -1939,7 +1923,7 @@
       });
     });
 
-    // rack reveal strips + thin column toggles
+    // rack reveal strips
     document.querySelectorAll(".y2krackreveal").forEach(function (strip) {
       strip.addEventListener("click", function () {
         state.racks[strip.dataset.side].open = true;
@@ -1947,14 +1931,47 @@
         requestRender();
       });
     });
-    document.querySelectorAll(".y2kxcoltoggle").forEach(function (btn) {
-      btn.addEventListener("click", function () {
-        var side = btn.dataset.col;
-        state.cols[side].open = !state.cols[side].open;
-        applyShell();
-        requestRender();
+
+    // the toolbars PULL their drawers (user spec): drag down on the top
+    // toolbar to reveal the workspace drawer, drag up on the bottom one
+    // to pull out the animation timeline — the reverse pushes it shut.
+    // Panels, buttons, and inputs keep their own gestures.
+    function wireDrawerPull(barEl, which, openDir) {
+      if (!barEl) return;
+      barEl.addEventListener("pointerdown", function (ev) {
+        if (ev.button !== 0) return;
+        var t = ev.target;
+        if (t !== barEl && !(t.classList &&
+            t.classList.contains("spacer"))) return;
+        barEl.setPointerCapture(ev.pointerId);
+        var y0 = ev.clientY, done = false;
+        function onMove(e2) {
+          if (done) return;
+          var pull = (e2.clientY - y0) * openDir;
+          if (pull > 18) {
+            state.drawers[which].open = true;
+            done = true;
+          } else if (pull < -18) {
+            state.drawers[which].open = false;
+            done = true;
+          }
+          if (done) {
+            applyShell();
+            requestRender();
+          }
+        }
+        function onUp() {
+          barEl.removeEventListener("pointermove", onMove);
+          barEl.removeEventListener("pointerup", onUp);
+          barEl.removeEventListener("pointercancel", onUp);
+        }
+        barEl.addEventListener("pointermove", onMove);
+        barEl.addEventListener("pointerup", onUp);
+        barEl.addEventListener("pointercancel", onUp);
       });
-    });
+    }
+    wireDrawerPull(document.getElementById("topbar"), "top", 1);
+    wireDrawerPull(document.getElementById("xbar-bottom"), "bottom", -1);
 
     // xToolbars: panels group left-to-right; drag the ⠿ grip to
     // rearrange, wheel scrolls an overflowing strip sideways
