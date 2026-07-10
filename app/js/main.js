@@ -3080,6 +3080,10 @@
       }
     }
     drawStepGrid();
+    // the three.js stage follows the playing frame (every playback and
+    // scrub path funnels through refreshTimeline; the signature check
+    // makes held frames free)
+    if (VB.CompositeView && VB.CompositeView.sync) VB.CompositeView.sync();
   }
 
   function drawStepGrid() {

@@ -138,6 +138,41 @@
     });
   }
 
+  /** What the current frame SHOWS — cheap identity signature (no
+   *  content hashing): playback ticks compare this and rebuild only
+   *  when a held frame gives way to new cells, a pose switches, a
+   *  visibility span starts/ends, or a transform moves. */
+  function frameSignature() {
+    var project = view.app.project;
+    var scene = project.scenes[project.cur.scene];
+    if (!scene) return "none";
+    var frame = project.cur.frame || 0;
+    var sig = project.cur.scene + "|";
+    scene.layers.forEach(function (l) {
+      sig += (l.visible
+        ? Math.min(frame, l.frames.length - 1) : "x") + ",";
+    });
+    sig += "|";
+    (scene.cast || []).forEach(function (inst) {
+      sig += inst.id + ":" + inst.x + ":" + inst.y + ":" +
+        inst.scale + ":" + inst.rotation + ":" +
+        (VB.stepVisibleAt(scene, inst.id, frame) ? "v" : "h") + ":" +
+        (VB.stepRunAt(scene, "pose:" + inst.id, frame) || "-") + ";";
+    });
+    return sig;
+  }
+
+  /** Frame-sync entry: playback and scrubbing call this every frame;
+   *  docChanged calls refresh() which forces the rebuild. */
+  function syncFrame() {
+    if (!view.host || !view.renderer) return;
+    var sig = frameSignature();
+    if (!view.dirty && sig === view.sig) return;
+    view.sig = sig;
+    view.dirty = false;
+    rebuildScene();
+  }
+
   function applyCamera() {
     var T = three();
     if (!T) return;
@@ -298,13 +333,15 @@
     }
     size();
     setMode(view.mode);
-    rebuildScene();
+    view.dirty = true;
+    syncFrame();
     renderLoop();
   }
 
   function refresh() {
     if (!view.host || !view.renderer) return;
-    rebuildScene();
+    view.dirty = true; // journaled change: content may differ
+    syncFrame();
   }
 
   function unmount() {
@@ -330,6 +367,7 @@
   window.VB = window.VB || {};
   VB.CompositeView = {
     mount: mount, unmount: unmount, refresh: refresh,
+    sync: syncFrame, // playback frame ticks land here
     isMounted: function () { return !!view.host; }
   };
 })();
