@@ -744,6 +744,18 @@
     width: 128px; height: 72px;
   }
   .au-bnum { font: 9px system-ui, sans-serif; color: #4b4736; }
+  /* the viewer/timeline splitter */
+  #au-split {
+    flex: none; height: 10px; cursor: ns-resize;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--panel);
+    border-bottom: 1px solid var(--panel-edge);
+  }
+  #au-split::before {
+    content: ""; width: 44px; height: 3px; border-radius: 2px;
+    background: var(--text-dim); opacity: 0.5;
+  }
+  #au-split:hover::before { background: var(--accent); opacity: 1; }
   #au-body { flex: 1; min-height: 0; display: flex; }
   #au-stems {
     flex: none; width: 200px; overflow-y: auto;

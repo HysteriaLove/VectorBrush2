@@ -691,6 +691,22 @@
       ctx.textAlign = "left";
       ctx.fillText(tracks[i].name, 6, y + 14);
     }
+    // the track area extends to the BOTTOM: empty ghost lanes keep the
+    // alternating pattern going (the DAW look — and where new tracks
+    // will land)
+    var gi = tracks.length;
+    for (var gy = tracksY() + tracks.length * LANE_H; gy < h;
+         gy += LANE_H, gi++) {
+      ctx.fillStyle = gi % 2 ? C.bg : C.panel;
+      ctx.globalAlpha = 0.55;
+      ctx.fillRect(0, gy, w, Math.min(LANE_H, h - gy));
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = C.edge;
+      ctx.beginPath();
+      ctx.moveTo(0, gy + Math.min(LANE_H, h - gy) + 0.5);
+      ctx.lineTo(w, gy + Math.min(LANE_H, h - gy) + 0.5);
+      ctx.stroke();
+    }
 
     // drop ghost while dragging a stem in
     if (view.drag && view.drag.kind === "place" && view.drag.overMs !== undefined) {
@@ -1257,6 +1273,42 @@
     view.board.appendChild(view.bmain.root);
     view.board.appendChild(view.bzoneR);
     host.appendChild(view.board);
+    // the viewer/timeline split is the user's to size (drag handle);
+    // the height persists as view state
+    try {
+      var savedH = parseInt(localStorage.getItem("vb-au-boardh"), 10);
+      if (savedH >= 140) view.board.style.height = savedH + "px";
+    } catch (e) { /* defaults */ }
+    var split = document.createElement("div");
+    split.id = "au-split";
+    split.title = "Drag to resize the board viewer and the timeline";
+    split.addEventListener("pointerdown", function (ev) {
+      if (ev.button !== 0) return;
+      ev.preventDefault();
+      split.setPointerCapture(ev.pointerId);
+      var y0 = ev.clientY;
+      var h0 = view.board.offsetHeight;
+      function onMove(e2) {
+        var hMax = Math.round(host.clientHeight * 0.75);
+        var hNew = Math.max(140, Math.min(hMax, h0 + (e2.clientY - y0)));
+        view.board.style.height = hNew + "px";
+        syncBoardStrip();
+        renderLanes();
+      }
+      function onUp() {
+        split.removeEventListener("pointermove", onMove);
+        split.removeEventListener("pointerup", onUp);
+        split.removeEventListener("pointercancel", onUp);
+        try {
+          localStorage.setItem("vb-au-boardh",
+            String(view.board.offsetHeight));
+        } catch (e) { /* storage unavailable */ }
+      }
+      split.addEventListener("pointermove", onMove);
+      split.addEventListener("pointerup", onUp);
+      split.addEventListener("pointercancel", onUp);
+    });
+    host.appendChild(split);
 
     var body = document.createElement("div");
     body.id = "au-body";
