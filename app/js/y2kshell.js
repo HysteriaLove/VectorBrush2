@@ -232,16 +232,20 @@
     return rack.scroll;
   }
 
+  // Smooth follow (user spec): the width tracks the drag exactly — the
+  // ONLY snap is the ~4px close zone at the edge. No jerky minimums.
+  var SNAP_SHUT = 4;
+
   function setRackWidth(state, side, width, shellWidth) {
     var other = side === "left" ? "right" : "left";
     var max = Math.min(RACK_MAX,
       Math.max(RACK_MIN, (shellWidth || Infinity) -
         state.racks[other].width - CENTER_MIN));
-    if (width < RACK_MIN / 2) { // dragged shut: disappears to its side
+    var w = Math.max(0, Math.min(max, width));
+    if (w <= SNAP_SHUT) { // disappears to its side; width kept for reopen
       state.racks[side].open = false;
-      return state.racks[side].width;
+      return 0;
     }
-    var w = Math.max(RACK_MIN, Math.min(max, width));
     state.racks[side].open = true;
     state.racks[side].width = w;
     return w;
@@ -347,7 +351,7 @@
 
   window.VB = window.VB || {};
   VB.Y2KShell = {
-    CELL: CELL, TAB_H: TAB_H, SNAP: SNAP,
+    CELL: CELL, TAB_H: TAB_H, SNAP: SNAP, SNAP_SHUT: SNAP_SHUT,
     RACK_MIN: RACK_MIN, RACK_MAX: RACK_MAX, RACK_DEFAULT: RACK_DEFAULT,
     defaults: defaults,
     moduleById: moduleById,

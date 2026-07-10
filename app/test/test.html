@@ -4063,10 +4063,13 @@
     Sh.setRackWidth(sh, "right", 9999, 1200);
     check("rack width clamps against the shell",
       sh.racks.right.width <= Sh.RACK_MAX);
-    Sh.setRackWidth(sh, "right", 30, 1200);
-    check("dragging under half-min disappears the rack to its side",
+    Sh.setRackWidth(sh, "right", 90, 1200);
+    check("widths follow the drag smoothly (no jerky minimum)",
+      sh.racks.right.open === true && sh.racks.right.width === 90);
+    Sh.setRackWidth(sh, "right", 2, 1200);
+    check("only the ~4px edge zone snaps the rack shut",
       sh.racks.right.open === false &&
-      sh.racks.right.width >= Sh.RACK_MIN); // width survives for reopen
+      sh.racks.right.width === 90); // width survives for reopen
     Sh.setRackWidth(sh, "right", Sh.RACK_DEFAULT, 1200);
     check("a real width reopens the rack", sh.racks.right.open === true);
     sh.racks.right.scroll = 9999;

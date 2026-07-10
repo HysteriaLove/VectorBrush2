@@ -1841,13 +1841,10 @@
         el.classList.toggle("closed", closed);
         el.classList.toggle("bare", rack.modules.length === 0);
         el.classList.remove("empty");
-        el.style.width = Math.max(S.RACK_MIN, rack.width || S.RACK_DEFAULT) + "px";
+        el.style.width = (rack.width || S.RACK_DEFAULT) + "px";
         var reveal = document.querySelector(
           '.y2krackreveal[data-side="' + side + '"]');
-        if (reveal) {
-          reveal.classList.toggle("show", closed);
-          reveal.textContent = side === "left" ? "⯈" : "⯇";
-        }
+        if (reveal) reveal.classList.toggle("show", closed);
         S.clampRackScroll(state, side, el.clientHeight || 600);
         rack.modules.forEach(function (m) {
           var dom = moduleDom[m.id];
@@ -1863,9 +1860,9 @@
         if (!drawer) return;
         var d = state.drawers[which];
         drawer.classList.toggle("closed", !d.open);
-        if (d.open) { // an OVERLAY, anchored to its toolbar
-          drawer.style.height =
-            Math.max(which === "top" ? 60 : 120, d.h | 0) + "px";
+        if (d.open) { // an OVERLAY, anchored to its toolbar — the
+          // height follows the pull exactly (smooth, no minimums)
+          drawer.style.height = Math.max(0, d.h | 0) + "px";
           if (which === "top") {
             var tb = document.getElementById("topbar");
             drawer.style.top = tb
@@ -1938,12 +1935,40 @@
       });
     });
 
-    // rack reveal strips
+    // closed racks reopen by DRAGGING from their screen edge — an
+    // invisible hot zone, no pillars or buttons (user spec); a plain
+    // click still opens to the remembered width as a courtesy
     document.querySelectorAll(".y2krackreveal").forEach(function (strip) {
-      strip.addEventListener("click", function () {
-        state.racks[strip.dataset.side].open = true;
-        applyShell();
-        requestRender();
+      var side = strip.dataset.side;
+      strip.addEventListener("pointerdown", function (ev) {
+        if (ev.button !== 0) return;
+        ev.preventDefault();
+        strip.setPointerCapture(ev.pointerId);
+        var x0 = ev.clientX, moved = false;
+        function onMove(e2) {
+          var dx = side === "left" ? e2.clientX - x0 : x0 - e2.clientX;
+          if (!moved && Math.abs(dx) < 3) return;
+          moved = true;
+          var mid = document.getElementById("middle");
+          S.setRackWidth(state, side, dx,
+                         mid ? mid.clientWidth : undefined);
+          applyShell();
+          requestRender();
+        }
+        function onUp() {
+          strip.removeEventListener("pointermove", onMove);
+          strip.removeEventListener("pointerup", onUp);
+          strip.removeEventListener("pointercancel", onUp);
+          if (!moved) { // click: open where it last was
+            state.racks[side].open = true;
+            applyShell();
+          }
+          requestRender();
+          persist();
+        }
+        strip.addEventListener("pointermove", onMove);
+        strip.addEventListener("pointerup", onUp);
+        strip.addEventListener("pointercancel", onUp);
       });
     });
 
@@ -1961,12 +1986,13 @@
         var d = state.drawers[which];
         var y0 = ev.clientY;
         var h0 = d.open ? (d.h | 0) : 0;
-        var minH = which === "top" ? 60 : 120;
         function onMove(e2) {
-          var h = Math.min(Math.round(window.innerHeight * 0.7),
-                           h0 + (e2.clientY - y0) * openDir);
-          d.open = h > 40;
-          if (d.open) d.h = Math.max(minH, h);
+          // SMOOTH follow — the only snap is the ~4px close zone
+          var h = Math.max(0, Math.min(
+            Math.round(window.innerHeight * 0.7),
+            h0 + (e2.clientY - y0) * openDir));
+          d.open = h > S.SNAP_SHUT;
+          if (d.open) d.h = h;
           applyShell();
           if (which === "top") renderScratch();
           else { renderSeqStrip(); refreshTimeline(); }
