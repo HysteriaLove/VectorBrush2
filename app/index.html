@@ -752,11 +752,12 @@
     font-size: 11px; padding: 2px 8px; cursor: pointer;
   }
   .bdaddline:hover { color: var(--accent); border-color: var(--accent); }
-  /* a written-but-unboarded beat: an empty slot awaiting its frame */
+  /* a written-but-undrawn panel: a dashed slot awaiting its drawing */
   .ptthumb.bdslot {
     display: flex; align-items: center; justify-content: center;
-    border-style: dashed; color: var(--text-dim); font-size: 18px;
+    border-style: dashed; color: var(--text-dim);
   }
+  .bdslotmark { font-size: 15px; opacity: 0.7; }
   #bd-beats {
     flex: none; max-height: 190px; overflow-y: auto;
     background: var(--panel);
@@ -979,6 +980,17 @@
   .wradd:hover { color: #4a6fa5; border-color: #4a6fa5; background: none; }
   .wraddscene { display: block; margin: 14px auto 0; }
   .wrhint { color: #9a988c; text-align: center; padding: 24px 0 8px; }
+  .wrtools {
+    display: flex; align-items: center; gap: 6px;
+  }
+  .wrtools .wradd { margin: 2px 0 8px 40px; }
+  .wrsetchip {
+    font: 10px/1.6 system-ui, sans-serif; letter-spacing: 0.05em;
+    text-transform: uppercase; color: #7a7666;
+    border: 1px dashed #c9c5b6; border-radius: 3px;
+    padding: 0 8px; margin-bottom: 6px; min-width: 60px;
+  }
+  .wrsetchip:focus { border-style: solid; border-color: #4a6fa5; }
   .wr-line { padding: 0 44px; }
   .wrchar {
     text-align: center; font: 700 12px/1.5 system-ui, sans-serif;

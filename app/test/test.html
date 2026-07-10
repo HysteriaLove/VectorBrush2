@@ -3033,167 +3033,159 @@
   log("boards:");
   try {
     var dse = new VB.Session({ width: 11000, height: 8000 });
-    // panels live on SPINE beats (PreProductionSpine.md): structure
-    // from spine.*, panel content from boards' panel ops
-    dse.exec({ op: "spineSceneAdd", id: "slug_d", title: "INT. SILO" });
-    dse.exec({ op: "spineBeatAdd", id: "bt1", scene: "slug_d" });
-    dse.exec({ op: "spineBeatAdd", id: "bt2", scene: "slug_d",
-               title: "The Jump" });
-    dse.exec({ op: "blockAdd", beat: "bt1", id: "bline", kind: "line",
-               character: "MIRA", text: "We jump on three." });
-    dse.exec({ op: "panelAdd", beat: "bt1", id: "pn1" });
-    dse.exec({ op: "panelAdd", beat: "bt1", id: "pn2" });
-    dse.exec({ op: "panelAdd", beat: "bt2", id: "pn3", duration: 48 });
-    var dBeats = VB.spineFlatBeats(dse.project);
-    check("beats and panels land in order",
-      dBeats.length === 2 &&
-      dBeats[0].beat.panels.length === 2 &&
-      dBeats[1].beat.title === "The Jump" &&
-      VB.boardsFlatten(dse.project).map(function (e) {
-        return e.panel.id; }).join(",") === "pn1,pn2,pn3" &&
+    // ONE container (PreProductionSpine.md, panel-driven): the flat
+    // panel list; the deck's text field and dialogue rows write the
+    // SAME script rows the Story editor renders
+    dse.exec({ op: "characterAdd", id: "ch_m", name: "MIRA" });
+    dse.exec({ op: "panelAdd", id: "pn1" });
+    dse.exec({ op: "panelAdd", id: "pn2" });
+    dse.exec({ op: "panelAdd", id: "pn3", duration: 48 });
+    check("panels land in order (numbering = index + 1)",
+      VB.boardsFlatten(dse.project).map(function (p) {
+        return p.id; }).join(",") === "pn1,pn2,pn3" &&
       VB.boardsTotalFrames(dse.project) === 24 + 24 + 48,
       VB.boardsTotalFrames(dse.project) + " frames");
     dse.exec({ op: "panelDuration", id: "pn2", frames: 12 });
     check("durations clamp and apply",
-      VB.boardsPanelById(dse.project, "pn2").panel.duration === 12 &&
+      VB.spinePanelById(dse.project, "pn2").panel.duration === 12 &&
       VB.boardsTotalFrames(dse.project) === 24 + 12 + 48);
-    // the deck's text field writes the beat's ACTION BLOCK — the same
-    // writing.* op family the script editor uses (one script, two views)
-    dse.exec({ op: "blockAdd", beat: "bt1", id: "bact", index: 0,
-               kind: "action", content: "Mira leans over the edge." });
-    check("the frame text is the beat's action block — script prose",
-      VB.spineBeatById(dse.project, "bt1").beat.blocks[0].content ===
-      "Mira leans over the edge." &&
-      VB.spineBeatText(VB.spineBeatById(dse.project, "bt1").beat) ===
+    dse.exec({ op: "blockAdd", panel: "pn1", id: "bact", kind: "action",
+               content: "Mira leans over the edge." });
+    dse.exec({ op: "blockAdd", panel: "pn1", id: "bline", kind: "line",
+               character: "ch_m", text: "We jump on three." });
+    check("the frame text is the panel's script rows",
+      VB.spinePanelText(dse.project,
+        VB.spinePanelById(dse.project, "pn1").panel) ===
       "Mira leans over the edge.\nMIRA: We jump on three.");
-    // two-way edit: the panel-side dialogue edit is the Story blockEdit
+    // two-way edit: the deck-side dialogue edit is the Story blockEdit
     dse.exec({ op: "blockEdit", block: "bline",
                lang: "default", text: "We jump NOW." });
-    check("panel-side line edits change the script",
+    check("deck-side line edits change the script",
       VB.lineTextOf(VB.lineById(dse.project, "bline").block) === "We jump NOW.");
     dse.exec({ op: "editTargetSet", target: { boardPanel: "pn3" } });
     check("board panel edit target retargets the active cell",
       dse.project.activeCell() ===
-      VB.boardsPanelById(dse.project, "pn3").panel.cell &&
-      dse.project.resolveEditCell().label === "The Jump ▸ panel 1");
+      VB.spinePanelById(dse.project, "pn3").panel.cell &&
+      dse.project.resolveEditCell().label === "panel 3");
     dse.exec({ op: "pencil",
                points: [{ x: 2000, y: 5000 }, { x: 15000, y: 5400 }],
                style: { width: 20, color: { r: 0, g: 0, b: 0, a: 255 } } });
     dse.exec({ op: "editTargetClear" });
     check("panel ink lands in the panel cell",
-      VB.boardsPanelById(dse.project, "pn3").panel.cell.edges.length > 0 &&
-      VB.boardsPanelById(dse.project, "pn1").panel.cell.edges.length === 0);
-    dse.exec({ op: "panelMove", id: "pn2", index: 0, beat: "bt2" });
-    check("panels move across beats (coverage, no script change)",
-      VB.spineBeatById(dse.project, "bt1").beat.panels.length === 1 &&
-      VB.spineBeatById(dse.project, "bt2").beat.panels.map(function (p) {
-        return p.id; }).join(",") === "pn2,pn3" &&
-      VB.spineBeatById(dse.project, "bt1").beat.blocks.length === 2);
+      VB.spinePanelById(dse.project, "pn3").panel.cell.edges.length > 0 &&
+      VB.spinePanelById(dse.project, "pn1").panel.cell.edges.length === 0);
+    dse.exec({ op: "panelMove", id: "pn3", index: 0 });
+    check("panels reorder (script rows travel with their panel)",
+      VB.boardsFlatten(dse.project).map(function (p) {
+        return p.id; }).join(",") === "pn3,pn1,pn2" &&
+      VB.spinePanelById(dse.project, "pn1").panel.rows.length === 2);
+    dse.exec({ op: "boardsSelect", panel: 99 });
+    check("deck selection clamps to the panel list",
+      dse.project.boards.cur.panel === 2);
     var dRep = await VB.replayJournal(JSON.parse(JSON.stringify(dse.journal)));
     check("boards replay byte-exact",
-      JSON.stringify(dRep.project.spine.scenes.map(function (sc) {
-        return [sc.id, sc.beats.map(function (bt) {
-          return [bt.id, bt.title, bt.blocks, bt.panels.map(function (p) {
-            return [p.id, p.duration, p.cell.edges]; })];
-        })];
-      })) === JSON.stringify(dse.project.spine.scenes.map(function (sc) {
-        return [sc.id, sc.beats.map(function (bt) {
-          return [bt.id, bt.title, bt.blocks, bt.panels.map(function (p) {
-            return [p.id, p.duration, p.cell.edges]; })];
-        })];
+      JSON.stringify(dRep.project.spine.panels.map(function (p) {
+        return [p.id, p.duration, p.rows, p.cell.edges];
+      })) === JSON.stringify(dse.project.spine.panels.map(function (p) {
+        return [p.id, p.duration, p.rows, p.cell.edges];
       })));
-    dse.exec({ op: "spineBeatRemove", id: "bt2" });
+    dse.exec({ op: "panelRemove", id: "pn3" });
     dse.exec({ op: "undo" });
-    check("beat removal undoes with panels, ink, and blocks",
-      VB.spineFlatBeats(dse.project).length === 2 &&
-      VB.boardsPanelById(dse.project, "pn3").panel.cell.edges.length > 0 &&
-      VB.spineBeatById(dse.project, "bt1").beat.blocks[1].id === "bline");
+    check("panel removal undoes with ink and rows",
+      VB.boardsFlatten(dse.project).length === 3 &&
+      VB.spinePanelById(dse.project, "pn3").panel.cell.edges.length > 0 &&
+      VB.spinePanelById(dse.project, "pn1").panel.rows[1].id === "bline");
   } catch (err) {
     fail++;
     log("  BOARDS EXCEPTION: " + (err && err.stack || err), "fail");
   }
 
   // ================================ spine =====================================
-  // The pre-production story spine (spine.js, PreProductionSpine.md):
-  // slugs → beats, the story⟷boards interchange unit. Structure ops,
-  // split/merge determinism, and referential integrity.
+  // The pre-production story spine (spine.js, PreProductionSpine.md,
+  // panel-driven): the flat panel container, the characters/settings
+  // registries, and DERIVED scenes (runs of a shared setting).
   log("");
   log("spine:");
   try {
     var spe = new VB.Session({ width: 11000, height: 8000 });
-    spe.exec({ op: "spineSceneAdd", id: "sg1" });
-    spe.exec({ op: "spineSceneAdd", id: "sg2", title: "EXT. RIVER" });
-    spe.exec({ op: "spineSceneAdd", id: "sg0", index: 0, title: "COLD OPEN" });
-    check("slugs land in order with auto/explicit titles",
-      spe.project.spine.scenes.map(function (s) { return s.id; }).join(",") ===
-      "sg0,sg1,sg2" &&
-      spe.project.spine.scenes[1].title === "Scene 01" &&
-      spe.project.spine.scenes[0].title === "COLD OPEN");
+    spe.exec({ op: "panelAdd", id: "p1" });
+    spe.exec({ op: "panelAdd", id: "p2" });
+    spe.exec({ op: "panelAdd", id: "p0", index: 0 });
+    check("panels land in order with explicit index",
+      spe.project.spine.panels.map(function (p) { return p.id; }).join(",") ===
+      "p0,p1,p2");
     var spThrew = false;
-    try { spe.exec({ op: "spineSceneAdd" }); }
+    try { spe.exec({ op: "panelAdd" }); }
     catch (e) { spThrew = true; spe.journal.pop(); }
     check("id-less spine adds are refused", spThrew);
-    spe.exec({ op: "spineSceneMove", id: "sg0", index: 2 });
-    check("slugs reorder",
-      spe.project.spine.scenes.map(function (s) { return s.id; }).join(",") ===
-      "sg1,sg2,sg0");
-    spe.exec({ op: "spineBeatAdd", id: "b1", scene: "sg1" });
-    spe.exec({ op: "spineBeatAdd", id: "b2", scene: "sg1" });
-    spe.exec({ op: "spineBeatAdd", id: "b3", scene: "sg2" });
-    check("beats seat under their slug in story order",
-      VB.spineFlatBeats(spe.project).map(function (e) {
-        return e.beat.id + "@" + e.scene.id; }).join(",") ===
-      "b1@sg1,b2@sg1,b3@sg2");
-    spe.exec({ op: "spineBeatMove", id: "b3", scene: "sg1", index: 1 });
-    check("beats move across slugs",
-      spe.project.spine.scenes[0].beats.map(function (b) {
-        return b.id; }).join(",") === "b1,b3,b2" &&
-      spe.project.spine.scenes[1].beats.length === 0);
-    // split: blocks[at..] go to the new beat AFTER; panels stay put
-    spe.exec({ op: "blockAdd", beat: "b1", id: "k1", kind: "action",
+    spe.exec({ op: "panelMove", id: "p0", index: 2 });
+    check("panels reorder",
+      spe.project.spine.panels.map(function (p) { return p.id; }).join(",") ===
+      "p1,p2,p0");
+
+    // the registries: the casting sheets for actors/backgrounds later
+    spe.exec({ op: "settingAdd", id: "set_roof", name: "ROOFTOP" });
+    spe.exec({ op: "settingAdd", id: "set_silo", name: "INT. SILO" });
+    check("registry lookups resolve by id and by name",
+      VB.spineSettingById(spe.project, "set_roof").name === "ROOFTOP" &&
+      VB.spineFindByName(spe.project.spine.settings, "rooftop").id ===
+        "set_roof" &&
+      VB.spineFindByName(spe.project.spine.settings, "nope") === null);
+
+    // SCENES ARE DERIVED: runs of consecutive panels sharing a setting
+    spe.exec({ op: "panelSetting", id: "p1", setting: "set_roof" });
+    spe.exec({ op: "panelSetting", id: "p2", setting: "set_roof" });
+    spe.exec({ op: "panelSetting", id: "p0", setting: "set_silo" });
+    check("setting runs derive the scene grouping",
+      JSON.stringify(VB.spineSceneRuns(spe.project)) === JSON.stringify(
+        [{ setting: "set_roof", from: 0, to: 1 },
+         { setting: "set_silo", from: 2, to: 2 }]));
+    spe.exec({ op: "panelSetting", id: "p2", setting: "set_silo" });
+    check("changing one panel's setting moves the scene boundary",
+      JSON.stringify(VB.spineSceneRuns(spe.project)) === JSON.stringify(
+        [{ setting: "set_roof", from: 0, to: 0 },
+         { setting: "set_silo", from: 1, to: 2 }]));
+    spe.exec({ op: "panelSetting", id: "p2", setting: null });
+    check("an unset panel is its own run (setting null)",
+      VB.spineSceneRuns(spe.project).length === 3 &&
+      VB.spineSceneRuns(spe.project)[1].setting === null);
+
+    // rows sit in exactly one panel (one-seat integrity)
+    spe.exec({ op: "blockAdd", panel: "p1", id: "k1", kind: "action",
                content: "Kai ducks behind the console." });
-    spe.exec({ op: "blockAdd", beat: "b1", id: "k2", kind: "line",
-               character: "KAI", text: "Not today." });
-    spe.exec({ op: "blockAdd", beat: "b1", id: "k3", kind: "action",
-               content: "The console sparks." });
-    spe.exec({ op: "panelAdd", beat: "b1", id: "kp1" });
-    spe.exec({ op: "spineBeatSplit", beat: "b1", at: 2, newId: "b1b" });
-    check("split moves the tail blocks and keeps panels with the head",
-      VB.spineBeatById(spe.project, "b1").beat.blocks.map(function (b) {
-        return b.id; }).join(",") === "k1,k2" &&
-      VB.spineBeatById(spe.project, "b1b").beat.blocks[0].id === "k3" &&
-      VB.spineBeatById(spe.project, "b1").beat.panels.length === 1 &&
-      VB.spineBeatById(spe.project, "b1b").beat.panels.length === 0 &&
-      spe.project.spine.scenes[0].beats.map(function (b) {
-        return b.id; }).join(",") === "b1,b1b,b3,b2");
-    spe.exec({ op: "spineBeatMerge", beat: "b1", from: "b1b" });
-    check("merge concatenates and dissolves the second beat",
-      VB.spineBeatById(spe.project, "b1").beat.blocks.map(function (b) {
-        return b.id; }).join(",") === "k1,k2,k3" &&
-      VB.spineBeatById(spe.project, "b1b") === null);
-    spe.exec({ op: "spineBeatMerge", beat: "b1", from: "b2" }); // not adjacent
-    check("merge refuses a non-adjacent beat",
-      VB.spineBeatById(spe.project, "b2") !== null);
-    // referential integrity: every block/panel sits in exactly one beat
+    spe.exec({ op: "blockAdd", panel: "p1", id: "k2", kind: "line",
+               character: "", text: "Not today." });
+    spe.exec({ op: "blockMove", block: "k2", panel: "p2", index: 0 });
     var seen = {};
     var dupes = 0;
-    VB.spineFlatBeats(spe.project).forEach(function (e) {
-      e.beat.blocks.concat(e.beat.panels).forEach(function (item) {
-        if (seen[item.id]) dupes++;
-        seen[item.id] = true;
+    spe.project.spine.panels.forEach(function (p) {
+      p.rows.forEach(function (r) {
+        if (seen[r.id]) dupes++;
+        seen[r.id] = true;
       });
     });
-    check("every block and panel sits in exactly one beat", dupes === 0);
+    check("every row sits in exactly one panel",
+      dupes === 0 &&
+      VB.spinePanelOfRow(spe.project, "k2").panel.id === "p2");
+
     var spRep = await VB.replayJournal(JSON.parse(JSON.stringify(spe.journal)));
     check("the spine replays byte-exact",
-      JSON.stringify(spRep.project.spine) ===
-      JSON.stringify(spe.project.spine));
-    spe.exec({ op: "spineSceneRemove", id: "sg1" });
+      JSON.stringify(spRep.project.spine.panels.map(function (p) {
+        return [p.id, p.setting, p.duration, p.rows]; })) ===
+      JSON.stringify(spe.project.spine.panels.map(function (p) {
+        return [p.id, p.setting, p.duration, p.rows]; })) &&
+      JSON.stringify(spRep.project.spine.settings) ===
+      JSON.stringify(spe.project.spine.settings));
+    spe.exec({ op: "settingRemove", id: "set_silo" });
+    check("a removed setting leaves panels dangling-but-rendering",
+      VB.spineSettingById(spe.project, "set_silo") === null &&
+      VB.spineSceneRuns(spe.project).length === 3);
+    spe.exec({ op: "panelRemove", id: "p1" });
     spe.exec({ op: "undo" });
-    check("slug removal undoes with its beats, blocks, and panels",
-      VB.spineBeatById(spe.project, "b1") !== null &&
-      VB.spineBeatById(spe.project, "b1").beat.blocks.length === 3 &&
-      VB.spineBeatById(spe.project, "b1").beat.panels.length === 1);
+    check("panel removal undoes with rows and setting",
+      VB.spinePanelById(spe.project, "p1") !== null &&
+      VB.spinePanelById(spe.project, "p1").panel.rows[0].id === "k1" &&
+      VB.spinePanelById(spe.project, "p1").panel.setting === "set_roof");
   } catch (err) {
     fail++;
     log("  SPINE EXCEPTION: " + (err && err.stack || err), "fail");
@@ -3287,32 +3279,33 @@
       wse.project.writing.docs[0].name === "Document 01" &&
       wse.project.writing.docs[1].name === "Episode 2");
 
-    // script atoms live on SPINE BEATS (PreProductionSpine.md)
-    wse.exec({ op: "spineSceneAdd", id: "slug_w", title: "EXT. ROOFTOP" });
-    wse.exec({ op: "spineBeatAdd", id: "wbt1", scene: "slug_w" });
-    wse.exec({ op: "blockAdd", beat: "wbt1", id: "b1", kind: "action",
+    // script atoms live on SPINE PANELS (PreProductionSpine.md,
+    // panel-driven); characters are REGISTRY ids
+    wse.exec({ op: "characterAdd", id: "ch_mira", name: "MIRA" });
+    wse.exec({ op: "characterAdd", id: "ch_juno", name: "JUNO" });
+    wse.exec({ op: "panelAdd", id: "wp1" });
+    wse.exec({ op: "blockAdd", panel: "wp1", id: "b1", kind: "action",
                content: "Wind. Sirens far below." });
-    wse.exec({ op: "blockAdd", beat: "wbt1", id: "line_a", kind: "line",
-               character: "MIRA", text: "We jump on three." });
-    wse.exec({ op: "blockAdd", beat: "wbt1", id: "line_b", kind: "line",
-               character: "JUNO", text: "Three as in NOW three?" });
-    wse.exec({ op: "blockAdd", beat: "wbt1", id: "b2", kind: "note",
+    wse.exec({ op: "blockAdd", panel: "wp1", id: "line_a", kind: "line",
+               character: "ch_mira", text: "We jump on three." });
+    wse.exec({ op: "blockAdd", panel: "wp1", id: "line_b", kind: "line",
+               character: "ch_juno", text: "Three as in NOW three?" });
+    wse.exec({ op: "blockAdd", panel: "wp1", id: "b2", kind: "note",
                index: 1, content: "[[storm builds all scene]]" });
-    var wbeat = VB.spineBeatById(wse.project, "wbt1").beat;
-    check("blocks insert in order (explicit index respected)",
-      wbeat.blocks.map(function (b) { return b.id; }).join(",") ===
+    var wpan = VB.spinePanelById(wse.project, "wp1").panel;
+    check("rows insert in order (explicit index respected)",
+      wpan.rows.map(function (b) { return b.id; }).join(",") ===
       "b1,b2,line_a,line_b" &&
-      wbeat.blocks[0].kind === "action" && wbeat.blocks[1].kind === "note");
+      wpan.rows[0].kind === "action" && wpan.rows[1].kind === "note");
     check("lines resolve by id anywhere on the spine",
-      VB.lineById(wse.project, "line_b").block.character === "JUNO" &&
+      VB.lineById(wse.project, "line_b").block.character === "ch_juno" &&
       VB.lineTextOf(VB.lineById(wse.project, "line_b").block) ===
       "Three as in NOW three?" &&
-      !VB.lineById(wse.project, "b1"), // action blocks are not lines
+      !VB.lineById(wse.project, "b1"), // action rows are not lines
       JSON.stringify(VB.lineById(wse.project, "line_b").block.text));
     wse.exec({ op: "blockEdit", block: "line_a",
                lang: "default", text: "We jump on three. Trust me." });
-    wse.exec({ op: "blockEdit", block: "line_a",
-               character: "MIRA (calm)" });
+    wse.exec({ op: "blockEdit", block: "line_a", character: "ch_juno" });
     wse.exec({ op: "blockEdit", block: "line_a",
                lang: "fr", text: "On saute à trois. Fais-moi confiance." });
     var lineA = VB.lineById(wse.project, "line_a").block;
@@ -3320,28 +3313,35 @@
       VB.lineTextOf(lineA) === "We jump on three. Trust me." &&
       VB.lineTextOf(lineA, "fr") ===
       "On saute à trois. Fais-moi confiance." &&
-      lineA.character === "MIRA (calm)" &&
+      lineA.character === "ch_juno" &&
       VB.lineTextOf(lineA, "de") === VB.lineTextOf(lineA), // fallback
       JSON.stringify(lineA.text));
+    // renaming a registry character renames it EVERYWHERE (the payoff)
+    wse.exec({ op: "characterRename", id: "ch_juno", name: "JUNO II" });
+    check("registry renames flow to every line",
+      VB.spinePanelText(wse.project, wpan).indexOf("JUNO II:") >= 0,
+      VB.spinePanelText(wse.project, wpan));
     wse.exec({ op: "blockMove", block: "line_b", index: 0 });
-    check("blocks reorder inside their beat",
-      wbeat.blocks[0].id === "line_b", wbeat.blocks.map(function (b) {
+    check("rows reorder inside their panel",
+      wpan.rows[0].id === "line_b", wpan.rows.map(function (b) {
         return b.id; }).join(","));
-    wse.exec({ op: "spineBeatAdd", id: "wbt2", scene: "slug_w" });
-    wse.exec({ op: "blockMove", block: "b2", beat: "wbt2", index: 0 });
-    check("blocks move across beats (writer restructuring)",
-      VB.spineBeatById(wse.project, "wbt2").beat.blocks[0].id === "b2" &&
-      wbeat.blocks.length === 3);
+    wse.exec({ op: "panelAdd", id: "wp2" });
+    wse.exec({ op: "blockMove", block: "b2", panel: "wp2", index: 0 });
+    check("rows move across panels (writer restructuring)",
+      VB.spinePanelById(wse.project, "wp2").panel.rows[0].id === "b2" &&
+      wpan.rows.length === 3);
     var wRep = await VB.replayJournal(JSON.parse(JSON.stringify(wse.journal)));
     check("writing replays byte-exact",
-      JSON.stringify(wRep.project.spine) ===
-      JSON.stringify(wse.project.spine) &&
-      JSON.stringify(wRep.project.writing) ===
-      JSON.stringify(wse.project.writing));
+      JSON.stringify(wRep.project.spine.panels.map(function (p) {
+        return [p.id, p.setting, p.rows]; })) ===
+      JSON.stringify(wse.project.spine.panels.map(function (p) {
+        return [p.id, p.setting, p.rows]; })) &&
+      JSON.stringify(wRep.project.spine.characters) ===
+      JSON.stringify(wse.project.spine.characters));
     wse.exec({ op: "blockRemove", block: "b1" });
     wse.exec({ op: "undo" });
-    check("block removal undoes through project history",
-      VB.spineBeatById(wse.project, "wbt1").beat.blocks.some(function (b) {
+    check("row removal undoes through project history",
+      VB.spinePanelById(wse.project, "wp1").panel.rows.some(function (b) {
         return b.id === "b1"; }));
     wse.exec({ op: "writingDocRemove", doc: "wd2" });
     check("document removal drops the doc",

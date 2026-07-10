@@ -1,291 +1,161 @@
 # VectorBrush2 — The Pre-Production Spine (ontology ladder)
 
-Status: DESIGN (2026-07-10) — the spine model + op family (§3) LANDED
-as slice 2 (spine.js; blocks/panels re-seated on beats); the
-interchange UI (beat rail, spine-bound deck) is the next slice.
-
-How Story, Boards, Audio, and Roughs share
-data without sync hell, and the interchange units that let writing in
-the text editor create storyboard panels and vice-versa. Companion to
-[Architecture.md](Architecture.md) §6.3–§6.6 and
+Status: DESIGN, revised 2026-07-10 to the PANEL-DRIVEN model (user
+decision, derived from real storyboard workflows) and IMPLEMENTED
+through the flat-spine slices (spine.js). How Story, Boards, Audio, and
+Roughs share data without sync hell, and the interchange unit that lets
+writing in the text editor create storyboard panels and vice-versa.
+Companion to [Architecture.md](Architecture.md) §6.3–§6.6 and
 [SystemsDeepDive.md](SystemsDeepDive.md) §5.
 
-The governing principles (all already standing):
+The governing principles (all standing):
 
 1. **Single writer.** Every entity type has exactly ONE owning
    workspace. Nobody keeps a copy of anyone else's data.
 2. **Op routing, not data conversion.** Editing "someone else's" data
-   from your workspace issues an op from the OWNER's op family (the
-   mechanism Lines already use: a line edited on a panel is a
-   `writing.*` op). There is no interchange *file* between workspaces —
-   the interchange format is the spine itself.
-3. **References by id, downstream→upstream only.** Panels point at
-   lines; scenes point at the beats that seeded them. Upstream never
-   points down; reverse lookups are queries over the one model
-   (`VB.refsTo`).
+   from your workspace issues an op from the OWNER's op family. There
+   is no interchange *file* between workspaces — the interchange format
+   is the spine itself.
+3. **References by id, downstream→upstream only.** Numbering and
+   grouping are PRESENTATION, derived live; identity is the stable
+   random id underneath.
 4. **Promotion + drift, never auto-sync.** Crossing a rung of the
-   ladder is an explicit journaled op that records WHAT REVISION it
+   ladder is an explicit journaled op that records what revision it
    consumed. Upstream edits after promotion make downstream *stale*
    (visible badge, one-tap re-pull) — they never silently rewrite it.
 
 ---
 
-## 1. The ladder
+## 1. The model: ONE container — the PANEL
 
-Entities are born on a rung, get referenced from below, and cross rungs
-only by explicit promotion. Sketchbook and Pitch sit OFF the ladder by
-decision (2026-07-10): they are isolated concepting spaces; pulling
-material out of them is promotion-as-COPY (optional provenance note,
-never a live link).
-
-```
-L0  CONCEPT      Sketchbook items, Pitch slides        (isolated; copy-out only)
-L1  SCRIPT       Slug → Beat → Block / Line             (Story owns; the content spine)
-L2  PICTURE+SOUND Panel (per beat), Take (per line),    (Boards / Audio own;
-                 animatic timing                         the first real timeline)
-L3  PRODUCTION   Scene, SceneInstance, master sequence  (Roughs owns; THE clock)
-L4  DOWNSTREAM   cast instances, tracks, camera,        (already built; addresses
-                 grading passes, exports                 time as (instance, frame))
-```
-
-### The entity table
-
-| Entity | Id | Owner | Created by | Referenced by | Promotes to |
-| --- | --- | --- | --- | --- | --- |
-| **Slug** (story scene) | `slug_xxxx` | Story spine | either editor | beats (membership), scene provenance | seeds a production Scene |
-| **Beat** (one story moment) | `beat_xxxx` | Story spine | either editor | blocks+panels (membership), scene provenance | its duration seeds scene timing |
-| **Block** (action / note) | `blk_xxxx` | Story | Writing (or Boards caption edit → op-routed) | beats | — |
-| **Line** (dialogue: character, per-language text, rev) | `line_xxxx` | Story | Writing (or drafted on a panel → op-routed) | panels, takes, lip-sync, subtitles | — |
-| **Panel** (art cell, duration, notes) | `panel_xxxx` | Boards | Boards | animatic, scene provenance | art can seed a rough layer (copy) |
-| **Take** (recorded audio of a line) | `take_xxxx` | Audio | Audio | timeline clips | placed on the master timeline |
-| **Scene / SceneInstance** | `scene_xxxx` / `seq_xxxx` | Roughs (sequence) | "establish scenes" promotion | everything downstream | — |
-
-Notes:
-
-- **Ids are random and collision-resistant** (the `VB.actorNewId`
-  discipline) — this design depends on the scene-id migration
-  (SystemsDeepDive §5.1.2) landing first.
-- **Scenes are still established in Roughs, by the user** (standing
-  decision). Slugs do NOT auto-become scenes; "establish scenes from
-  the spine" is the explicit promotion that mints `scene_xxxx`, records
-  `seededFrom: {slug, beats, revs}`, and copies beat durations into
-  instance durations. The default mapping is one slug → one scene, and
-  the user can split/merge at establishment.
-- **"Actions" from the data list are Blocks** — an action block is the
-  story event ("Kai ducks behind the console"). It doesn't need a
-  richer entity until something downstream points at individual actions
-  (the "data earns an id when a second workspace points at it" rule —
-  blocks already have ids, so the hook exists for free).
-- **Quirks** (camera notes, transitions, mood refs) are plain fields on
-  their owner (panel.notes, beat title, slug synopsis). Not entities.
-
-### The timing ladder (who owns time, when)
-
-| Rung | Time | Owner | Notes |
-| --- | --- | --- | --- |
-| T0 | script pacing | Story | optional per-slug estimate; advisory only |
-| T1 | animatic time | Boards | panel durations; beat duration = Σ its panels (a panel-less beat holds a default 1 s); scratch audio aligns here |
-| T2 | sequence time | Roughs | "establish scenes" copies beat durations → instance durations; from this moment the master sequence owns time FOREVER (already true in code — the audio-rig master clock) |
-| T3 | downstream | — | `(sceneInstance, localFrame)` addressing; already built |
-
-Each promotion stores consumed revisions; later upstream edits show as
-drift ("3 beats changed since Scene 4 was established"), resolved by an
-explicit re-pull op or dismissed.
-
-**Audio re-conform (decision needed with Roughs/Audio integration):**
-clips today anchor at absolute master-ms. Once T2 re-timing exists,
-dialogue belonging to a scene should move WITH the scene. Add optional
-scene-anchored placement — `{anchor: seqInstanceId, offsetMs}` — beside
-absolute placement; re-timing then re-conforms anchored clips for free.
-
----
-
-## 2. Story ⟷ Boards: the interchange units
-
-**The unit of bidirectional sync is the BEAT.** Not the block (too
-fine: a ten-line exchange would explode into ten panels), not the panel
-(too visual: three panels of camera coverage are one story moment).
-A beat is one discrete story moment; on the Writing side it is a
-contiguous span of blocks, on the Boards side a group of panels. The
-spine holds the ordering; both editors are views of it:
+Scene, shot, and panel are the same thing here (user decision): the
+spine is ONE flat, ordered list of panels. A panel is a story moment:
 
 ```
 project.spine = {
-  scenes: [ { id: "slug_x", title, synopsis?, beats: [beatId…] } ],
-  beats:  { beat_x: { id, title?, blocks: [blkId…], panels: [panelId…] } }
+  panels:     [ { id, rows: [row…], setting: settingId|null,
+                  cell: <y2kvector doc>, duration: <frames> } ],
+  characters: [ { id, name } ],     — registry (casting sheet → Actors)
+  settings:   [ { id, name } ]      — registry (casting sheet → Backgrounds)
 }
-writing owns block/line CONTENT;   boards owns panel CONTENT (art, duration)
+row = { id, kind: "action"|"note", content }
+    | { id, kind: "line", character: <characterId>, text: {lang: str} }
 ```
 
-### Two personas, one script (the equal-power principle)
+- **The rows are the script** (Story-owned, `writing.*` block ops); the
+  **cell is the drawing** (Boards-owned, drawn through the journaled
+  editTarget); the **duration is the animatic timing**. One script,
+  two views — the Story editor renders the row stacks as prose, the
+  Boards deck renders the same rows under each frame, both editing the
+  same blocks by op routing.
+- **Panel numbering is presentation**: index + 1, live-renumbered on
+  insert/delete. Identity is the stable id; nothing references numbers.
+- **SCENES ARE DERIVED, never stored**: a run of consecutive panels
+  sharing a setting is a scene (film grammar — continuous action in one
+  setting; `VB.spineSceneRuns`). Change one panel's setting chip and
+  the boundary moves. No settings assigned = one implicit scene.
+- **The registries are the casting sheets.** Characters and settings
+  auto-create on first use (typing a new name in a WHO field or setting
+  chip mints the entry — the recorder journals the add). Renaming an
+  entry renames it everywhere. Later rungs LINK them: a character to an
+  Actor, a setting to a Background — that is the bridge from
+  pre-production into the production pipeline.
+- Multi-drawing coverage of one moment = consecutive panels (text on
+  the first, art-only siblings after). Art-only and text-only panels
+  are both first-class; an undrawn panel renders as a dashed SLOT in
+  the deck and a hollow marker (▢) on the script rail.
 
-Some authors write scripts; others write THROUGH storyboards. Both must
-have the same effect and control over the script — a boards-first
-author is writing, not annotating. The design consequence: **there is
-one script, rendered twice.** A beat's content is its typed block stack
-(action lines, dialogue Lines, notes). The Writing editor renders the
-stacks as a prose document; the Boards view renders the SAME stack
-under each beat's panel group — the full stack, not a one-line caption
-— editable in place, with every edit op-routed to the owning `writing.*`
-family. Nothing script-shaped is reachable from only one side. (The
-"caption" is therefore not a Boards field at all on spine-bound boards:
-what reads as a caption IS the beat's action text.)
+### The ladder (entities by production stage)
 
-A boards-first script naturally reads like a breakdown — terse action
-lines under frames. That is a legitimate draft: a writer can refine the
-prose in place later without breaking anything, because block ids are
-stable and only revisions bump.
+```
+L0  CONCEPT      Sketchbook items, Pitch slides     (isolated; copy-out only)
+L1  SCRIPT       Panel rows + Characters/Settings   (Story owns content)
+L2  PICTURE+SOUND Panel art + durations, Takes       (Boards / Audio own;
+                                                      the animatic timeline)
+L3  PRODUCTION   Scene, SceneInstance, master seq   (Roughs owns; THE clock)
+L4  DOWNSTREAM   cast instances, tracks, camera,    (already built; addresses
+                 grading, exports                    time as (instance, frame))
+```
 
-### The membrane rules
+### Timing (who owns time, when)
 
-The key trick is **lazy materialization**: creating a beat from either
-side creates ONLY the beat. The other side renders a beat with no
-native content as a placeholder — an empty paragraph slot in Writing,
-an empty frame in Boards — and the real block/panel entity is minted
-only when someone actually types or draws. No phantom entities, no
-round-trip echo.
+| Rung | Time | Owner | Notes |
+| --- | --- | --- | --- |
+| T1 | animatic time | the panel list | per-panel `duration` in frames is the STORED truth; the audio-backed timeline lane (planned) EDITS it — panels laid against the waveform, boundary drags emitting `panelDuration` ops. Never absolute audio ms: re-cutting audio must not re-time the board |
+| T2 | sequence time | Roughs | "establish scenes" consumes setting runs + panel durations with provenance; from then on the master sequence owns time (already true in code) |
+| T3 | downstream | — | `(sceneInstance, localFrame)`; already built |
 
-Determinism note: the journal only ever sees explicit spine/block/panel
-ops. Everything below labeled *default* is an EDITOR GESTURE deciding
-which ops to emit — never a replay-time rule, so segmentation defaults
-can be tuned without touching op semantics.
+Audio re-conform (decision still pending with Roughs/Audio
+integration): clips today anchor at absolute master-ms; scene-anchored
+placement (`{seqInstance, offsetMs}`) should join before T2 re-timing
+ships.
 
-**Script → Boards (what creates a frame):**
+---
+
+## 2. The membrane: two personas, one script
+
+Some authors write scripts; others write THROUGH storyboards. Both have
+the same effect and control over the script — **there is one script,
+rendered twice**, and with the panel-driven model the membrane is
+symmetric and trivial: **paragraph = panel, both directions, 1:1.**
+
+**Script → Boards:**
 
 | Writing act | Boards consequence |
 | --- | --- |
-| Type a slug (scene heading) | new scene group (`spineSceneAdd`) |
-| Start an action paragraph | **new beat** (default) → a new frame appears, showing the text as it is typed; the panel entity is minted when an artist first draws |
-| Enter within a beat (via the beat rail / merge) | same beat — prose detail, NO new frame |
-| Dialogue (character + line) | attaches to the CURRENT beat — dialogue chips on its frame, no new frame; a dialogue run opening a scene mints the beat it lives in |
-| Note block `[[…]]` | visible in the beat's stack; no frame |
-| Merge / split beats (beat-rail gesture) | frames regroup (`spineBeatMerge/Split`; split keeps panels with the first half) |
+| ＋ panel / Enter at the end of a panel's action | a NEW panel — a dashed slot in the deck, numbered in sequence |
+| Type action / dialogue / note rows | the frame's text — same rows, live |
+| WHO field | dialogue references a registry character (minted on first use) |
+| Setting chip | scene boundaries move (derived runs) |
+| Backspace on an empty, art-less panel | the panel is removed (merge up) |
 
-The *action paragraph = new beat* default is deliberate: it hands
-script-first writers a usable board breakdown for free, and
-over-segmentation is the cheap failure — merging beats on the visible
-beat rail is one gesture, while splitting dense prose later is work.
-
-**Boards → Script (what writes to the script):**
+**Boards → Script:**
 
 | Boards act | Script consequence |
 | --- | --- |
-| New frame in a gap between beats | new beat (`spineBeatAdd`) → an empty paragraph slot at that position |
-| Type the frame's text (the "caption") | the beat's action block — this IS script prose (`writingBlockAdd/Edit`, op-routed) |
-| Add a dialogue chip (character + text) | a real Line in the beat — a script dialogue block (`writing.*`) |
-| Reorder frames across beats / reorder beats | the script reorders (`spineBeatMove` — one op, both views) |
-| New scene group | `spineSceneAdd` with a placeholder slug ("SCENE 4"); a writer renames it to a proper heading later |
-| Add MORE panels inside a beat | camera coverage — NO script change |
-| Panel art, duration, arrows, composition | Boards-local craft — never generates text |
-| Panel tech notes (camera, fx) | Boards-local by default; explicitly promotable to a script note block |
-| Delete the last panel of a beat | the beat (and its text) SURVIVES — beat deletion is always its own explicit act |
-| Delete a beat (`spineBeatRemove`) | journaled + undoable; UI confirms when the other side has content |
+| ＋ Panel | a new panel = a new script row slot (inherits the current panel's setting) |
+| Type the frame's text field | the panel's action row — script prose (`writing.*` op-routed) |
+| Add/edit a dialogue row | a real Line (registry character + per-language text) |
+| Reorder panels | the script reorders — rows travel with their panel |
+| Draw / duration | Boards-local craft; never generates text |
+| Delete a panel | journaled + undoable; rows and art go together (it is one entity) |
 
-**The invariants under both tables:**
+Determinism note: everything above is the EDITOR deciding which ops to
+emit — the journal only ever sees explicit `panelAdd/Move/Remove/
+Duration/Setting`, `blockAdd/Edit/Move/Remove`, `characterAdd/…`,
+`settingAdd/…`. Gesture defaults can be retuned without touching op
+semantics or replay.
 
-1. STRUCTURE (scene order, beat order, beat existence) is shared — one
-   spine op, both views re-render.
-2. STORY CONTENT (action text, dialogue, notes) is shared and fully
-   editable from both views — always via the owning `writing.*` ops.
-3. CRAFT is local and never crosses: visual craft (art, coverage,
-   duration, composition) stays in Boards; prose craft is just… the
-   blocks, so there is nothing writing-local to leak.
-4. Within-beat additions never create counterparts on the other side —
-   the beat spine is the only thing that echoes.
-
-- Free-form boards (mood boards) and free writing docs (outlines,
-  notes) stay unbound — the spine binds ONE canonical screenplay
-  structure per project in v1.
-
-### Block model (Fountain-shaped on purpose)
-
-Writing's block types map 1:1 onto Fountain elements: scene heading =
-slug, action paragraph = action block, character+dialogue = Line,
-`[[note]]` = note block, `= synopsis` = beat title/break. We adopt the
-SEMANTICS, not the storage — but a Fountain import/export becomes a
-cheap projection, which is the external-interchange story for scripts
-(same position as OpenTimelineIO for timing: exports are projections,
-the journal stays truth).
+Fountain remains the external-interchange shape (scene heading =
+derived setting-run header, action/dialogue/notes = rows); an
+import/export is a projection, the journal stays truth.
 
 ---
 
-## 3. Ops sketch (model + ops first, no UI — the standing pattern)
+## 3. What is deliberately NOT built
 
-New `spine.*` family (issuable from Writing OR Boards):
-
-```
-spineSceneAdd    {id, index, title}
-spineSceneMove/Rename/Remove
-spineBeatAdd     {id, scene, index, title?}
-spineBeatMove    {id, scene, index}
-spineBeatSplit   {beat, atBlock, newId}
-spineBeatMerge   {first, second}
-spineBeatRemove  {id}
-```
-
-Existing families gain beat membership:
-
-```
-writing:  blockAdd {id, beat, index, type, text|lineId} · blockEdit ·
-          blockMove {beat, index} · blockRemove · lineEdit (unchanged)
-boards:   panelAdd {id, beat, index} · panelMove {beat, index} ·
-          panelDuration · panelRemove · art via journaled editTarget
-          (all existing mechanisms)
-audio:    takeLink {take, line} · clip anchor {seqInst, offsetMs}
-roughs:   establishScenes {scenes:[{id, slug, beats, revs, duration}]}
-```
-
-Revisions: `rev` bumps on Line/Block/Beat edit ops; promotion ops store
-consumed revs; `VB.refsTo(id)` (pure reverse-index helper over the one
-in-memory model) powers where-used and drift badges everywhere.
-
-Migration: current `boards.beats` lift into the spine (a journaled
-migration op or replay-compat shim — old `beatAdd` ops replay as spine
-beats with no blocks); current free-form writing docs stay as they are;
-binding a doc to the spine is a new op.
-
-Gates (suite section "spine"): replay determinism for every op;
-referential integrity after arbitrary op sequences — every beat's
-blocks/panels resolve, every block/panel belongs to exactly one beat,
-scene lists contain each beat exactly once, line refs resolve or render
-as explicitly-dangling chips; split/merge round-trip; establishScenes
-provenance and drift computation.
-
----
-
-## 4. What we are deliberately NOT building
-
-- No per-workspace mirror documents, no converters, no diff/merge of
-  prose against panels. The moment two workspaces both own a fact, the
-  sync problem the spine exists to prevent comes back.
-- No automatic writeback from downstream: re-timing a scene never edits
-  a beat; redrawing a panel never touches text. Drift badges only.
+- No stored scene/beat/group level — grouping is derived from settings.
+- No per-workspace mirror documents, no converters, no auto-writeback
+  from downstream (re-timing a scene never edits a panel; redrawing
+  never touches text).
 - No live links out of Sketchbook/Pitch (copy-out only).
-- No auto-establishment of scenes from slugs (user establishes in
-  Roughs; the spine just makes it one tap and records provenance).
+- No separate "Notes" script mode — one script (user decision); loose
+  ideation lives in the Sketchbook, in-panel notes are note rows.
 
-## 5. Open questions
+## 4. Open questions
 
-1. **Parked-panels shelf** (panels out of the cut, kept): v2 candidate,
-   affects `spineBeatRemove` semantics.
-2. **Beat granularity pressure**: dialogue-heavy scenes may want a
-   panel per line; the model allows it (many panels per beat) — whether
-   the UI offers "explode beat to panels per line" is a build-time call.
-3. **Multiple screenplay docs** (episodes/drafts) binding to one spine:
-   v1 binds one; drafts likely want spine VERSIONS, which is a bigger
-   feature (journal already gives history).
-4. **Slug↔scene 1:1 default**: establishment UI should offer split/
-   merge at promotion time; how much re-establishment (re-seeding an
-   already-established scene from changed beats) is allowed before it
-   fights Roughs edits — needs the drift UX to answer.
-5. **Take management** (multiple takes per line, language-tagged takes)
-   interacts with the reserved per-language hooks (Architecture §6.3) —
-   design when Audio grows recording/import-per-line flows.
-6. **Transitions** (CUT TO:, dissolves): a Fountain transition element
-   that is really a property of the boundary between beats/scenes —
-   model as an optional boundary field when something (the animatic,
-   Composite) consumes it, not before.
-7. **Segmentation default tuning**: *action paragraph = new beat* is
-   the recommended editor default; if real writing sessions show it
-   over-segmenting, the gesture layer can change freely (journal
-   semantics are unaffected by design — see the determinism note).
+1. **The audio-ruler timing lane** (T1 editor): panel blocks against
+   the waveform, boundary drags → `panelDuration` ops. Next slice.
+2. **establishScenes promotion**: consumes setting runs + durations,
+   mints production scenes with `seededFrom` provenance and revs; the
+   drift-badge UX rides on it.
+3. **Registry management UI** (rename/merge/delete characters and
+   settings, see-where-used) — auto-create covers authoring; cleanup
+   needs a small panel later. Removing an entry currently leaves
+   dangling refs that render empty (tested, accepted for now).
+4. **Take management** (multiple takes per line, language-tagged) —
+   design when Audio grows per-line recording flows.
+5. **Transitions** (CUT TO:) as boundary properties — model when
+   something consumes them.
+6. **Panel gestures**: drag-reorder in both editors, split (a panel's
+   tail rows → new panel), duplicate-as-coverage. UX slice.

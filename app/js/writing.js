@@ -32,12 +32,15 @@
   }
 
   /** A dialogue Line anywhere on the story spine:
-   *  { beat, block, index }. Blocks live on spine beats (spine.js) —
-   *  the script is the beats' block stacks, rendered as prose here and
+   *  { panel, row, index }. Rows live on spine panels (spine.js) —
+   *  the script is the panels' row stacks, rendered as prose here and
    *  as frame text in Boards. */
   function lineById(project, id) {
-    var hit = VB.spineBeatOfBlock(project, id);
-    return hit && hit.block.kind === "line" ? hit : null;
+    var hit = VB.spinePanelOfRow(project, id);
+    return hit && hit.row.kind === "line"
+      ? { panel: hit.panel, block: hit.row, row: hit.row,
+          index: hit.index }
+      : null;
   }
 
   function lineText(block, lang) {
@@ -88,33 +91,34 @@
     }
   });
 
-  // Blocks are the script atoms and live on SPINE BEATS (spine.js):
-  // kind "action"/"note": { content } · kind "line": { character,
-  // text: {lang: str} }. Story owns the content; Boards edits it
-  // through these same ops (op routing — one script, rendered twice).
+  // Rows are the script atoms and live on SPINE PANELS (spine.js):
+  // kind "action"/"note": { content } · kind "line": { character:
+  // <registry id>, text: {lang: str} }. Story owns the content; Boards
+  // edits it through these same ops (op routing — one script, two
+  // views).
   VB.defineOp("blockAdd", function (c, op) {
-    var hit = VB.spineBeatById(c.project, op.beat);
+    var hit = VB.spinePanelById(c.project, op.panel);
     if (!hit) return;
     c.history.push(c.project);
-    var block = op.kind === "line"
+    var row = op.kind === "line"
       ? { id: op.id, kind: "line",
           character: op.character || "",
           text: {} }
       : { id: op.id, kind: op.kind === "note" ? "note" : "action",
           content: op.content || "" };
-    if (op.kind === "line") block.text[LANG] = op.text || "";
-    var blocks = hit.beat.blocks;
-    var at = op.index === undefined ? blocks.length
-      : Math.max(0, Math.min(blocks.length, op.index));
-    blocks.splice(at, 0, block);
+    if (op.kind === "line") row.text[LANG] = op.text || "";
+    var rows = hit.panel.rows;
+    var at = op.index === undefined ? rows.length
+      : Math.max(0, Math.min(rows.length, op.index));
+    rows.splice(at, 0, row);
     c.sync();
   });
 
   VB.defineOp("blockEdit", function (c, op) {
-    var hit = VB.spineBeatOfBlock(c.project, op.block);
+    var hit = VB.spinePanelOfRow(c.project, op.block);
     if (!hit) return;
     c.history.push(c.project);
-    var b = hit.block;
+    var b = hit.row;
     if (b.kind === "line") {
       if (op.character !== undefined) b.character = op.character;
       if (op.text !== undefined) {
@@ -130,41 +134,34 @@
     c.sync();
   });
 
-  // within a beat or across beats (the writer restructuring a moment)
+  // within a panel or across panels (the writer restructuring)
   VB.defineOp("blockMove", function (c, op) {
-    var hit = VB.spineBeatOfBlock(c.project, op.block);
+    var hit = VB.spinePanelOfRow(c.project, op.block);
     if (!hit) return;
-    var dest = op.beat ? VB.spineBeatById(c.project, op.beat) : null;
-    var beat = dest ? dest.beat : hit.beat;
-    if (!beat) return;
+    var dest = op.panel ? VB.spinePanelById(c.project, op.panel) : null;
+    var panel = dest ? dest.panel : hit.panel;
+    if (!panel) return;
     c.history.push(c.project);
-    hit.beat.blocks.splice(hit.index, 1);
-    var to = Math.max(0, Math.min(beat.blocks.length, op.index | 0));
-    beat.blocks.splice(to, 0, hit.block);
+    hit.panel.rows.splice(hit.index, 1);
+    var to = Math.max(0, Math.min(panel.rows.length, op.index | 0));
+    panel.rows.splice(to, 0, hit.row);
     c.sync();
   });
 
   VB.defineOp("blockRemove", function (c, op) {
-    var hit = VB.spineBeatOfBlock(c.project, op.block);
+    var hit = VB.spinePanelOfRow(c.project, op.block);
     if (!hit) return;
     c.history.push(c.project);
-    hit.beat.blocks.splice(hit.index, 1);
+    hit.panel.rows.splice(hit.index, 1);
     c.sync();
   });
 
   // ---- workspace view (DOM; mounted by the shell) -------------------------------
-  // Two editors behind one tab: SCRIPT (the spine screenplay — slugs →
-  // beats, the interchange surface Boards renders as frames) and NOTES
-  // (the free one-body document, kept from the earlier slice).
+  // ONE script (user decision, panel-driven revision): the spine's flat
+  // panel list rendered as prose, with scene headings DERIVED from
+  // setting runs. The Notes split is gone.
 
-  var view = { host: null, app: null, editorEl: null,
-               mode: "script", xpanels: [], focusBeat: null };
-
-  function activeDoc() {
-    if (!view.app) return null;
-    var docs = writingOf(view.app.project).docs;
-    return docs.length ? docs[0] : null;
-  }
+  var view = { host: null, app: null, editorEl: null, focusPanel: null };
 
   function isEditing() {
     var el = document.activeElement;
@@ -177,42 +174,50 @@
     refresh();
   }
 
-  function commitBody() {
-    var body = view.editorEl && view.editorEl.querySelector(".wrbody");
-    if (!body) return;
-    var val = body.innerText.replace(/\n$/, "");
-    var doc = activeDoc();
-    if (!doc) {
-      if (val.trim() === "") return; // nothing typed, nothing created
-      view.app.exec({ op: "writingDocAdd", id: VB.actorNewId("wdoc"),
-                      name: "Story" });
-      doc = activeDoc();
-    }
-    if (doc && val !== (doc.text || "")) {
-      exec({ op: "writingDocEdit", doc: doc.id, text: val });
-    }
-  }
-
   // ---- the script editor (the spine, rendered as prose) ---------------------------
 
-  function firstAction(beat) {
-    for (var i = 0; i < beat.blocks.length; i++) {
-      if (beat.blocks[i].kind === "action") return beat.blocks[i];
+  function firstAction(panel) {
+    for (var i = 0; i < panel.rows.length; i++) {
+      if (panel.rows[i].kind === "action") return panel.rows[i];
     }
     return null;
   }
 
-  function commitAction(beat, el) {
+  function commitAction(panel, el) {
     var val = el.innerText.replace(/\n+$/, "");
-    var block = firstAction(beat);
-    if (block) {
-      if (val !== (block.content || "")) {
-        exec({ op: "blockEdit", block: block.id, content: val });
+    var row = firstAction(panel);
+    if (row) {
+      if (val !== (row.content || "")) {
+        exec({ op: "blockEdit", block: row.id, content: val });
       }
     } else if (val.trim() !== "") {
-      exec({ op: "blockAdd", id: VB.actorNewId("blk"), beat: beat.id,
+      exec({ op: "blockAdd", id: VB.actorNewId("blk"), panel: panel.id,
              index: 0, kind: "action", content: val });
     }
+  }
+
+  /** Resolve a typed character name to a registry id, minting the
+   *  entry on first use (the recorder journals the add). */
+  function characterIdFor(name) {
+    var project = view.app.project;
+    var v = String(name || "").trim();
+    if (!v) return "";
+    var hit = VB.spineFindByName(VB.spineOf(project).characters, v);
+    if (hit) return hit.id;
+    var id = VB.actorNewId("char");
+    view.app.exec({ op: "characterAdd", id: id, name: v });
+    return id;
+  }
+
+  function settingIdFor(name) {
+    var project = view.app.project;
+    var v = String(name || "").trim();
+    if (!v) return null;
+    var hit = VB.spineFindByName(VB.spineOf(project).settings, v);
+    if (hit) return hit.id;
+    var id = VB.actorNewId("set");
+    view.app.exec({ op: "settingAdd", id: id, name: v });
+    return id;
   }
 
   function editable(className, text, placeholder, commit) {
@@ -229,64 +234,72 @@
     return el;
   }
 
-  function renderBeat(scene, beat) {
+  function panelHasArt(panel) {
+    return panel.cell.edges.length > 0 || panel.cell.texts.length > 0;
+  }
+
+  function renderPanel(panel, number) {
     var project = view.app.project;
     var row = document.createElement("div");
     row.className = "wrbeat";
-    row.dataset.beat = beat.id;
+    row.dataset.panel = panel.id;
 
-    // the beat rail: the visible seam between prose and frames
+    // the rail: the panel's NUMBER (presentation — index+1) and its
+    // Boards art state; the visible seam between prose and frames
     var rail = document.createElement("div");
     rail.className = "wrrail";
-    rail.title = beat.panels.length
-      ? beat.panels.length + " frame(s) in Boards"
-      : "no frames yet — Boards shows this beat as an empty slot";
-    rail.textContent = beat.panels.length ? "▣" + beat.panels.length : "▢";
+    rail.title = panelHasArt(panel)
+      ? "panel " + number + " — drawn in Boards"
+      : "panel " + number + " — no drawing yet";
+    rail.textContent = number + (panelHasArt(panel) ? " ▣" : " ▢");
     row.appendChild(rail);
 
     var body = document.createElement("div");
     body.className = "wrbeatbody";
 
-    // action text — Enter starts the NEXT beat (paragraph = beat, the
-    // membrane's editor default); Backspace on an empty beat merges up
+    // action text — Enter starts the NEXT panel (paragraph = panel);
+    // Backspace on an empty, art-less panel removes it (merge up)
     var action = editable("wraction",
-      (firstAction(beat) || {}).content || "",
-      "action…", function (el) { commitAction(beat, el); });
+      (firstAction(panel) || {}).content || "",
+      "action…", function (el) { commitAction(panel, el); });
     action.addEventListener("keydown", function (ev) {
       if (ev.key === "Enter" && !ev.shiftKey) {
         ev.preventDefault();
-        var hit = VB.spineBeatById(project, beat.id);
+        var hit = VB.spinePanelById(project, panel.id);
         if (!hit) return;
         action.blur(); // commits through the blur handler, frees refresh
-        var nid = VB.actorNewId("beat");
-        view.focusBeat = nid;
-        exec({ op: "spineBeatAdd", id: nid, scene: scene.id,
-               index: hit.index + 1 });
+        var nid = VB.actorNewId("panel");
+        view.focusPanel = nid;
+        exec({ op: "panelAdd", id: nid, index: hit.index + 1,
+               setting: panel.setting || null });
       } else if (ev.key === "Backspace" && action.innerText.trim() === "" &&
-                 beat.blocks.length <= (firstAction(beat) ? 1 : 0) &&
-                 beat.panels.length === 0) {
-        var hit2 = VB.spineBeatById(project, beat.id);
+                 panel.rows.length <= (firstAction(panel) ? 1 : 0) &&
+                 !panelHasArt(panel)) {
+        var hit2 = VB.spinePanelById(project, panel.id);
         if (!hit2 || hit2.index === 0) return;
         ev.preventDefault();
-        var prevId = hit2.scene.beats[hit2.index - 1].id;
-        view.focusBeat = prevId;
+        var prevId = VB.spineOf(project).panels[hit2.index - 1].id;
+        view.focusPanel = prevId;
         action.blur(); // an empty commit is a no-op
-        view.focusBeat = prevId; // re-arm if the blur consumed it
-        exec({ op: "spineBeatRemove", id: beat.id });
+        view.focusPanel = prevId; // re-arm if the blur consumed it
+        exec({ op: "panelRemove", id: panel.id });
       }
     });
     body.appendChild(action);
 
-    // dialogue + notes, each row op-routed to its own block
-    beat.blocks.forEach(function (b) {
+    // dialogue + notes, each row op-routed to its own block op
+    panel.rows.forEach(function (b) {
       if (b.kind === "line") {
+        var who = VB.spineCharacterById(project, b.character);
         var lr = document.createElement("div");
         lr.className = "wrline";
-        lr.appendChild(editable("wrchar", b.character, "WHO",
+        lr.appendChild(editable("wrchar", who ? who.name : "", "WHO",
           function (el) {
             var v = el.innerText.trim();
-            if (v !== (b.character || "")) {
-              exec({ op: "blockEdit", block: b.id, character: v });
+            var cur = VB.spineCharacterById(project, b.character);
+            if (v !== ((cur && cur.name) || "")) {
+              exec({ op: "blockEdit", block: b.id,
+                     character: characterIdFor(v) });
             }
           }));
         lr.appendChild(editable("wrsay", lineText(b), "dialogue…",
@@ -308,16 +321,33 @@
       }
     });
 
+    var tools = document.createElement("div");
+    tools.className = "wrtools";
     var addLine = document.createElement("button");
     addLine.className = "wradd";
     addLine.textContent = "＋ dialogue";
-    addLine.title = "Add a dialogue line to this beat";
+    addLine.title = "Add a dialogue line to this panel";
     addLine.addEventListener("click", function () {
-      view.focusBeat = beat.id;
-      exec({ op: "blockAdd", id: VB.actorNewId("line"), beat: beat.id,
+      view.focusPanel = panel.id;
+      exec({ op: "blockAdd", id: VB.actorNewId("line"), panel: panel.id,
              kind: "line", character: "", text: "" });
     });
-    body.appendChild(addLine);
+    tools.appendChild(addLine);
+
+    // the setting chip: scenes are DERIVED from runs of this value
+    var setEntry = VB.spineSettingById(project, panel.setting);
+    var chip = editable("wrsetchip", setEntry ? setEntry.name : "",
+      "setting…", function (el) {
+        var v = el.innerText.trim();
+        var cur = VB.spineSettingById(project, panel.setting);
+        if (v === ((cur && cur.name) || "")) return;
+        exec({ op: "panelSetting", id: panel.id,
+               setting: settingIdFor(v) });
+      });
+    chip.title = "This panel's setting — consecutive panels sharing a " +
+      "setting form a SCENE";
+    tools.appendChild(chip);
+    body.appendChild(tools);
 
     row.appendChild(body);
     return row;
@@ -329,55 +359,48 @@
     var page = document.createElement("div");
     page.className = "wrpage wrscript";
 
-    spine.scenes.forEach(function (scene) {
-      var slug = editable("wrslug", scene.title, "SCENE HEADING…",
-        function (el) {
-          var v = el.innerText.trim();
-          if (v && v !== scene.title) {
-            exec({ op: "spineSceneRename", id: scene.id, title: v });
-          }
-        });
-      page.appendChild(slug);
-      scene.beats.forEach(function (beat) {
-        page.appendChild(renderBeat(scene, beat));
-      });
-      var addBeat = document.createElement("button");
-      addBeat.className = "wradd";
-      addBeat.textContent = "＋ beat";
-      addBeat.title = "New story moment — Boards shows it as a new frame";
-      addBeat.addEventListener("click", function () {
-        var nid = VB.actorNewId("beat");
-        view.focusBeat = nid;
-        exec({ op: "spineBeatAdd", id: nid, scene: scene.id });
-      });
-      page.appendChild(addBeat);
+    // scene headings are DERIVED: one per setting run
+    var runs = VB.spineSceneRuns(project);
+    runs.forEach(function (run, ri) {
+      var setEntry = VB.spineSettingById(project, run.setting);
+      var head = document.createElement("div");
+      head.className = "wrslug";
+      head.textContent = "SCENE " + (ri + 1) +
+        (setEntry ? " · " + setEntry.name : "");
+      head.title = "Derived from the panels' settings — change a " +
+        "panel's setting chip to move the boundary";
+      page.appendChild(head);
+      for (var i = run.from; i <= run.to; i++) {
+        page.appendChild(renderPanel(spine.panels[i], i + 1));
+      }
     });
 
-    var addScene = document.createElement("button");
-    addScene.className = "wradd wraddscene";
-    addScene.textContent = "＋ scene";
-    addScene.addEventListener("click", function () {
-      var sid = VB.actorNewId("slug");
-      var nid = VB.actorNewId("beat");
-      view.app.exec({ op: "spineSceneAdd", id: sid });
-      view.focusBeat = nid;
-      exec({ op: "spineBeatAdd", id: nid, scene: sid });
+    var addPanel = document.createElement("button");
+    addPanel.className = "wradd wraddscene";
+    addPanel.textContent = "＋ panel";
+    addPanel.title = "New story moment — one panel, one script row";
+    addPanel.addEventListener("click", function () {
+      var last = spine.panels[spine.panels.length - 1];
+      var nid = VB.actorNewId("panel");
+      view.focusPanel = nid;
+      exec({ op: "panelAdd", id: nid,
+             setting: (last && last.setting) || null });
     });
-    page.appendChild(addScene);
+    page.appendChild(addPanel);
 
-    if (!spine.scenes.length) {
+    if (!spine.panels.length) {
       var hint = document.createElement("div");
       hint.className = "wrhint";
-      hint.textContent = "start the script — every beat you write " +
-        "becomes a storyboard frame, and vice-versa";
-      page.insertBefore(hint, addScene);
+      hint.textContent = "start the script — every panel you write " +
+        "is a storyboard frame, and vice-versa";
+      page.insertBefore(hint, addPanel);
     }
     view.editorEl.appendChild(page);
 
-    if (view.focusBeat) { // land the caret where the writer is going
+    if (view.focusPanel) { // land the caret where the writer is going
       var target = view.editorEl.querySelector(
-        '.wrbeat[data-beat="' + view.focusBeat + '"] .wraction');
-      view.focusBeat = null;
+        '.wrbeat[data-panel="' + view.focusPanel + '"] .wraction');
+      view.focusPanel = null;
       if (target) target.focus();
     }
   }
@@ -385,30 +408,10 @@
   function refresh() {
     if (!view.host) return;
     // never clobber live typing — unless a handler queued a rebuild
-    // WITH a focus target (Enter's new beat, Backspace's merge-up)
-    if (isEditing() && !view.focusBeat) return;
+    // WITH a focus target (Enter's new panel, Backspace's merge-up)
+    if (isEditing() && !view.focusPanel) return;
     view.editorEl.innerHTML = "";
-    if (view.mode === "script") { renderScript(); return; }
-    var doc = activeDoc();
-    // NOTES: one infinite document, a single flowing editable page
-    // (Google-Docs style). Commits as one op per editing session.
-    var page = document.createElement("div");
-    page.className = "wrpage";
-    var body = document.createElement("div");
-    body.className = "wredit wrbody wrtext";
-    body.contentEditable = "true";
-    body.innerText = doc ? (doc.text || "") : "";
-    body.dataset.ph = "write the story…";
-    body.addEventListener("blur", commitBody);
-    body.addEventListener("keydown", function (ev) {
-      if (ev.key === "Escape") body.blur();
-      ev.stopPropagation(); // typing never triggers app shortcuts
-    });
-    page.appendChild(body);
-    page.addEventListener("click", function (ev) {
-      if (ev.target === page) body.focus(); // click the margin, type anyway
-    });
-    view.editorEl.appendChild(page);
+    renderScript();
   }
 
   function onKeyDown(ev) {
@@ -435,31 +438,6 @@
     view.app = app;
     host.innerHTML = "";
 
-    // Script (the spine screenplay) vs Notes (the free document)
-    view.xpanels = [];
-    if (app.xpanel) {
-      var modePanel = app.xpanel(null, "wr-mode");
-      view.xpanels.push(modePanel);
-      ["script", "notes"].forEach(function (m) {
-        var b = document.createElement("button");
-        b.textContent = m === "script" ? "Script" : "Notes";
-        b.title = m === "script"
-          ? "The screenplay — beats shared live with Boards"
-          : "Free story notes (one flowing document)";
-        b.dataset.wrmode = m;
-        b.classList.toggle("active", view.mode === m);
-        b.addEventListener("click", function () {
-          if (view.mode === "notes") commitBody();
-          view.mode = m;
-          modePanel.querySelectorAll("button").forEach(function (k) {
-            k.classList.toggle("active", k.dataset.wrmode === m);
-          });
-          refresh();
-        });
-        modePanel.appendChild(b);
-      });
-    }
-
     var body = document.createElement("div");
     body.id = "wr-body";
     var editorEl = document.createElement("div");
@@ -474,12 +452,7 @@
 
   function unmount() {
     if (!view.host) return;
-    if (view.mode === "notes") {
-      commitBody(); // leaving the tab never loses an uncommitted edit
-    }
     window.removeEventListener("keydown", onKeyDown);
-    (view.xpanels || []).forEach(function (p) { p.remove(); });
-    view.xpanels = [];
     view.host.innerHTML = "";
     view.host = null;
     view.editorEl = null;

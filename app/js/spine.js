@@ -1,227 +1,233 @@
-/* spine.js — the pre-production STORY SPINE (docs/PreProductionSpine.md):
- * slugs (story scenes) → BEATS → each beat's block stack (Story-owned
- * prose and dialogue) and panel group (Boards-owned art). The beat is
- * the story⟷boards interchange unit — one discrete story moment. The
- * spine owns STRUCTURE (scene and beat order, membership); block
- * content stays with writing.js and panel content with boards.js, so
- * "one script, rendered twice" holds: the Writing editor and the
- * Boards deck are two views of these same beats.
+/* spine.js — the pre-production STORY SPINE (docs/PreProductionSpine.md,
+ * revised 2026-07-10 to the PANEL-DRIVEN model): ONE flat, ordered list
+ * of PANELS — scene, shot, and panel are the same container. A panel is
+ * a story moment: its ROWS are the script (action / dialogue / note —
+ * Story-owned content), its CELL is the drawing (Boards-owned art), its
+ * SETTING references the settings registry. Panel numbering is
+ * presentation (index + 1, live-renumbered); identity is the stable id.
+ *
+ * SCENES ARE DERIVED, never stored: a run of consecutive panels sharing
+ * a setting is a scene (film grammar — continuous action in one
+ * setting). CHARACTERS and SETTINGS are the first registries — the
+ * casting sheets that later link to Actors and Backgrounds.
  *
  * Structure ops are issuable from either workspace; every op carries
- * its ids (adds throw without one — an index-derived fallback could
- * alias references, the sceneAdd lesson). Story slugs are NOT
- * production scenes: Roughs establishes those later, consuming beat
- * durations with provenance (the ladder's T1→T2 promotion).
+ * its ids (adds throw without one). Timing: per-panel duration in
+ * frames is the stored truth; the audio-backed timeline lane EDITS it
+ * (never absolute audio ms — re-cutting audio must not re-time the
+ * board).
  */
 (function () {
   "use strict";
 
+  var PANEL_W = 960 * 20, PANEL_H = 540 * 20;
+  var DEFAULT_DURATION = 24; // frames
+
   function spineOf(project) {
-    project.spine = project.spine || { scenes: [] };
+    project.spine = project.spine ||
+      { panels: [], characters: [], settings: [] };
     return project.spine;
   }
 
-  function sceneById(project, id) {
-    var scenes = spineOf(project).scenes;
-    for (var i = 0; i < scenes.length; i++) {
-      if (scenes[i].id === id) return { scene: scenes[i], index: i };
+  function panelById(project, id) {
+    var panels = spineOf(project).panels;
+    for (var i = 0; i < panels.length; i++) {
+      if (panels[i].id === id) return { panel: panels[i], index: i };
     }
     return null;
   }
 
-  /** A beat anywhere on the spine: { scene, sceneIndex, beat, index }. */
-  function beatById(project, id) {
-    var scenes = spineOf(project).scenes;
-    for (var s = 0; s < scenes.length; s++) {
-      for (var b = 0; b < scenes[s].beats.length; b++) {
-        if (scenes[s].beats[b].id === id) {
-          return { scene: scenes[s], sceneIndex: s,
-                   beat: scenes[s].beats[b], index: b };
+  function panelOfRow(project, rowId) {
+    var panels = spineOf(project).panels;
+    for (var i = 0; i < panels.length; i++) {
+      for (var r = 0; r < panels[i].rows.length; r++) {
+        if (panels[i].rows[r].id === rowId) {
+          return { panel: panels[i], panelIndex: i,
+                   row: panels[i].rows[r], index: r };
         }
       }
     }
     return null;
   }
 
-  /** Every beat in story order with its scene: [{ scene, beat }]. */
-  function flatBeats(project) {
-    var out = [];
-    spineOf(project).scenes.forEach(function (scene) {
-      scene.beats.forEach(function (beat) {
-        out.push({ scene: scene, beat: beat });
-      });
+  function entryById(list, id) {
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === id) return list[i];
+    }
+    return null;
+  }
+
+  function characterById(project, id) {
+    return entryById(spineOf(project).characters, id);
+  }
+
+  function settingById(project, id) {
+    return entryById(spineOf(project).settings, id);
+  }
+
+  function findByName(list, name) {
+    var want = String(name || "").trim().toLowerCase();
+    if (!want) return null;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].name.trim().toLowerCase() === want) return list[i];
+    }
+    return null;
+  }
+
+  /** SCENES, derived: runs of consecutive panels sharing a setting —
+   *  [{ setting: id|null, from, to }] over panel indices (inclusive). */
+  function sceneRuns(project) {
+    var panels = spineOf(project).panels;
+    var runs = [];
+    panels.forEach(function (p, i) {
+      var last = runs[runs.length - 1];
+      var s = p.setting || null;
+      if (last && last.setting === s) last.to = i;
+      else runs.push({ setting: s, from: i, to: i });
     });
-    return out;
+    return runs;
   }
 
-  function beatOfBlock(project, blockId) {
-    var flat = flatBeats(project);
-    for (var i = 0; i < flat.length; i++) {
-      var blocks = flat[i].beat.blocks;
-      for (var b = 0; b < blocks.length; b++) {
-        if (blocks[b].id === blockId) {
-          return { beat: flat[i].beat, scene: flat[i].scene,
-                   block: blocks[b], index: b };
-        }
-      }
-    }
-    return null;
-  }
-
-  function beatOfPanel(project, panelId) {
-    var flat = flatBeats(project);
-    for (var i = 0; i < flat.length; i++) {
-      var panels = flat[i].beat.panels;
-      for (var p = 0; p < panels.length; p++) {
-        if (panels[p].id === panelId) {
-          return { beat: flat[i].beat, scene: flat[i].scene,
-                   panel: panels[p], index: p };
-        }
-      }
-    }
-    return null;
-  }
-
-  /** The beat's story text as display lines — action/note content plus
+  /** The panel's story text as display lines — action/note content plus
    *  "CHARACTER: dialogue" — for animatic subtitles and frame text. */
-  function beatText(beat, lang) {
+  function panelText(project, panel, lang) {
     var out = [];
-    (beat.blocks || []).forEach(function (b) {
-      if (b.kind === "line") {
-        var t = VB.lineTextOf ? VB.lineTextOf(b, lang) : "";
-        if (t) out.push((b.character ? b.character + ": " : "") + t);
-      } else if (b.content) {
-        out.push(b.content);
+    (panel.rows || []).forEach(function (r) {
+      if (r.kind === "line") {
+        var t = VB.lineTextOf ? VB.lineTextOf(r, lang) : "";
+        var who = r.character &&
+          (characterById(project, r.character) || {}).name;
+        if (t) out.push((who ? who + ": " : "") + t);
+      } else if (r.content) {
+        out.push(r.content);
       }
     });
     return out.join("\n");
   }
 
-  // ---- structure ops (both workspaces record these) --------------------------------
+  function newPanelCell() {
+    var d = new VB.Y2KVectorDocument();
+    d.width = PANEL_W;
+    d.height = PANEL_H;
+    return d;
+  }
 
-  VB.defineOp("spineSceneAdd", function (c, op) {
-    if (!op.id) throw new Error("spineSceneAdd op requires an id");
+  // ---- panel ops (the one container — both workspaces record these) ---------------
+
+  VB.defineOp("panelAdd", function (c, op) {
+    if (!op.id) throw new Error("panelAdd op requires an id");
     c.history.push(c.project);
-    var scenes = spineOf(c.project).scenes;
-    var at = op.index === undefined ? scenes.length
-      : Math.max(0, Math.min(scenes.length, op.index));
-    scenes.splice(at, 0, {
+    var panels = spineOf(c.project).panels;
+    var at = op.index === undefined ? panels.length
+      : Math.max(0, Math.min(panels.length, op.index));
+    panels.splice(at, 0, {
       id: op.id,
-      title: op.title ||
-        "Scene " + String(scenes.length + 1).padStart(2, "0"),
-      beats: []
+      rows: [],
+      setting: op.setting || null,
+      cell: newPanelCell(),
+      duration: op.duration || DEFAULT_DURATION
     });
     c.sync();
   });
 
-  VB.defineOp("spineSceneRename", function (c, op) {
-    var hit = sceneById(c.project, op.id);
+  VB.defineOp("panelMove", function (c, op) {
+    var hit = panelById(c.project, op.id);
     if (!hit) return;
-    c.history.push(c.project);
-    hit.scene.title = op.title;
-    c.sync();
-  });
-
-  VB.defineOp("spineSceneMove", function (c, op) {
-    var hit = sceneById(c.project, op.id);
-    if (!hit) return;
-    var scenes = spineOf(c.project).scenes;
-    var to = Math.max(0, Math.min(scenes.length - 1, op.index));
+    var panels = spineOf(c.project).panels;
+    var to = Math.max(0, Math.min(panels.length - 1, op.index | 0));
     if (to === hit.index) return;
     c.history.push(c.project);
-    scenes.splice(hit.index, 1);
-    scenes.splice(to, 0, hit.scene);
+    panels.splice(hit.index, 1);
+    panels.splice(to, 0, hit.panel);
     c.sync();
   });
 
-  VB.defineOp("spineSceneRemove", function (c, op) {
-    var hit = sceneById(c.project, op.id);
+  VB.defineOp("panelRemove", function (c, op) {
+    var hit = panelById(c.project, op.id);
     if (!hit) return;
     c.history.push(c.project);
-    spineOf(c.project).scenes.splice(hit.index, 1);
+    spineOf(c.project).panels.splice(hit.index, 1);
     c.sync();
   });
 
-  VB.defineOp("spineBeatAdd", function (c, op) {
-    if (!op.id) throw new Error("spineBeatAdd op requires an id");
-    var hit = sceneById(c.project, op.scene);
+  VB.defineOp("panelDuration", function (c, op) {
+    var hit = panelById(c.project, op.id);
     if (!hit) return;
     c.history.push(c.project);
-    var beats = hit.scene.beats;
-    var at = op.index === undefined ? beats.length
-      : Math.max(0, Math.min(beats.length, op.index));
-    beats.splice(at, 0, {
-      id: op.id, title: op.title || "", blocks: [], panels: []
-    });
+    hit.panel.duration = Math.max(1, Math.min(9999, op.frames | 0));
     c.sync();
   });
 
-  VB.defineOp("spineBeatRename", function (c, op) {
-    var hit = beatById(c.project, op.id);
+  /** Assign/clear the panel's setting — scene boundaries move with it
+   *  (scenes are derived from setting runs, never stored). */
+  VB.defineOp("panelSetting", function (c, op) {
+    var hit = panelById(c.project, op.id);
     if (!hit) return;
     c.history.push(c.project);
-    hit.beat.title = op.title;
+    hit.panel.setting = op.setting || null;
     c.sync();
   });
 
-  // beats move within or across scenes; order is the spine's alone
-  VB.defineOp("spineBeatMove", function (c, op) {
-    var hit = beatById(c.project, op.id);
-    if (!hit) return;
-    var dest = op.scene ? sceneById(c.project, op.scene) : null;
-    var scene = dest ? dest.scene : hit.scene;
-    if (!scene) return;
+  // ---- the registries (characters, settings — the casting sheets) -----------------
+  // entries auto-create on first use from the editors (the recorder
+  // mints the op); later they LINK to actors and backgrounds
+
+  VB.defineOp("characterAdd", function (c, op) {
+    if (!op.id) throw new Error("characterAdd op requires an id");
     c.history.push(c.project);
-    hit.scene.beats.splice(hit.index, 1);
-    var to = Math.max(0, Math.min(scene.beats.length, op.index | 0));
-    scene.beats.splice(to, 0, hit.beat);
+    spineOf(c.project).characters.push(
+      { id: op.id, name: op.name || "" });
     c.sync();
   });
 
-  /** Split at block index `at`: blocks[at..] move to the new beat
-   *  placed immediately after; PANELS STAY WITH THE FIRST HALF (the
-   *  deterministic default — the artist redistributes afterwards). */
-  VB.defineOp("spineBeatSplit", function (c, op) {
-    if (!op.newId) throw new Error("spineBeatSplit op requires newId");
-    var hit = beatById(c.project, op.beat);
-    if (!hit) return;
+  VB.defineOp("characterRename", function (c, op) {
+    var e = characterById(c.project, op.id);
+    if (!e) return;
     c.history.push(c.project);
-    var at = Math.max(0, Math.min(hit.beat.blocks.length, op.at | 0));
-    var moved = hit.beat.blocks.splice(at);
-    hit.scene.beats.splice(hit.index + 1, 0, {
-      id: op.newId, title: op.title || "", blocks: moved, panels: []
-    });
+    e.name = op.name;
     c.sync();
   });
 
-  /** Merge the beat immediately AFTER `beat` (same scene) into it —
-   *  blocks and panels concatenate in order. */
-  VB.defineOp("spineBeatMerge", function (c, op) {
-    var hit = beatById(c.project, op.beat);
-    if (!hit) return;
-    var next = hit.scene.beats[hit.index + 1];
-    if (!next || (op.from && next.id !== op.from)) return;
+  VB.defineOp("characterRemove", function (c, op) {
+    var list = spineOf(c.project).characters;
+    var e = entryById(list, op.id);
+    if (!e) return;
     c.history.push(c.project);
-    hit.beat.blocks = hit.beat.blocks.concat(next.blocks);
-    hit.beat.panels = hit.beat.panels.concat(next.panels);
-    hit.scene.beats.splice(hit.index + 1, 1);
+    list.splice(list.indexOf(e), 1);
     c.sync();
   });
 
-  VB.defineOp("spineBeatRemove", function (c, op) {
-    var hit = beatById(c.project, op.id);
-    if (!hit) return;
+  VB.defineOp("settingAdd", function (c, op) {
+    if (!op.id) throw new Error("settingAdd op requires an id");
     c.history.push(c.project);
-    hit.scene.beats.splice(hit.index, 1);
+    spineOf(c.project).settings.push({ id: op.id, name: op.name || "" });
+    c.sync();
+  });
+
+  VB.defineOp("settingRename", function (c, op) {
+    var e = settingById(c.project, op.id);
+    if (!e) return;
+    c.history.push(c.project);
+    e.name = op.name;
+    c.sync();
+  });
+
+  VB.defineOp("settingRemove", function (c, op) {
+    var list = spineOf(c.project).settings;
+    var e = entryById(list, op.id);
+    if (!e) return;
+    c.history.push(c.project);
+    list.splice(list.indexOf(e), 1);
     c.sync();
   });
 
   window.VB = window.VB || {};
   VB.spineOf = spineOf;
-  VB.spineSceneById = sceneById;
-  VB.spineBeatById = beatById;
-  VB.spineFlatBeats = flatBeats;
-  VB.spineBeatOfBlock = beatOfBlock;
-  VB.spineBeatOfPanel = beatOfPanel;
-  VB.spineBeatText = beatText;
+  VB.spinePanelById = panelById;
+  VB.spinePanelOfRow = panelOfRow;
+  VB.spineCharacterById = characterById;
+  VB.spineSettingById = settingById;
+  VB.spineFindByName = findByName;
+  VB.spineSceneRuns = sceneRuns;
+  VB.spinePanelText = panelText;
 })();

@@ -71,13 +71,14 @@
     // Pitch (pitch.js): a sequential slide deck; each slide is a
     // y2kvector cell. Rides the journal.
     this.pitch = { slides: [], cur: 0 };
-    // The pre-production STORY SPINE (spine.js, PreProductionSpine.md):
-    // slugs → beats → { blocks (Story-owned), panels (Boards-owned) }.
-    // The beat is the story⟷boards interchange unit. Rides the journal.
-    this.spine = { scenes: [] };
-    // Boards (boards.js): the deck view's selection over the spine's
-    // flattened beats. Panel content lives ON the spine beats.
-    this.boards = { cur: { beat: 0, panel: 0 } };
+    // The pre-production STORY SPINE (spine.js, PreProductionSpine.md,
+    // panel-driven revision): ONE flat ordered list of PANELS — each a
+    // story moment with script rows + art cell + setting ref — plus the
+    // CHARACTERS and SETTINGS registries (the casting sheets). Scenes
+    // are DERIVED from setting runs, never stored. Rides the journal.
+    this.spine = { panels: [], characters: [], settings: [] };
+    // Boards (boards.js): the deck view's selection — a panel index.
+    this.boards = { cur: { panel: 0 } };
     // The object LIBRARY (library.js): symbols (converted selections)
     // and backgrounds — global containers for instantiation later.
     this.library = [];
@@ -191,18 +192,12 @@
       return null;
     }
     if (t.boardPanel) {
-      // panels live on the story spine's beats (spine.js)
-      var scenes2 = (this.spine && this.spine.scenes) || [];
-      for (var ss = 0; ss < scenes2.length; ss++) {
-        var beats = scenes2[ss].beats;
-        for (var bb = 0; bb < beats.length; bb++) {
-          for (var pp = 0; pp < beats[bb].panels.length; pp++) {
-            if (beats[bb].panels[pp].id === t.boardPanel) {
-              return { cell: beats[bb].panels[pp].cell, actor: null,
-                       label: (beats[bb].title || scenes2[ss].title ||
-                               "beat") + " ▸ panel " + (pp + 1) };
-            }
-          }
+      // panels are the story spine's one container (spine.js)
+      var panels2 = (this.spine && this.spine.panels) || [];
+      for (var pp = 0; pp < panels2.length; pp++) {
+        if (panels2[pp].id === t.boardPanel) {
+          return { cell: panels2[pp].cell, actor: null,
+                   label: "panel " + (pp + 1) };
         }
       }
       return null;
