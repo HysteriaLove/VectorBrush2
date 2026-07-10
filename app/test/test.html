@@ -51,6 +51,7 @@
 <script src="../js/library.js"></script>
 <script src="../js/audio.js"></script>
 <script src="../js/sequence.js"></script>
+<script src="../js/stepseq.js"></script>
 <script src="../js/y2kshell.js"></script>
 <script src="../js/thumbs.js"></script>
 <script src="../js/brainstorm.js"></script>
@@ -4127,6 +4128,122 @@
   } catch (err) {
     fail++;
     log("  Y2KSHELL EXCEPTION: " + (err && err.stack || err), "fail");
+  }
+
+  // ============================ step sequencer ================================
+  // Instances + timing runs (stepseq.js, docs/StepSequencer.md): the
+  // prototype/instance discipline on the stage, ranged exposure ops
+  // that maintain runs with deterministic fragment ids, and both
+  // renderers drawing placed cells under instance transforms.
+  log("");
+  log("step sequencer:");
+  try {
+    var ste = new VB.Session({ width: 11000, height: 8000 });
+    // a red symbol in the library to place (same clip path as convert)
+    ste.exec({ op: "brush",
+               points: [{ x: 2000, y: 2000 }, { x: 3000, y: 2200 }],
+               radius: 300, color: { r: 220, g: 40, b: 40, a: 255 } });
+    var stBand = [{ x: 1500, y: 1500 }, { x: 3600, y: 1500 },
+                  { x: 3600, y: 2700 }, { x: 1500, y: 2700 }];
+    ste.exec({ op: "symbolCreate", id: "st_sym", clip:
+      JSON.parse(JSON.stringify(VB.clipFromLifted(
+        VB.regionLift(ste.project.activeCell(), stBand), null))) });
+    ste.exec({ op: "actorAdd", id: "st_actor", poseId: "st_p1" });
+    ste.exec({ op: "poseAdd", actor: "st_actor", id: "st_p2" });
+
+    ste.exec({ op: "instancePlace", id: "st_i1", scene: "scene@0",
+               ref: "st_sym", kind: "symbol", x: 4000, y: 1000 });
+    ste.exec({ op: "instancePlace", id: "st_i2", scene: "scene@0",
+               ref: "st_actor", kind: "actor", x: 0, y: 0 });
+    ste.exec({ op: "instancePlace", id: "st_bad", scene: "scene@0",
+               ref: "nope", kind: "actor", x: 0, y: 0 });
+    var stScene = ste.project.scenes[0];
+    check("placement lands instances (bad refs no-op)",
+      stScene.cast.length === 2 &&
+      stScene.cast[0].id === "st_i1" && stScene.cast[0].scale === 1);
+    check("placing drops a whole-scene Visible span (144f default seq)",
+      VB.stepClipsFor(stScene, "vis:st_i1").length === 1 &&
+      VB.stepClipsFor(stScene, "vis:st_i1")[0].duration === 144 &&
+      VB.stepVisibleAt(stScene, "st_i1", 100) === true);
+
+    // exposure runs: paint, overwrite, erase, merge
+    ste.exec({ op: "exposureSet", id: "r1", scene: "scene@0",
+               lane: "pose", target: "pose:st_i2",
+               from: 10, to: 20, value: "st_p1" });
+    ste.exec({ op: "exposureSet", id: "r2", scene: "scene@0",
+               lane: "pose", target: "pose:st_i2",
+               from: 15, to: 30, value: "st_p2" });
+    var stRuns = VB.stepClipsFor(stScene, "pose:st_i2");
+    check("overlapping paint splits the earlier run",
+      stRuns.length === 2 &&
+      stRuns[0].start === 10 && stRuns[0].duration === 5 &&
+      stRuns[0].label === "st_p1" &&
+      stRuns[1].start === 15 && stRuns[1].duration === 16 &&
+      stRuns[1].label === "st_p2",
+      JSON.stringify(stRuns));
+    ste.exec({ op: "exposureSet", id: "r3", scene: "scene@0",
+               lane: "pose", target: "pose:st_i2",
+               from: 12, to: 17, value: null });
+    stRuns = VB.stepClipsFor(stScene, "pose:st_i2");
+    check("erase carves runs",
+      stRuns.length === 2 &&
+      stRuns[0].start === 10 && stRuns[0].duration === 2 &&
+      stRuns[1].start === 18 && stRuns[1].duration === 13);
+    ste.exec({ op: "exposureSet", id: "r4", scene: "scene@0",
+               lane: "pose", target: "pose:st_i2",
+               from: 12, to: 17, value: "st_p1" });
+    stRuns = VB.stepClipsFor(stScene, "pose:st_i2");
+    check("adjacent same-value runs merge",
+      stRuns.length === 2 &&
+      stRuns[0].start === 10 && stRuns[0].duration === 8 &&
+      stRuns[0].label === "st_p1",
+      JSON.stringify(stRuns));
+    check("pose lookup honors the painted run",
+      VB.stepPoseAt(ste.project, stScene, stScene.cast[1], 12).id === "st_p1" &&
+      VB.stepPoseAt(ste.project, stScene, stScene.cast[1], 20).id === "st_p2" &&
+      VB.stepPoseAt(ste.project, stScene, stScene.cast[1], 100).id === "st_p1");
+
+    // transforms clamp; removal cascades every clip of the instance
+    ste.exec({ op: "instanceTransform", id: "st_i1",
+               scale: 0, rotation: 45 });
+    check("transform clamps scale and keeps rotation",
+      stScene.cast[0].scale === 0.01 && stScene.cast[0].rotation === 45);
+    ste.exec({ op: "instanceTransform", id: "st_i1", scale: 1, rotation: 0 });
+    ste.exec({ op: "instanceRemove", id: "st_i2" });
+    check("removal cascades the instance's clips",
+      stScene.cast.length === 1 &&
+      VB.stepClipsFor(stScene, "pose:st_i2").length === 0 &&
+      VB.stepClipsFor(stScene, "vis:st_i2").length === 0);
+    ste.exec({ op: "undo" });
+    var stScene2 = ste.project.scenes[0]; // history rebuilt the scene
+    check("undo restores the cast and its runs",
+      stScene2.cast.length === 2 &&
+      VB.stepClipsFor(stScene2, "pose:st_i2").length === 2);
+
+    var stPlain = function (p) {
+      return JSON.stringify(p.scenes.map(function (s) {
+        return { cast: s.cast, tracks: s.tracks };
+      }));
+    };
+    var stRep = await VB.replayJournal(JSON.parse(JSON.stringify(ste.journal)));
+    check("instances and runs replay byte-exact",
+      stPlain(stRep.project) === stPlain(ste.project));
+
+    // the oracle draws a placed instance under its transform
+    ste.exec({ op: "editTargetClear" }); // ensure scene rendering
+    var stCv = document.createElement("canvas");
+    stCv.width = 550; stCv.height = 400;
+    var stCtx = stCv.getContext("2d");
+    VB.renderProject(stCtx, ste.project, { zoom: 1, panX: 0, panY: 0, dpr: 1 });
+    // the symbol's red blob sits near (2500,2100)tw in its cell; the
+    // instance offsets it by (4000,1000)tw -> (325, 155)px at zoom 1
+    var stPx = stCtx.getImageData(325, 155, 1, 1).data;
+    check("the oracle renders the placed instance offset",
+      stPx[0] > 180 && stPx[1] < 120,
+      "rgb(" + stPx[0] + "," + stPx[1] + "," + stPx[2] + ")");
+  } catch (err) {
+    fail++;
+    log("  STEPSEQ EXCEPTION: " + (err && err.stack || err), "fail");
   }
 
   // =========================== streaming skeleton ============================

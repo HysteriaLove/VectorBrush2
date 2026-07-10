@@ -152,6 +152,8 @@
       scenes: target.scenes.map(function (sc) {
         return {
           id: sc.id, name: sc.name,
+          cast: JSON.parse(JSON.stringify(sc.cast || [])),
+          tracks: JSON.parse(JSON.stringify(sc.tracks || [])),
           layers: sc.layers.map(function (l) {
             return {
               name: l.name, visible: l.visible, locked: l.locked,
@@ -222,6 +224,8 @@
     target.scenes = snap.scenes.map(function (sc) {
       return {
         id: sc.id, name: sc.name,
+        cast: JSON.parse(JSON.stringify(sc.cast || [])),
+        tracks: JSON.parse(JSON.stringify(sc.tracks || [])),
         layers: sc.layers.map(function (l) {
           return {
             name: l.name, visible: l.visible, locked: l.locked,

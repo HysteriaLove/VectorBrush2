@@ -29,12 +29,35 @@
   function renderProject(ctx, project, view, opts) {
     setupStage(ctx, project.stage ? project.stage() : project, view,
                opts && opts.transparent);
-    var layers = project.scene().layers;
+    var scene = project.scene();
+    var layers = scene.layers;
     var frame = project.cur ? project.cur.frame || 0 : 0;
+    drawCast(ctx, project, scene, view, frame, true); // backgrounds
     for (var i = layers.length - 1; i >= 0; i--) {
       if (!layers[i].visible) continue;
       drawDocContent(ctx, VB.frameCell(layers[i], frame), view);
     }
+    drawCast(ctx, project, scene, view, frame, false); // actors, symbols
+  }
+
+  /** Placed instances (stepseq.js): each draws its prototype's cell
+   *  under its own transform, composed onto the stage transform — the
+   *  SAME math the Pixi backend applies, parity-gated. */
+  function drawCast(ctx, project, scene, view, frame, backgrounds) {
+    if (!VB.stepCellAt || !scene.cast || !scene.cast.length) return;
+    scene.cast.forEach(function (inst) {
+      if ((inst.kind === "background") !== backgrounds) return;
+      var cell = VB.stepCellAt(project, scene, inst, frame);
+      if (!cell) return;
+      ctx.save();
+      ctx.translate(inst.x || 0, inst.y || 0);
+      var r = (inst.rotation || 0) * Math.PI / 180;
+      if (r) ctx.rotate(r);
+      var sc = inst.scale === undefined ? 1 : inst.scale;
+      if (sc !== 1) ctx.scale(sc, sc);
+      drawDocContent(ctx, cell, view);
+      ctx.restore();
+    });
   }
 
   function setupStage(ctx, stage, view, transparent) {

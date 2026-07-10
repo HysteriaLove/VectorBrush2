@@ -637,13 +637,59 @@
       surface._cells.delete(key);
       if (VB.assets) VB.assets.release(cellAssetKey(key));
     }
-    var layers = project.scene().layers;
+    var scene = project.scene();
+    var layers = scene.layers;
     var frame = project.cur.frame || 0;
     var structure = project.cur.scene + "|" + layers.map(function (l) {
       return l.visible ? 1 : 0;
-    }).join("");
+    }).join("") + "|" + (scene.cast || []).map(function (inst) {
+      return inst.id;
+    }).join(",");
     var live = {};
     var order = [];
+    // placed instances (stepseq.js) — the same transform math as the
+    // oracle's drawCast; backgrounds under the layers, the rest above
+    function pushCast(backgrounds) {
+      (scene.cast || []).forEach(function (inst) {
+        if ((inst.kind === "background") !== backgrounds) return;
+        var doc = VB.stepCellAt
+          ? VB.stepCellAt(project, scene, inst, frame) : null;
+        if (!doc) return;
+        var key = project.cur.scene + ":cast:" + inst.id;
+        live[key] = true;
+        var hash = hashCell(doc);
+        var st = surface._cells.get(key);
+        var zoomStale = st && st.hasHairlines &&
+          Math.abs(view.zoom - st.zoom) / st.zoom > 0.02;
+        if (!st || st.hash !== hash || zoomStale) {
+          if (st) dropCell(key, st);
+          st = { hash: hash, zoom: view.zoom, hasHairlines: false, bytes: 0 };
+          st.container = buildCell(doc, view.zoom, st);
+          surface._cells.set(key, st);
+          if (VB.assets) {
+            (function (k) {
+              VB.assets.claim(cellAssetKey(k), st.bytes, function () {
+                var evicted = surface._cells.get(k);
+                if (evicted) {
+                  if (evicted.container) {
+                    evicted.container.destroy({ children: true });
+                  }
+                  surface._cells.delete(k);
+                }
+              });
+            })(key);
+          }
+        } else if (VB.assets) {
+          VB.assets.touch(cellAssetKey(key));
+        }
+        st.container.position.set(inst.x || 0, inst.y || 0);
+        st.container.rotation = (inst.rotation || 0) * Math.PI / 180;
+        var sc = inst.scale === undefined ? 1 : inst.scale;
+        st.container.scale.set(sc, sc);
+        order.push(st.container);
+      });
+    }
+    pushCast(true);
     for (var i = layers.length - 1; i >= 0; i--) {
       if (!layers[i].visible) continue;
       var key = project.cur.scene + ":" + i;
@@ -674,7 +720,8 @@
       }
       order.push(st.container);
     }
-    // drop cells for deleted/hidden layers
+    pushCast(false);
+    // drop cells for deleted/hidden layers and removed instances
     surface._cells.forEach(function (st, key) {
       if (!live[key]) dropCell(key, st);
     });

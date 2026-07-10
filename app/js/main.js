@@ -348,6 +348,110 @@
     return { x: p.x * VB.TWIPS, y: p.y * VB.TWIPS };
   }
 
+  /** Select-tool drag of a placed instance (stepseq.js): topmost hit
+   *  under the pointer takes the gesture — ghosted live, rewound, then
+   *  ONE journaled instanceMove so undo lands on the pre-drag spot. */
+  function instanceHitDrag(ev) {
+    if (!VB.stepCellAt) return false;
+    var scene = app.project.scenes[app.project.cur.scene];
+    if (!scene || !scene.cast || !scene.cast.length) return false;
+    var p = clientToTwips(ev);
+    var frame = app.project.cur.frame || 0;
+    var hit = null;
+    for (var i = scene.cast.length - 1; i >= 0; i--) {
+      var inst = scene.cast[i];
+      var cell = VB.stepCellAt(app.project, scene, inst, frame);
+      if (!cell) continue;
+      var sc = inst.scale === undefined ? 1 : inst.scale;
+      if (p.x >= inst.x && p.x <= inst.x + (cell.width || 0) * sc &&
+          p.y >= inst.y && p.y <= inst.y + (cell.height || 0) * sc) {
+        hit = inst;
+        break;
+      }
+    }
+    if (!hit) return false;
+    canvas.setPointerCapture(ev.pointerId);
+    var x0 = hit.x, y0 = hit.y, p0 = p;
+    function onMove(e2) {
+      var q = clientToTwips(e2);
+      hit.x = Math.round(x0 + q.x - p0.x); // live ghost, no journal
+      hit.y = Math.round(y0 + q.y - p0.y);
+      requestRender();
+    }
+    function onUp() {
+      canvas.removeEventListener("pointermove", onMove);
+      canvas.removeEventListener("pointerup", onUp);
+      canvas.removeEventListener("pointercancel", onUp);
+      var fx = hit.x, fy = hit.y;
+      if (fx === x0 && fy === y0) return;
+      hit.x = x0; hit.y = y0; // the op's history sees the pre-drag state
+      app.exec({ op: "instanceMove", id: hit.id, x: fx, y: fy });
+    }
+    canvas.addEventListener("pointermove", onMove);
+    canvas.addEventListener("pointerup", onUp);
+    canvas.addEventListener("pointercancel", onUp);
+    return true;
+  }
+
+  /** Drag a Library/Actors thumbnail onto the stage to PLACE an
+   *  instance (a plain click keeps the row's own action). */
+  function wirePlaceDrag(el, kind, refId, rowEl) {
+    el.style.touchAction = "none";
+    el.addEventListener("pointerdown", function (ev) {
+      if (ev.button !== 0) return;
+      var started = false, ghost = null;
+      el.setPointerCapture(ev.pointerId);
+      var x0 = ev.clientX, y0 = ev.clientY;
+      function onMove(e2) {
+        if (!started &&
+            Math.abs(e2.clientX - x0) + Math.abs(e2.clientY - y0) < 8) return;
+        if (!started) {
+          started = true;
+          ghost = document.createElement("div");
+          ghost.className = "placeghost";
+          ghost.textContent = "＋ place";
+          document.body.appendChild(ghost);
+        }
+        ghost.style.left = (e2.clientX + 12) + "px";
+        ghost.style.top = (e2.clientY + 8) + "px";
+      }
+      function onUp(e2) {
+        el.removeEventListener("pointermove", onMove);
+        el.removeEventListener("pointerup", onUp);
+        el.removeEventListener("pointercancel", onUp);
+        if (ghost) ghost.remove();
+        if (!started) return; // plain click falls through to the row
+        if (rowEl) { // a drag must not fire the row's click action
+          var stop = function (ce) {
+            ce.stopPropagation();
+            ce.preventDefault();
+          };
+          rowEl.addEventListener("click", stop, true);
+          setTimeout(function () {
+            rowEl.removeEventListener("click", stop, true);
+          }, 0);
+        }
+        var r = canvas.getBoundingClientRect();
+        if (e2.clientX < r.left || e2.clientX > r.right ||
+            e2.clientY < r.top || e2.clientY > r.bottom) return;
+        if (app.project.editTarget) {
+          setMsg("leave symbol edit to place instances");
+          return;
+        }
+        var p = clientToTwips(e2);
+        var sc = app.project.scenes[app.project.cur.scene];
+        if (!sc || !sc.id) return;
+        app.exec({ op: "instancePlace", id: VB.actorNewId("inst"),
+                   scene: sc.id, ref: refId, kind: kind,
+                   x: Math.round(p.x), y: Math.round(p.y) });
+        setMsg("placed — select-tool drags move it; its rows are in the step grid");
+      }
+      el.addEventListener("pointermove", onMove);
+      el.addEventListener("pointerup", onUp);
+      el.addEventListener("pointercancel", onUp);
+    });
+  }
+
   function setZoom(zoom, cx, cy) {
     zoom = Math.min(64, Math.max(0.02, zoom));
     if (cx === undefined) {
@@ -593,6 +697,14 @@
         return;
       }
       var tool = tools[app.tool];
+      // placed INSTANCES (stepseq.js) grab before the planar tools:
+      // with the select tool, pressing inside an instance's bounds
+      // drags it — ghosted live, ONE journaled instanceMove on release
+      if (app.tool === "select" && !app.project.editTarget &&
+          instanceHitDrag(ev)) {
+        ev.preventDefault();
+        return;
+      }
       // a pending transform session stays GRABBABLE across the selection
       // family: presses on its frame route to the transform tool; a
       // press anywhere else lands the session first, then the active
@@ -2019,9 +2131,9 @@
 
     // the step sequencer keeps its OWN view: wheel zooms its cells
     // (the scene timeline zooms independently inside its strip)
-    var tlFrames = document.getElementById("tl-frames");
-    if (tlFrames) {
-      tlFrames.addEventListener("wheel", function (ev) {
+    var stepGridEl = document.getElementById("step-grid");
+    if (stepGridEl) {
+      stepGridEl.addEventListener("wheel", function (ev) {
         ev.preventDefault();
         var factor = ev.deltaY < 0 ? 1.2 : 1 / 1.2;
         state.step.cellW = Math.max(6, Math.min(40,
@@ -2884,13 +2996,48 @@
 
   var playback = { playing: false, raf: 0, last: 0, acc: 0 };
 
+  // ---- the STEP SEQUENCER (docs/StepSequencer.md) --------------------------------
+  // Rows are GENERATED from the current scene's cast: the drawn-frames
+  // rail first, then per instance a Visibility row and one row per
+  // pose. Clips are painted timing regions; a drag paints ONE ranged
+  // exposureSet op. The drawer's pull reveals more rows.
+
+  var STEP_ROW_H = 24;
+  var stepView = { scroll: 0, drag: null };
+
+  function stepCellW() {
+    return (app.shellState && app.shellState.step &&
+            app.shellState.step.cellW) || 13;
+  }
+
+  function stepRows() {
+    var project = app.project;
+    var scene = project.scenes[project.cur.scene];
+    var rows = [{ kind: "frames",
+                  label: "Frames · " + (project.activeLayer().name || "") }];
+    if (scene && !project.editTarget && VB.stepRefOf) {
+      (scene.cast || []).forEach(function (inst) {
+        var ref = VB.stepRefOf(project, inst);
+        var nm = ref && ref.actor ? ref.actor.name
+          : ref && ref.entry ? ref.entry.name : "?";
+        rows.push({ kind: "vis", inst: inst, target: "vis:" + inst.id,
+                    value: "1", label: nm + " · Visibility" });
+        if (ref && ref.actor) {
+          ref.actor.poses.forEach(function (pose) {
+            rows.push({ kind: "pose", inst: inst, pose: pose,
+                        target: "pose:" + inst.id, value: pose.id,
+                        label: nm + " · " + pose.name });
+          });
+        }
+      });
+    }
+    return { rows: rows, scene: scene };
+  }
+
   function refreshTimeline() {
     var project = app.project;
-    // the rail spans the scene's longest INSTANCE — hold columns are
-    // clickable, so the playhead can park anywhere inside the scene
     var total = project.sceneSpan ? project.sceneSpan() : project.frameCount();
     var cur = project.cur.frame || 0;
-    var layer = project.activeLayer();
     document.getElementById("tl-counter").textContent =
       (cur + 1) + " / " + total;
     var fpsInput = document.getElementById("tl-fps");
@@ -2898,36 +3045,224 @@
       fpsInput.value = String(project.fps || 24);
     }
     document.getElementById("tl-onion").classList.toggle("active", !!app.onion);
-    var strip = document.getElementById("tl-frames");
-    strip.innerHTML = "";
-    var cellW = (app.shellState && app.shellState.step &&
-                 app.shellState.step.cellW) || 13; // the step view's zoom
-    var curCell = null;
-    for (var i = 0; i < total; i++) {
-      var cell = document.createElement("div");
-      var own = i < layer.frames.length;
-      cell.className = "tlcell" +
-        (i === cur ? " cur" : "") +
-        (!own ? " hold" : (layer.frames[i].edges.length ||
-                           (layer.frames[i].texts || []).length ? " filled" : ""));
-      cell.style.width = cellW + "px";
-      cell.title = "Frame " + (i + 1) + (own ? "" : " (hold)");
-      if (i === cur) curCell = cell;
-      (function (idx) {
-        cell.addEventListener("pointerdown", function () {
-          stopPlay();
-          if (idx !== app.project.cur.frame) {
-            app.exec({ op: "frameSelect", index: idx });
+    // the names column
+    var names = document.getElementById("step-names");
+    if (names) {
+      names.innerHTML = "";
+      stepRows().rows.forEach(function (row) {
+        var el = document.createElement("div");
+        el.className = "stepname" + (row.kind === "frames" ? " head" : "");
+        var nm = document.createElement("span");
+        nm.className = "aname";
+        nm.textContent = row.label;
+        nm.title = row.label;
+        el.appendChild(nm);
+        if (row.kind === "vis") {
+          el.appendChild(actorPanelBtn("✕",
+            "Remove this instance from the scene", function () {
+              if (!confirm("Remove this instance from the scene?")) return;
+              app.exec({ op: "instanceRemove", id: row.inst.id });
+            }));
+        }
+        names.appendChild(el);
+      });
+    }
+    // playback keeps the playhead column in view
+    if (seqPlay.playing || playback.playing) {
+      var grid = document.getElementById("step-grid");
+      if (grid) {
+        var px = cur * stepCellW() - stepView.scroll;
+        if (px < 0 || px > grid.clientWidth - stepCellW() - 4) {
+          stepView.scroll = Math.max(0, cur * stepCellW() -
+                                        grid.clientWidth / 2);
+        }
+      }
+    }
+    drawStepGrid();
+  }
+
+  function drawStepGrid() {
+    var cvs = document.getElementById("step-grid");
+    if (!cvs) return;
+    var w = cvs.clientWidth, h = cvs.clientHeight;
+    if (!w || !h) return;
+    if (cvs.width !== w || cvs.height !== h) { cvs.width = w; cvs.height = h; }
+    var ctx = cvs.getContext("2d");
+    var project = app.project;
+    var data = stepRows();
+    var total = project.sceneSpan ? project.sceneSpan() : project.frameCount();
+    var cur = project.cur.frame || 0;
+    var cw = stepCellW();
+    stepView.scroll = Math.max(0,
+      Math.min(stepView.scroll, total * cw - w + 24));
+    var css = getComputedStyle(document.body);
+    var C = {
+      panel: css.getPropertyValue("--panel").trim() || "#f2f3f5",
+      bg: css.getPropertyValue("--bg").trim() || "#e4e6e9",
+      edge: css.getPropertyValue("--panel-edge").trim() || "#c6cad0",
+      field: css.getPropertyValue("--field").trim() || "#ffffff",
+      filled: css.getPropertyValue("--cell-filled").trim() || "#b9c0c9",
+      accent: css.getPropertyValue("--accent").trim() || "#2f7fd6"
+    };
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = C.panel;
+    ctx.fillRect(0, 0, w, h);
+    var layer = project.activeLayer();
+    function xOf(f) { return f * cw - stepView.scroll; }
+    data.rows.forEach(function (row, ri) {
+      var y = ri * STEP_ROW_H;
+      if (y > h) return;
+      ctx.fillStyle = ri % 2 ? C.bg : C.panel;
+      ctx.fillRect(0, y, w, STEP_ROW_H);
+      if (row.kind === "frames") {
+        for (var f = 0; f < total; f++) {
+          var fx = xOf(f);
+          if (fx + cw < 0) continue;
+          if (fx > w) break;
+          var own = f < layer.frames.length;
+          var filled = own && (layer.frames[f].edges.length ||
+                               (layer.frames[f].texts || []).length);
+          ctx.fillStyle = own ? (filled ? C.filled : C.field) : C.bg;
+          ctx.strokeStyle = C.edge;
+          ctx.beginPath();
+          ctx.rect(fx + 1, y + 4, Math.max(1, cw - 2), STEP_ROW_H - 8);
+          ctx.fill();
+          ctx.stroke();
+        }
+      } else if (data.scene) {
+        VB.stepClipsFor(data.scene, row.target).forEach(function (c) {
+          if (row.kind === "pose" && c.label !== row.value) return;
+          var x0 = xOf(c.start), x1 = xOf(c.start + c.duration);
+          if (x1 < 0 || x0 > w) return;
+          ctx.fillStyle = row.kind === "vis" ? "#6ea7df" : "#8fbf7f";
+          ctx.strokeStyle = "#11161b";
+          ctx.beginPath();
+          ctx.rect(x0 + 1, y + 4, Math.max(2, x1 - x0 - 2), STEP_ROW_H - 8);
+          ctx.fill();
+          ctx.stroke();
+          if (cw >= 7) { // the step-cell ticks inside a run
+            ctx.strokeStyle = "rgba(0,0,0,0.22)";
+            ctx.beginPath();
+            for (var f2 = c.start + 1; f2 < c.start + c.duration; f2++) {
+              var tx = Math.round(xOf(f2)) + 0.5;
+              if (tx < 0 || tx > w) continue;
+              ctx.moveTo(tx, y + 4);
+              ctx.lineTo(tx, y + STEP_ROW_H - 4);
+            }
+            ctx.stroke();
           }
         });
-      })(i);
-      strip.appendChild(cell);
-    }
-    // the step playhead follows playback into view
-    if (curCell && (seqPlay.playing || playback.playing)) {
-      curCell.scrollIntoView({ block: "nearest", inline: "nearest" });
-    }
+      }
+      var d = stepView.drag;
+      if (d && d.kind === "paint" && d.row === ri) {
+        var g0 = Math.min(d.from, d.to), g1 = Math.max(d.from, d.to);
+        ctx.fillStyle = d.erase
+          ? "rgba(208,48,48,0.35)" : "rgba(47,127,214,0.35)";
+        ctx.fillRect(xOf(g0), y + 2, (g1 - g0 + 1) * cw, STEP_ROW_H - 4);
+      }
+    });
+    // the playhead COLUMN (this view's distinct look)
+    var px = Math.round(xOf(cur));
+    ctx.fillStyle = "rgba(47,127,214,0.16)";
+    ctx.fillRect(px, 0, cw, h);
+    ctx.strokeStyle = C.accent;
+    ctx.strokeRect(px + 0.5, 0.5, Math.max(1, cw - 1), h - 1);
   }
+
+  (function wireStepGrid() {
+    var cvs = document.getElementById("step-grid");
+    if (!cvs) return;
+    function frameAt(ev) {
+      var r = cvs.getBoundingClientRect();
+      return Math.floor((ev.clientX - r.left + stepView.scroll) /
+                        stepCellW());
+    }
+    function rowAt(ev) {
+      var r = cvs.getBoundingClientRect();
+      return Math.floor((ev.clientY - r.top) / STEP_ROW_H);
+    }
+    function clampFrame(f) {
+      var total = app.project.sceneSpan
+        ? app.project.sceneSpan() : app.project.frameCount();
+      return Math.max(0, Math.min(total - 1, f));
+    }
+    cvs.addEventListener("pointerdown", function (ev) {
+      if (ev.button === 1) {
+        ev.preventDefault();
+        cvs.setPointerCapture(ev.pointerId);
+        stepView.drag = { kind: "pan", x0: ev.clientX,
+                          s0: stepView.scroll };
+        return;
+      }
+      if (ev.button !== 0 && ev.button !== 2) return;
+      stopPlay();
+      stopSeqPlay();
+      cvs.setPointerCapture(ev.pointerId);
+      var data = stepRows();
+      var row = data.rows[rowAt(ev)];
+      var f = clampFrame(frameAt(ev));
+      if (!row) return;
+      if (row.kind === "frames") { // scrub, pin on release
+        stepView.drag = { kind: "scrub" };
+        app.project.cur.frame = f;
+        requestRender();
+        refreshTimeline();
+        return;
+      }
+      stepView.drag = { kind: "paint", row: rowAt(ev), rowDef: row,
+                        erase: ev.button === 2 || ev.altKey,
+                        from: f, to: f, scene: data.scene };
+      drawStepGrid();
+    });
+    cvs.addEventListener("pointermove", function (ev) {
+      var d = stepView.drag;
+      if (!d) return;
+      if (d.kind === "pan") {
+        stepView.scroll = Math.max(0, d.s0 - (ev.clientX - d.x0));
+        drawStepGrid();
+        return;
+      }
+      var f = clampFrame(frameAt(ev));
+      if (d.kind === "scrub") {
+        if (f !== app.project.cur.frame) {
+          app.project.cur.frame = f;
+          requestRender();
+          refreshTimeline();
+        }
+        return;
+      }
+      if (f !== d.to) {
+        d.to = f;
+        drawStepGrid();
+      }
+    });
+    cvs.addEventListener("pointerup", function () {
+      var d = stepView.drag;
+      stepView.drag = null;
+      if (!d) return;
+      if (d.kind === "scrub") { // pin the landing frame in the journal
+        app.exec({ op: "frameSelect", index: app.project.cur.frame });
+        return;
+      }
+      if (d.kind === "paint" && d.scene) {
+        app.exec({ op: "exposureSet", id: VB.actorNewId("run"),
+                   scene: d.scene.id,
+                   lane: d.rowDef.kind,
+                   target: d.rowDef.target,
+                   from: Math.min(d.from, d.to),
+                   to: Math.max(d.from, d.to),
+                   value: d.erase ? null : d.rowDef.value });
+      }
+      drawStepGrid();
+    });
+    cvs.addEventListener("pointercancel", function () {
+      stepView.drag = null;
+      drawStepGrid();
+    });
+    if (window.ResizeObserver) {
+      new ResizeObserver(function () { drawStepGrid(); }).observe(cvs);
+    }
+  })();
 
   function startPlay() {
     stopSeqPlay(); // the scene loop and the sequence never play together
@@ -3190,6 +3525,12 @@
     (app.project.actors || []).forEach(function (a) {
       var row = document.createElement("div");
       row.className = "actrow" + (t && t.actor === a.id ? " active" : "");
+      if (a.poses[0]) { // drag the thumb onto the stage to PLACE
+        var athumb = thumbCanvas("pose:" + a.poses[0].id, a.poses[0].cell);
+        athumb.title = "Drag onto the stage to place this actor";
+        wirePlaceDrag(athumb, "actor", a.id, row);
+        row.appendChild(athumb);
+      }
       var name = document.createElement("span");
       name.className = "aname";
       name.textContent = a.name;
@@ -3242,8 +3583,13 @@
       var row = document.createElement("div");
       var editing = t && t.librarySymbol === entry.id;
       row.className = "actrow" + (editing ? " active" : "");
-      row.title = entry.kind + " — click to edit its art";
-      row.appendChild(thumbCanvas("lib:" + entry.id, entry.cell));
+      row.title = entry.kind + " — click to edit its art · drag the " +
+        "thumbnail onto the stage to place it";
+      var lthumb = thumbCanvas("lib:" + entry.id, entry.cell);
+      wirePlaceDrag(lthumb,
+        entry.kind === "background" ? "background" : "symbol",
+        entry.id, row);
+      row.appendChild(lthumb);
       var nm = document.createElement("span");
       nm.className = "aname";
       nm.textContent = (entry.kind === "background" ? "🖼 " : "◆ ") + entry.name;

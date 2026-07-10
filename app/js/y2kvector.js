@@ -670,7 +670,8 @@
       for (var si = 0; si < nScenes; si++) {
         // index-derived id: deterministic, so sequence instances built
         // by later journal ops resolve identically in replay
-        var scene = { id: "scene@" + si, name: readStr(r), layers: [] };
+        var scene = { id: "scene@" + si, name: readStr(r), layers: [],
+                      cast: [], tracks: [] };
         var nLayers = r.u16();
         for (var li = 0; li < nLayers; li++) {
           var lname = readStr(r);

@@ -528,7 +528,9 @@
    "panelMove", "panelRemove", "panelDuration", "panelCaption",
    "panelLineAttach", "panelLineDetach", "boardsSelect",
    "audioImport", "audioRemove", "trackAdd", "trackRename", "trackRemove",
-   "clipAdd", "clipMove", "clipTrim", "clipGain", "clipRemove"
+   "clipAdd", "clipMove", "clipTrim", "clipGain", "clipRemove",
+   "instancePlace", "instanceMove", "instanceTransform", "instanceRemove",
+   "exposureSet"
   ].forEach(function (kind) {
     ESTIMATORS[kind] = function (doc) {
       var b = Builder(kind, kind, doc, null);

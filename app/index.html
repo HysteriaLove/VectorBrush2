@@ -854,16 +854,40 @@
   .bbitem:hover .bbdel, .bbitem:hover .bbresize { display: flex; }
 
   /* timeline rail (Sequence/Roughs) — frame columns of the active layer */
-  /* the CONTEXT timeline (the step sequencer): it EXPANDS when the
-     drawer is pulled taller — more room for future track rows */
+  /* the STEP SEQUENCER (docs/StepSequencer.md): rows generated from
+     the scene's cast; it EXPANDS when the drawer is pulled taller */
   #timebar {
     flex: 1 1 30px; min-height: 30px;
-    display: flex; align-items: flex-start; gap: 6px;
-    padding: 6px 10px;
+    display: flex; align-items: stretch;
     background: var(--panel);
     border-top: 1px solid var(--panel-edge);
     font-size: 12px; color: var(--text);
     user-select: none;
+    overflow: hidden;
+  }
+  #step-names {
+    flex: none; width: 172px; overflow: hidden;
+    border-right: 1px solid var(--panel-edge);
+  }
+  .stepname {
+    height: 24px; display: flex; align-items: center; gap: 4px;
+    padding: 0 6px;
+    border-bottom: 1px solid var(--row-edge);
+    font-size: 10px; color: var(--text-dim);
+    white-space: nowrap;
+  }
+  .stepname.head { color: var(--text); font-weight: 600; }
+  .stepname .aname { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+  .stepname button {
+    background: none; border: none; color: var(--text-dim);
+    cursor: pointer; padding: 0 2px; font-size: 10px;
+  }
+  .stepname button:hover { color: var(--hot); }
+  #step-grid { flex: 1; min-width: 0; height: 100%; touch-action: none; }
+  .placeghost {
+    position: fixed; z-index: 300; pointer-events: none;
+    background: var(--accent); color: #fff;
+    border-radius: 4px; padding: 2px 8px; font-size: 11px;
   }
   #timebar button {
     background: var(--field); color: var(--text);
@@ -1293,7 +1317,8 @@
   <div id="seqbar"></div>
 
   <div id="timebar">
-    <div id="tl-frames"></div>
+    <div id="step-names"></div>
+    <canvas id="step-grid"></canvas>
   </div>
   </div>
   </div>
@@ -1344,6 +1369,7 @@
   <script src="js/ttf.js"></script>
   <script src="js/project.js"></script>
   <script src="js/sequence.js"></script>
+  <script src="js/stepseq.js"></script>
   <script src="js/y2kshell.js"></script>
   <script src="js/actors.js"></script>
   <script src="js/library.js"></script>

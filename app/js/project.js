@@ -34,6 +34,9 @@
     this.id = id || null;
     this.name = name;
     this.layers = [new Layer("Layer 1", cell)];
+    // the step sequencer (stepseq.js): placed instances + timing clips
+    this.cast = [];
+    this.tracks = [];
   }
 
   function Project(width, height) {
