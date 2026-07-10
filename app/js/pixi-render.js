@@ -610,7 +610,7 @@
     var w = surface.app.renderer.width / res;
     var h = surface.app.renderer.height / res;
     surface._backdrop.clear();
-    surface._backdrop.rect(0, 0, w, h).fill(0x3a3d42);
+    surface._backdrop.rect(0, 0, w, h).fill(parseInt(VB.DESK.slice(1), 16));
 
     surface.world.scale.set(view.zoom / VB.TWIPS);
     surface.world.position.set(view.panX, view.panY);

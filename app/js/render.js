@@ -11,6 +11,11 @@
 (function () {
   "use strict";
 
+  // The work-area backdrop around the stage. ONE constant shared by the
+  // Canvas2D and Pixi backends — the parity gate compares full frames,
+  // so the desks must match byte-for-byte. Light theme default.
+  VB.DESK = "#cfd3d8";
+
   // view: { zoom (screen px per stage px), panX, panY (screen px), dpr }
   function render(ctx, doc, view) {
     setupStage(ctx, doc, view);
@@ -42,7 +47,7 @@
 
     if (!transparent) {
       // Work-area backdrop.
-      ctx.fillStyle = "#3a3d42";
+      ctx.fillStyle = VB.DESK;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
 

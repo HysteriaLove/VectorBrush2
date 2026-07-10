@@ -248,10 +248,11 @@
     var ctx = cvs.getContext("2d");
     var slide = currentSlide(view.app.project);
     if (!slide) {
+      var theme = getComputedStyle(document.body);
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.fillStyle = "#26282c";
+      ctx.fillStyle = theme.getPropertyValue("--bg").trim() || "#e4e6e9";
       ctx.fillRect(0, 0, w, h);
-      ctx.fillStyle = "#888";
+      ctx.fillStyle = theme.getPropertyValue("--text-dim").trim() || "#6b7079";
       ctx.font = "13px system-ui";
       ctx.textAlign = "center";
       ctx.fillText("No slides yet — add one.", w / 2, h / 2);
