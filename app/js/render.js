@@ -11,10 +11,12 @@
 (function () {
   "use strict";
 
-  // The work-area backdrop around the stage. ONE constant shared by the
-  // Canvas2D and Pixi backends — the parity gate compares full frames,
-  // so the desks must match byte-for-byte. Light theme default.
+  // The export-frame outline on the infinite canvas. ONE constant
+  // shared by the Canvas2D and Pixi backends — the parity gate compares
+  // full frames, so both must match. (VB.DESK survives for any host
+  // that still letterboxes.)
   VB.DESK = "#cfd3d8";
+  VB.FRAME_OUTLINE = "#c6cad0";
 
   // view: { zoom (screen px per stage px), panX, panY (screen px), dpr }
   function render(ctx, doc, view) {
@@ -69,22 +71,14 @@
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     if (!transparent) {
-      // Work-area backdrop.
-      ctx.fillStyle = VB.DESK;
+      // INFINITE canvas (user decision): the paper runs unbounded in
+      // every direction — no desk, no letterbox, no frame. Framing is
+      // Composite's job (the camera).
+      ctx.fillStyle = VB.colorToCSS(stage.background);
       ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
 
     ctx.setTransform(s, 0, 0, s, view.panX * dpr, view.panY * dpr);
-
-    if (!transparent) {
-      // Stage.
-      ctx.save();
-      ctx.shadowColor = "rgba(0,0,0,0.45)";
-      ctx.shadowBlur = 18 / s;
-      ctx.fillStyle = VB.colorToCSS(stage.background);
-      ctx.fillRect(0, 0, stage.width, stage.height);
-      ctx.restore();
-    }
   }
 
   function drawDocContent(ctx, doc, view) {

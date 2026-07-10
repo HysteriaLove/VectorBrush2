@@ -155,13 +155,16 @@ Project
   are ordinary y2kvector docs edited through the journaled editTarget, so
   the whole tool suite and byte-exact replay apply for free.
 - **Boards are INFINITE canvases (DECIDED 2026-07-10):** no drawing
-  surface is a fixed-frame canvas — every board (Sketchbook, scene
-  cells, actor cells) is conceptually unbounded; FRAMING happens in
-  Composite. Composite and Grading are three.js scenes hosting actors,
-  symbols, and backgrounds (three.js r159 is vendored at
-  app/vendor/three.min.js — UMD, MIT — per the packaged-app vendoring
-  decision). The editor's current stage rect remains as the SWF-export
-  frame until the Composite camera takes that job.
+  surface is a fixed-frame canvas — every board (Sketchbook, Roughs,
+  Actors, scene cells) is unbounded, with NO frame drawn (the export
+  frame was judged redundant there); FRAMING is the Composite camera's
+  job. Composite and Grading are three.js scenes hosting actors,
+  symbols, and backgrounds (three.js r159 vendored at
+  app/vendor/three.min.js — UMD, MIT). Grading IS the compositing view
+  for now; the pass stack grows inside it. Pitch, Story, Boards, and
+  Audio keep their own surface shapes. (Open: Roughs may consolidate
+  with Audio.) The stage width/height persists in the model as the
+  SWF-export frame definition only.
 - **All vector art is a y2kvector document** (the planar map engine we
   already have — the in-code `VBDocument` class and the current `.vbd`
   codec are renamed to y2kvector, extension `.y2kvector`, when the shell

@@ -41,7 +41,11 @@
     audio: { el: "audio-view",
              view: function () { return VB.AudioView; } },
     compositing: { el: "composite-view",
-                   view: function () { return VB.CompositeView; } }
+                   view: function () { return VB.CompositeView; } },
+    // Grading IS the compositing view for now (user decision) — the
+    // post-process pass stack will grow inside the same three.js scene
+    post: { el: "composite-view",
+            view: function () { return VB.CompositeView; } }
   };
 
   // Tab names decided 2026-07-10 (Architecture §2); internal ids stay
@@ -55,8 +59,7 @@
     { id: "roughs", label: "Roughs", editor: true, note: "" },
     { id: "actors", label: "Actors", editor: true, note: "" },
     { id: "compositing", label: "Composite", mount: "compositing", note: "" },
-    { id: "post", label: "Grading",
-      note: "Effect stacks over the composited frame — Architecture §6.9." },
+    { id: "post", label: "Grading", mount: "post", note: "" },
     { id: "export", label: "Export",
       note: "Every render, reproducible from its journal revision — Architecture §6.10." }
   ];
@@ -97,7 +100,10 @@
       var m = MOUNTS[k];
       var v = m.view();
       var el = document.getElementById(m.el);
-      var active = m === mount;
+      // mounts may SHARE an element/view (Composite and Grading are
+      // one surface for now) — a sibling entry must not tear down the
+      // active one
+      var active = !!mount && (m === mount || m.el === mount.el);
       if (el) el.classList.toggle("wsactive", active);
       if (!v) return;
       if (active) v.mount(el, app);
