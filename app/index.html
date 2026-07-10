@@ -184,9 +184,9 @@
   }
   #layerlist, #matlist, #actorlist { flex: 1; min-height: 40px; }
 
-  /* floating toolpanels: every xPanel is its own island — drag its ⠿
-     near the top or bottom toolbar bounds to ATTACH it to that row,
-     or drop it anywhere else to leave it floating there. Placement
+  /* floating toolpanels: every xPanel is its own island and always
+     DOCKS — drag its ⠿ toward the top or bottom bar and it snaps into
+     that packed row (left-to-right, never overlapping). Placement
      persists across every workspace. */
   #islands {
     position: fixed; inset: 0; z-index: 46;
@@ -195,11 +195,8 @@
   #islands > .y2kxpanel {
     position: absolute; pointer-events: auto;
     background: var(--panel);
-    box-shadow: 0 4px 14px rgba(0,0,0,0.22);
-    user-select: none;
-  }
-  #islands > .y2kxpanel.docked {
     box-shadow: 0 1px 4px rgba(0,0,0,0.10);
+    user-select: none;
   }
   #islands > .y2kxpanel.floatdrag {
     opacity: 0.88; z-index: 5;
@@ -566,10 +563,13 @@
   #brainstorm-board.wsactive, #writing-view.wsactive, #pitch-view.wsactive,
   #boards-view.wsactive, #audio-view.wsactive, #composite-view.wsactive {
     display: flex; flex: 1; flex-direction: column; min-height: 0;
-    /* the bottom dock's drawer slides OVER content; mounted views have
-       bottom-anchored bars, so the overlap becomes padding (applyShell
-       keeps the variable in sync with the drawer pull) */
-    padding-bottom: var(--botdock-overlap, 0px);
+    /* the toolpanel rows and the bottom dock's drawer float OVER the
+       page; mounted views take their footprints as padding so content
+       (audio lanes, board cards, the script) never hides under them —
+       applyShell keeps the variables live through drags and pulls */
+    padding-top: var(--float-top-h, 0px);
+    padding-bottom: calc(var(--botdock-overlap, 0px) +
+                         var(--float-bot-h, 0px));
   }
 
   /* Composite workspace (composite.js — three.js stage) */

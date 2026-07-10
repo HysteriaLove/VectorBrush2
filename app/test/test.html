@@ -4255,12 +4255,13 @@
       pk.racks.left.open === true && pkById("a").y === 0 &&
       pkById("c").y === 0 && pkById("b").y === 100);
 
-    // floating toolpanels (every panel is its own island — it docks
-    // to the top/bottom bar bounds or floats free; user spec):
+    // floating toolpanels (every panel is its own island and always
+    // DOCKS — packed rows, no free positions, no overlaps; user spec):
     // placement is pure state, the DOM lays the rows out
     var fl = Sh.defaults();
     check("defaults start with no float placements",
-      Object.keys(fl.float.panels).length === 0);
+      Object.keys(fl.float.panels).length === 0 &&
+      Sh.floatGet(fl, "missing") === null);
     Sh.floatDock(fl, "file", "top");
     Sh.floatDock(fl, "edit", "top");
     Sh.floatDock(fl, "zoom", "top");
@@ -4276,23 +4277,19 @@
     check("panels snap between the two bars",
       Sh.floatRow(fl, "top").join() === "edit,zoom" &&
       Sh.floatRow(fl, "bottom").join() === "file");
-    Sh.floatFree(fl, "edit", 200, 150);
-    check("a freed panel remembers its spot",
-      Sh.floatGet(fl, "edit").dock === "free" &&
-      Sh.floatGet(fl, "edit").x === 200 &&
-      Sh.floatGet(fl, "edit").y === 150 &&
-      Sh.floatRow(fl, "top").join() === "zoom" &&
-      Sh.floatGet(fl, "missing") === null);
     var fl2 = Sh.restore(Sh.serialize(fl));
     check("float placement roundtrips",
       Sh.serialize(fl2) === Sh.serialize(fl));
     check("legacy shell states grow a float field",
       Object.keys(Sh.restore('{"step":{"cellW":13}}').float.panels)
         .length === 0);
-    check("garbage float entries are dropped on restore",
+    check("garbage float entries drop; legacy FREE entries re-dock",
       Object.keys(Sh.restore('{"float":{"panels":{' +
-        '"x":{"dock":"weird"},"y":{"dock":"top","ord":0}}}}')
-        .float.panels).join() === "y");
+        '"x":{"dock":"weird"},"y":{"dock":"top","ord":0},' +
+        '"z":{"dock":"free","x":5,"y":9}}}}').float.panels)
+        .sort().join() === "y,z" &&
+      Sh.restore('{"float":{"panels":{"z":{"dock":"free"}}}}')
+        .float.panels.z.dock === "top");
 
     // persistence roundtrip (view state, never the journal)
     var sh2 = Sh.restore(Sh.serialize(sh));

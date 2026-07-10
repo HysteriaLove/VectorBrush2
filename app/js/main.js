@@ -2346,7 +2346,6 @@
     var floatHost = document.getElementById("islands");
     var panelEls = {};          // panel name -> current element
     var snapzones = { top: null, bottom: null };
-    var FLOAT_SNAP = 28;        // px band around a bar that captures a drop
 
     if (floatHost) {
       ["top", "bottom"].forEach(function (which) {
@@ -2398,9 +2397,11 @@
       var x0 = 8 + rackEdge("left");
       var maxW = window.innerWidth - 8 - rackEdge("right");
       if (maxW - x0 < 280) { x0 = 8; maxW = window.innerWidth - 8; }
+      var rowH = { top: 0, bottom: 0 };
       ["top", "bottom"].forEach(function (which) {
-        // rows flow left-to-right and wrap; absent panels keep their
-        // seat in the state for when their workspace comes back
+        // rows PACK left-to-right and wrap — never overlap, never
+        // float free (user decision); absent panels keep their seat
+        // in the state for when their workspace comes back
         var lines = [], line = [], lineH = 0;
         var x = x0;
         S.floatRow(state, which).forEach(function (n) {
@@ -2418,6 +2419,7 @@
         if (line.length) lines.push({ items: line, h: lineH });
         var total = 0;
         lines.forEach(function (l, i) { total += l.h + (i ? 6 : 0); });
+        rowH[which] = total;
         var y = which === "top" ? bands.top : bands.bottom - total;
         lines.forEach(function (l) {
           l.items.forEach(function (it) {
@@ -2429,20 +2431,13 @@
           y += l.h + 6;
         });
       });
-      var minY = 32;
-      var wsb = document.getElementById("workspacebar");
-      if (wsb && wsb.offsetHeight) minY = wsb.offsetHeight + 4;
-      Object.keys(panelEls).forEach(function (n) {
-        var e = S.floatGet(state, n);
-        if (!e || e.dock !== "free") return;
-        var el = panelEls[n];
-        if (el.classList.contains("floatdrag")) return;
-        el.classList.remove("docked");
-        e.x = Math.max(0, Math.min(window.innerWidth - 72, e.x));
-        e.y = Math.max(minY, Math.min(window.innerHeight - 40, e.y));
-        el.style.left = Math.round(e.x) + "px";
-        el.style.top = Math.round(e.y) + "px";
-      });
+      // workspace content clears the rows: publish their footprints
+      // (mounted views take these as padding — audio lanes, board
+      // cards, and the script never hide under the toolpanels)
+      document.body.style.setProperty("--float-top-h",
+        (rowH.top ? rowH.top + 12 : 0) + "px");
+      document.body.style.setProperty("--float-bot-h",
+        (rowH.bottom ? rowH.bottom + 12 : 0) + "px");
     }
 
     function adoptPanel(p) {
@@ -2465,25 +2460,24 @@
       grip.addEventListener("pointerdown", function (ev) {
         if (ev.button !== 0) return;
         ev.preventDefault();
+        // capture on the GRIP and never reparent the panel mid-drag —
+        // moving a captured element's subtree cancels the capture and
+        // the panel "sticks" while the mouse runs ahead (user bug)
         grip.setPointerCapture(ev.pointerId);
         var r0 = p.getBoundingClientRect();
         var dx = ev.clientX - r0.left, dy = ev.clientY - r0.top;
         var moved = false;
         function zoneAt(e2) {
+          // the nearer bar wins: every drop DOCKS (no free positions)
           var bands = floatBands();
-          var top = e2.clientY - dy; // where the panel would land
-          if (top < bands.top + FLOAT_SNAP) return "top";
-          if (top + r0.height > bands.bottom - FLOAT_SNAP) return "bottom";
-          return "free";
+          return (e2.clientY - bands.top) < (bands.bottom - e2.clientY)
+            ? "top" : "bottom";
         }
         function onMove(e2) {
           if (!moved && Math.abs(e2.clientX - (r0.left + dx)) < 5 &&
               Math.abs(e2.clientY - (r0.top + dy)) < 5) return;
-          if (!moved) {
-            moved = true;
-            p.classList.add("floatdrag");
-            floatHost.appendChild(p); // raise over its siblings
-          }
+          moved = true;
+          p.classList.add("floatdrag");
           p.style.left = (e2.clientX - dx) + "px";
           p.style.top = (e2.clientY - dy) + "px";
           var bands = floatBands();
@@ -2501,24 +2495,22 @@
           snapzones.bottom.classList.remove("show");
           if (!moved) return;
           p.classList.remove("floatdrag");
+          p.style.width = "";
+          // seat by pointer x among the row's present panels — the
+          // row packs, so panels can never overlap
           var name = p.dataset.panel;
           var z = zoneAt(e2);
-          if (z === "free") {
-            S.floatFree(state, name, e2.clientX - dx, e2.clientY - dy);
-          } else {
-            // seat by pointer x among the row's present panels
-            var others = S.floatRow(state, z).filter(function (n) {
-              return n !== name;
-            });
-            var at = others.length;
-            for (var i = 0; i < others.length; i++) {
-              var el2 = panelEls[others[i]];
-              if (!el2) continue;
-              var r = el2.getBoundingClientRect();
-              if (e2.clientX < r.left + r.width / 2) { at = i; break; }
-            }
-            S.floatDock(state, name, z, at);
+          var others = S.floatRow(state, z).filter(function (n) {
+            return n !== name;
+          });
+          var at = others.length;
+          for (var i = 0; i < others.length; i++) {
+            var el2 = panelEls[others[i]];
+            if (!el2) continue;
+            var r = el2.getBoundingClientRect();
+            if (e2.clientX < r.left + r.width / 2) { at = i; break; }
           }
+          S.floatDock(state, name, z, at);
           layoutFloats();
           persist();
         }

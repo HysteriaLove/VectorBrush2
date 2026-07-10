@@ -312,9 +312,11 @@
     return bar.scroll;
   }
 
-  // ---- floating toolpanels (dock to a bar's bounds, or float free) ----------------
-  // placement lives HERE (pure); the DOM layer measures elements and
-  // lays the docked rows out along the top/bottom bar bounds
+  // ---- floating toolpanels (always DOCKED — packed rows, never free) ---------------
+  // Every panel seats into the top or bottom row, packed left-to-right
+  // with no overlaps (user decision — no arbitrary positions).
+  // Placement lives HERE (pure); the DOM layer measures elements and
+  // lays the rows out along the top/bottom bar bounds.
 
   function floatGet(state, name) {
     return state.float.panels[name] || null;
@@ -343,12 +345,6 @@
     return state.float.panels[name];
   }
 
-  function floatFree(state, name, x, y) {
-    state.float.panels[name] = {
-      dock: "free", x: Math.round(x) || 0, y: Math.round(y) || 0
-    };
-    return state.float.panels[name];
-  }
 
   // ---- persistence (view state — never the journal) ------------------------------
 
@@ -396,17 +392,17 @@
     }
     Object.keys(state.float.panels).forEach(function (n) {
       var e = state.float.panels[n];
-      if (!e || (e.dock !== "top" && e.dock !== "bottom" &&
-                 e.dock !== "free")) {
+      if (!e) { delete state.float.panels[n]; return; }
+      if (e.dock === "free") {
+        // legacy free placements re-seat at the end of the top row
+        state.float.panels[n] = { dock: "top", ord: 9999 };
+        return;
+      }
+      if (e.dock !== "top" && e.dock !== "bottom") {
         delete state.float.panels[n];
         return;
       }
-      if (e.dock === "free") {
-        if (!isFinite(e.x)) e.x = 8;
-        if (!isFinite(e.y)) e.y = 44;
-      } else if (!isFinite(e.ord)) {
-        e.ord = 0;
-      }
+      if (!isFinite(e.ord)) e.ord = 0;
     });
     return state;
   }
@@ -437,7 +433,6 @@
     floatGet: floatGet,
     floatRow: floatRow,
     floatDock: floatDock,
-    floatFree: floatFree,
     serialize: serialize,
     restore: restore
   };
