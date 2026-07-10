@@ -531,10 +531,22 @@
      covers the editor chrome */
   body.ws-mount-mode #middle { display: none; }
   #brainstorm-board, #writing-view, #pitch-view, #boards-view,
-  #audio-view { display: none; }
+  #audio-view, #composite-view { display: none; }
   #brainstorm-board.wsactive, #writing-view.wsactive, #pitch-view.wsactive,
-  #boards-view.wsactive, #audio-view.wsactive {
+  #boards-view.wsactive, #audio-view.wsactive, #composite-view.wsactive {
     display: flex; flex: 1; flex-direction: column; min-height: 0;
+  }
+
+  /* Composite workspace (composite.js — three.js stage) */
+  #composite-view { position: relative; overflow: hidden; }
+  #cp-canvas { width: 100%; height: 100%; display: block; }
+  #cp-hint {
+    position: absolute; left: 10px; bottom: 8px;
+    color: #cfd5dc; font-size: 11px; pointer-events: none;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+  }
+  .cp-note {
+    margin: auto; color: var(--text-dim); font-size: 13px;
   }
 
   /* Audio workspace (audio.js) — stems, track lanes, bake */
@@ -1142,6 +1154,7 @@
   <div id="writing-view"></div>
   <div id="boards-view"></div>
   <div id="audio-view"></div>
+  <div id="composite-view"></div>
 
   <div id="middle">
     <div id="rack-left" class="y2krack">
@@ -1379,6 +1392,8 @@
   <script src="js/writing.js"></script>
   <script src="js/boards.js"></script>
   <script src="js/audio.js"></script>
+  <script src="vendor/three.min.js"></script>
+  <script src="js/composite.js"></script>
   <script src="js/text.js"></script>
   <script src="js/fonts-builtin.js"></script>
   <script src="js/session.js"></script>

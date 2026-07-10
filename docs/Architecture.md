@@ -154,6 +154,14 @@ Project
   delete-all-instances — comes later, with instantiation). Library cells
   are ordinary y2kvector docs edited through the journaled editTarget, so
   the whole tool suite and byte-exact replay apply for free.
+- **Boards are INFINITE canvases (DECIDED 2026-07-10):** no drawing
+  surface is a fixed-frame canvas — every board (Sketchbook, scene
+  cells, actor cells) is conceptually unbounded; FRAMING happens in
+  Composite. Composite and Grading are three.js scenes hosting actors,
+  symbols, and backgrounds (three.js r159 is vendored at
+  app/vendor/three.min.js — UMD, MIT — per the packaged-app vendoring
+  decision). The editor's current stage rect remains as the SWF-export
+  frame until the Composite camera takes that job.
 - **All vector art is a y2kvector document** (the planar map engine we
   already have — the in-code `VBDocument` class and the current `.vbd`
   codec are renamed to y2kvector, extension `.y2kvector`, when the shell

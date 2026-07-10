@@ -197,6 +197,7 @@
     if (VB.PitchView) VB.PitchView.refresh();
     if (VB.BoardsView) VB.BoardsView.refresh();
     if (VB.AudioView) VB.AudioView.refresh();
+    if (VB.CompositeView) VB.CompositeView.refresh(); // live 3D texture
     if (app.renderScratch) app.renderScratch(); // the shared scratchpad
     app.debugPin = -1;
     app.debugHover = -1;

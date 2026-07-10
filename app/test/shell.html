@@ -101,9 +101,9 @@
       shell.section() === "audio" && app.uiActive === false &&
       W.document.body.classList.contains("ws-mount-mode") &&
       W.document.getElementById("audio-view").classList.contains("wsactive"));
-    await shell.goto("#project/" + A.id + "/compositing");
+    await shell.goto("#project/" + A.id + "/post");
     check("stub workspaces cover the editor",
-      shell.section() === "compositing" && app.uiActive === false &&
+      shell.section() === "post" && app.uiActive === false &&
       W.document.body.classList.contains("ws-stub-mode"));
     await shell.goto("#project/" + A.id + "/roughs");
     check("editor sections restore input and art",

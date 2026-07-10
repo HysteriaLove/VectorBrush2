@@ -39,7 +39,9 @@
     storyboards: { el: "boards-view",
                    view: function () { return VB.BoardsView; } },
     audio: { el: "audio-view",
-             view: function () { return VB.AudioView; } }
+             view: function () { return VB.AudioView; } },
+    compositing: { el: "composite-view",
+                   view: function () { return VB.CompositeView; } }
   };
 
   // Tab names decided 2026-07-10 (Architecture §2); internal ids stay
@@ -52,8 +54,7 @@
     { id: "audio", label: "Audio", mount: "audio", note: "" },
     { id: "roughs", label: "Roughs", editor: true, note: "" },
     { id: "actors", label: "Actors", editor: true, note: "" },
-    { id: "compositing", label: "Composite",
-      note: "Placements, camera, and per-scene tracks — Architecture §6.8." },
+    { id: "compositing", label: "Composite", mount: "compositing", note: "" },
     { id: "post", label: "Grading",
       note: "Effect stacks over the composited frame — Architecture §6.9." },
     { id: "export", label: "Export",
