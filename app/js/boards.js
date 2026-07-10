@@ -469,6 +469,7 @@
     if (on && !currentPanel(view.app.project)) return;
     view.drawMode = on;
     view.toolStrip.style.display = on ? "inline-flex" : "none";
+    if (view.grid) view.grid.classList.toggle("drawing", on);
     if (on) {
       stopAnimatic();
       retargetDraw();

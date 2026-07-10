@@ -827,7 +827,8 @@
     box-shadow: 0 2px 10px rgba(0,0,0,0.14);
   }
   .bdcard.alt { background: #f5f2e6; } /* subtle panel alternation */
-  .bdcard.cur { outline: 2px solid var(--accent); outline-offset: 1px; }
+  /* the CURRENT panel is a logic target (insert-after, move, delete,
+     draw) but carries NO visual highlight (user decision) */
   /* the ACTION as the board's title */
   .bdtitle {
     outline: none; min-height: 1.2em; user-select: text;
@@ -863,7 +864,7 @@
     background: #ffffff; border-bottom: 1.5px solid #202327;
     touch-action: none;
   }
-  .bdcard.cur .bdframe { cursor: crosshair; }
+  #bd-grid.drawing .bdframe { cursor: crosshair; }
   .bddialog { min-height: 34px; padding: 2px 8px 6px; }
   .bddialoglab {
     display: block;
