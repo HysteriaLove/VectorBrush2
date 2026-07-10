@@ -2117,9 +2117,12 @@
     ctx.fillText(s.total + "f · " + (s.total / fps).toFixed(1) + "s",
                  w - 4, SEQ_RULER - 6);
 
-    // scene instance blocks — the reference's alternating blues
+    // scene instance blocks — the reference's alternating blues; an
+    // audio band below shows the stems against the scene cut
+    var hasAudio = VB.audioHasClips && VB.audioHasClips(app.project);
+    var bandH = hasAudio ? 18 : 0;
     var ghost = seqView.drag && seqView.drag.ghost;
-    var y = SEQ_RULER + 4, bh = h - SEQ_RULER - 9;
+    var y = SEQ_RULER + 4, bh = h - SEQ_RULER - 9 - bandH;
     var gStarts = 0;
     for (var i = 0; i < s.seq.length; i++) {
       var inst = s.seq[i];
@@ -2170,8 +2173,40 @@
       ctx.lineWidth = 1;
     }
 
-    // playhead
-    var px = Math.round(seqXOf(seqMasterFrame())) + 0.5;
+    // the audio band (reference: the audio lane under the scene track)
+    if (hasAudio) {
+      var frameMs = 1000 / fps;
+      var bandTop = h - bandH - 2;
+      (app.project.audio.tracks || []).forEach(function (track) {
+        track.clips.forEach(function (cl) {
+          var fx = seqXOf(cl.at / frameMs);
+          var fw = (cl.duration / frameMs) * seqView.pxf;
+          if (fx > w || fx + fw < 0) return;
+          ctx.fillStyle = "#e3ebf3";
+          ctx.fillRect(fx, bandTop, Math.max(1, fw), bandH);
+          var pk = VB.audioPeaks(app.project, cl.asset, renderSeqStrip);
+          if (!pk) return;
+          ctx.fillStyle = "#5b8fc9";
+          var mid = bandTop + bandH / 2, amp = bandH / 2 - 1;
+          var sx0 = Math.max(0, Math.floor(fx));
+          var sx1 = Math.min(w, fx + fw);
+          for (var sx = sx0; sx < sx1; sx++) {
+            var ms0 = cl.offset + (seqFrameAt(sx) * frameMs -
+                                   cl.at);
+            var pb = Math.floor(ms0 / 1000 * pk.rate / pk.bin);
+            if (pb < 0 || pb >= pk.bins) continue;
+            ctx.fillRect(sx, mid + pk.min[pb] * amp, 1,
+                         Math.max(1, (pk.max[pb] - pk.min[pb]) * amp));
+          }
+        });
+      });
+    }
+
+    // playhead — the SHARED master clock while the transport runs,
+    // the editor's scene/frame position otherwise
+    var pFrame = (VB.audioIsPlaying && VB.audioIsPlaying())
+      ? VB.audioNow() * fps / 1000 : seqMasterFrame();
+    var px = Math.round(seqXOf(pFrame)) + 0.5;
     if (px >= 0 && px <= w) {
       ctx.strokeStyle = css.getPropertyValue("--hot").trim() || "#d03030";
       ctx.beginPath();
@@ -2216,6 +2251,7 @@
         refreshLayers();
       }
       app.project.cur.frame = f - at.start;
+      VB.audioSeek(f * seqFrameMs()); // the master clock follows the scrub
       requestRender();
       refreshTimeline();
       renderSeqStrip();
@@ -2371,6 +2407,15 @@
       seqView.playBtn.textContent =
         (typeof seqPlay !== "undefined" && seqPlay.playing) ? "⏹" : "▶";
     }
+    // editor navigation re-seeds the shared master clock (never while
+    // something plays, and never from other tabs — an Audio-tab scrub
+    // must survive edits made over there)
+    if (VB.audioSeek && !(VB.audioIsPlaying && VB.audioIsPlaying()) &&
+        !(typeof seqPlay !== "undefined" && seqPlay.playing) &&
+        !document.body.classList.contains("ws-mount-mode") &&
+        !document.body.classList.contains("ws-stub-mode")) {
+      VB.audioSeek(seqMasterFrame() * seqFrameMs());
+    }
     renderSeqStrip();
   }
 
@@ -2507,21 +2552,6 @@
 
   function seqFrameMs() { return 1000 / (app.project.fps || 24); }
 
-  /** Where play starts: the selected chip, else the current scene's
-   *  first instance, else the top of the sequence. */
-  function seqStartMs() {
-    var seq = VB.sequenceOf(app.project);
-    var hit = seqSel ? VB.sequenceInstById(app.project, seqSel) : null;
-    if (!hit) {
-      var sc = app.project.scenes[app.project.cur.scene];
-      for (var i = 0; sc && i < seq.length; i++) {
-        if (seq[i].scene === sc.id) { hit = { index: i }; break; }
-      }
-    }
-    return hit
-      ? VB.sequenceInstStart(app.project, hit.index) * seqFrameMs() : 0;
-  }
-
   function startSeqPlay() {
     if (seqPlay.playing) return;
     if (app.project.editTarget) {
@@ -2531,7 +2561,8 @@
     stopPlay();
     flushSelections();
     seqPlay.playing = true;
-    seqPlay.ms = seqStartMs();
+    // resume from the MASTER position (reference: current_frame)
+    seqPlay.ms = seqMasterFrame() * seqFrameMs();
     if (seqPlay.ms >= VB.sequenceDuration(app.project) * seqFrameMs() - 1) {
       seqPlay.ms = 0;
     }
@@ -2554,7 +2585,10 @@
       if (!seqPlay.playing) return;
       var dt = now - seqPlay.last;
       seqPlay.last = now;
-      if (!seqPlay.audio) seqPlay.ms += dt;
+      if (!seqPlay.audio) {
+        seqPlay.ms += dt;
+        VB.audioSeek(seqPlay.ms); // the master clock follows silent play
+      }
       var total = VB.sequenceDuration(app.project) * seqFrameMs();
       if (seqPlay.ms >= total) { // loop; the audio restarts with the reel
         seqPlay.ms = 0;
@@ -2590,6 +2624,7 @@
     seqPlay.playing = false;
     seqPlay.audio = false;
     if (VB.audioStop) VB.audioStop();
+    VB.audioSeek(seqPlay.ms); // the shared playhead lands with the reel
     cancelAnimationFrame(seqPlay.raf);
     app.session.clock.playing = false;
     // pin the landing scene + frame in the journal (selectScene already
@@ -2601,13 +2636,32 @@
 
   ensureSeqStrip(); // build the strip at load — remounts never add canvases
 
-  // the global Space bar defers to sequence playback: Space stops the
-  // reel (sound included) instead of toggling raw audio underneath it
+  // In the EDITOR, Space is sequence playback (picture + sound from
+  // the master position); elsewhere it toggles the raw transport. A
+  // playing reel always stops first.
   VB.audioSpaceIntercept = VB.audioSpaceIntercept || [];
   VB.audioSpaceIntercept.push(function () {
     if (seqPlay.playing) { stopSeqPlay(); return true; }
+    var editorActive =
+      !document.body.classList.contains("ws-mount-mode") &&
+      !document.body.classList.contains("ws-stub-mode");
+    if (editorActive && !app.project.editTarget &&
+        VB.audioHasClips && VB.audioHasClips(app.project)) {
+      startSeqPlay();
+      return true;
+    }
     return false;
   });
+
+  // transport started elsewhere (Space in another tab, the Audio ▶):
+  // the strip's playhead follows the shared master clock
+  VB.audioTickHook = function () {
+    if (!seqPlay.playing && seqView.canvas &&
+        !document.body.classList.contains("ws-mount-mode") &&
+        !document.body.classList.contains("ws-stub-mode")) {
+      renderSeqStrip();
+    }
+  };
 
   // ---- Actors panel (actors.js; Architecture §6.6, step-2 beat 2) --------------
   // The library lists actors and their poses; clicking a pose enters the

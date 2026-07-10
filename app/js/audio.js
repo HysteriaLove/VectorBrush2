@@ -222,7 +222,8 @@
     buffers: {},         // assetId -> AudioBuffer
     peaks: {},           // assetId -> { bins, min: Float32Array, max: Float32Array }
     pending: {},         // assetId -> Promise (decode in flight)
-    playing: null        // { sources: [], t0, fromMs, endMs, raf }
+    playing: null,       // { sources: [], t0, fromMs, endMs, raf }
+    masterMs: 0          // THE shared playhead — every workspace reads it
   };
 
   function ensureCtx() {
@@ -353,14 +354,31 @@
         if (!rig.playing) return;
         var ms = rig.playing.fromMs + (ctx.currentTime - rig.playing.t0) * 1000;
         if (ms >= rig.playing.endMs) {
+          rig.masterMs = rig.playing.endMs;
           stopPlayback();
+          tickUI(rig.masterMs);
           if (onDone) onDone();
           return;
         }
-        if (onTick) onTick(Math.max(rig.playing.fromMs, ms));
+        ms = Math.max(rig.playing.fromMs, ms);
+        rig.masterMs = ms;
+        tickUI(ms);
+        if (onTick) onTick(ms);
         rig.playing.raf = requestAnimationFrame(tick);
       })();
     });
+  }
+
+  /** Every tick reaches every mounted view, regardless of who started
+   *  the transport — the playhead is ONE thing across workspaces. */
+  function tickUI(ms) {
+    if (view.host) {
+      if (view.timeEl) view.timeEl.textContent = fmtMs(ms);
+      renderLanes();
+    }
+    if (VB.audioTickHook) {
+      try { VB.audioTickHook(ms); } catch (e) { /* display only */ }
+    }
   }
 
   /** Offline render → 16-bit WAV bytes. 48kHz stereo master. */
@@ -398,7 +416,6 @@
     playBtn: null, ro: null,
     pxPerMs: 0.1, panMs: 0,        // 100 px/s default
     sel: null,                     // selected clip id
-    playMs: 0,
     drag: null                     // {kind, ...} pointer session
   };
 
@@ -512,7 +529,7 @@
     }
 
     // playhead
-    var px = Math.round(xOf(view.playMs)) + 0.5;
+    var px = Math.round(xOf(rig.masterMs)) + 0.5;
     if (px >= 0 && px <= w) {
       ctx.strokeStyle = theme("--hot", "#d03030");
       ctx.beginPath();
@@ -693,13 +710,8 @@
     }
     var appRef = view.app || window.VBApp;
     if (!appRef || !appRef.project) return;
-    startPlayback(appRef.project, view.playMs, function (ms) {
-      view.playMs = ms; // the playhead survives unmounts
-      if (view.host && view.timeEl) view.timeEl.textContent = fmtMs(ms);
-      if (view.host) renderLanes();
-    }, function () {
-      syncPlayBtn();
-      if (view.host) renderLanes();
+    startPlayback(appRef.project, rig.masterMs, null, function () {
+      syncPlayBtn(); // tickUI already fans out the position
     }).then(syncPlayBtn);
   }
 
@@ -764,7 +776,7 @@
     bar.appendChild(view.playBtn);
     view.timeEl = document.createElement("span");
     view.timeEl.id = "au-time";
-    view.timeEl.textContent = fmtMs(0);
+    view.timeEl.textContent = fmtMs(rig.masterMs);
     bar.appendChild(view.timeEl);
     bar.appendChild(toolBtn("＋ Track", "Add a track", function () {
       exec({ op: "trackAdd", id: VB.actorNewId("track") });
@@ -815,9 +827,9 @@
       if (ev.button !== 0) return;
       lanes.setPointerCapture(ev.pointerId);
       if (y < RULER_H) {
-        // scrub/seek
-        view.playMs = Math.max(0, Math.round(msOf(x)));
-        if (view.timeEl) view.timeEl.textContent = fmtMs(view.playMs);
+        // scrub/seek the SHARED master position
+        rig.masterMs = Math.max(0, Math.round(msOf(x)));
+        if (view.timeEl) view.timeEl.textContent = fmtMs(rig.masterMs);
         if (rig.playing) { stopPlayback(); togglePlay(); }
         view.drag = { kind: "seek" };
         renderLanes();
@@ -857,8 +869,8 @@
         return;
       }
       if (d.kind === "seek") {
-        view.playMs = Math.max(0, Math.round(msOf(x)));
-        if (view.timeEl) view.timeEl.textContent = fmtMs(view.playMs);
+        rig.masterMs = Math.max(0, Math.round(msOf(x)));
+        if (view.timeEl) view.timeEl.textContent = fmtMs(rig.masterMs);
         renderLanes();
         return;
       }
@@ -1000,4 +1012,24 @@
   };
   VB.audioPlay = startPlayback;
   VB.audioStop = stopPlayback;
+  // the master clock: ONE playhead across every workspace
+  VB.audioNow = function () { return rig.masterMs || 0; };
+  VB.audioSeek = function (ms) {
+    if (!rig.playing) rig.masterMs = Math.max(0, ms || 0);
+  };
+  VB.audioIsPlaying = function () { return !!rig.playing; };
+  /** Peaks for drawing a stem elsewhere (the sequence strip's audio
+   *  band): returns the pyramid, or null while the decode it kicked
+   *  off is still running (onReady fires when it lands). */
+  VB.audioPeaks = function (project, assetId, onReady) {
+    var hit = assetById(project, assetId);
+    if (!hit) return null;
+    var pk = peaksFor(hit.asset);
+    if (!pk) {
+      decodeAsset(hit.asset).then(function () {
+        if (onReady) onReady();
+      }, function () {});
+    }
+    return pk;
+  };
 })();

@@ -721,12 +721,14 @@
   .bbitem:hover .bbdel, .bbitem:hover .bbresize { display: flex; }
 
   /* timeline rail (Sequence/Roughs) — frame columns of the active layer */
+  /* the CONTEXT timeline (reference: the per-scene animation rows) —
+     stacked under the scene timeline at the bottom of the editor */
   #timebar {
     flex: none; height: 30px;
     display: flex; align-items: center; gap: 6px;
     padding: 0 10px;
     background: var(--panel);
-    border-bottom: 1px solid var(--panel-edge);
+    border-top: 1px solid var(--panel-edge);
     font-size: 12px; color: var(--text);
     user-select: none;
   }
@@ -755,7 +757,7 @@
      at the BOTTOM of the editor: frame-proportional blocks, ruler,
      playhead, boundary drags */
   #seqbar {
-    flex: none; height: 64px;
+    flex: none; height: 84px; /* ruler + scene blocks + the audio band */
     display: flex; align-items: stretch; gap: 6px;
     padding: 4px 8px;
     background: var(--panel);
@@ -955,19 +957,6 @@
     </label>
   </div>
 
-  <div id="timebar">
-    <button id="tl-play" title="Play / stop (Enter)">▶</button>
-    <button id="tl-add" title="Add a blank frame to the active layer (F7)">＋</button>
-    <button id="tl-del" title="Remove the current frame from the active layer">－</button>
-    <button id="tl-onion" title="Onion skin (previous/next frame ghosts)">🧅</button>
-    <label class="ctl" title="Frames per second">
-      <input type="number" id="tl-fps" value="24" min="1" max="120" step="1"
-             style="width:44px"> fps
-    </label>
-    <span id="tl-counter">1 / 1</span>
-    <div id="tl-frames"></div>
-  </div>
-
   <div id="workspace-stub">
     <div>
       <h2 id="ws-stub-title"></h2>
@@ -1084,6 +1073,19 @@
   </div>
 
   <div id="seqbar"></div>
+
+  <div id="timebar">
+    <button id="tl-play" title="Play / stop (Enter)">▶</button>
+    <button id="tl-add" title="Add a blank frame to the active layer (F7)">＋</button>
+    <button id="tl-del" title="Remove the current frame from the active layer">－</button>
+    <button id="tl-onion" title="Onion skin (previous/next frame ghosts)">🧅</button>
+    <label class="ctl" title="Frames per second">
+      <input type="number" id="tl-fps" value="24" min="1" max="120" step="1"
+             style="width:44px"> fps
+    </label>
+    <span id="tl-counter">1 / 1</span>
+    <div id="tl-frames"></div>
+  </div>
 
   <div id="statusbar">
     <span id="status-doc">—</span>
