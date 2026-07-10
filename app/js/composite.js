@@ -387,7 +387,11 @@
     host.appendChild(hint);
 
     view.scene = new T.Scene();
-    view.scene.background = new T.Color(0x3a4048);
+    // the stage matches the app chrome (user spec) — sample the theme
+    // token so a future theme switch carries the 3D view with it
+    var bgTok = getComputedStyle(document.body)
+      .getPropertyValue("--bg").trim() || "#e4e6e9";
+    view.scene.background = new T.Color(bgTok);
     view.group = new T.Group();
     view.scene.add(view.group);
     var st = stagePx(app);
@@ -398,7 +402,7 @@
     view.camO = new T.OrthographicCamera(-1, 1, 1, -1, 0.1, 100000);
 
     var grid = new T.GridHelper(Math.max(st.w, st.h) * 4, 40,
-                                0x777d86, 0x4d535c);
+                                0x9aa1aa, 0xc7ccd2);
     grid.position.y = -st.h / 2 - 20;
     view.scene.add(grid);
 
