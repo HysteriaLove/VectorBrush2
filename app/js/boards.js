@@ -198,9 +198,19 @@
 
   function createCard(panel) {
     var app = view.app;
+    var pid = panel.id;
+    // cards outlive refreshes (reconciled, never rebuilt) but panel
+    // OBJECTS are replaced by history restore (undo/redo) — handlers
+    // must resolve the live object at event time, or a mid-stroke
+    // render paints the stale pre-undo cell (ghost content that
+    // vanishes on pointerup — user bug)
+    function livePanel() {
+      var hit = panelById(view.app.project, pid);
+      return hit ? hit.panel : null;
+    }
     var root = document.createElement("div");
     root.className = "bdcard";
-    root.dataset.panel = panel.id;
+    root.dataset.panel = pid;
 
     // header strip: Scene · Panel · Time · Frames (the paper form)
     var head = document.createElement("div");
@@ -218,7 +228,7 @@
     frames.title = "Hold this panel for N frames (at the project fps)";
     frames.addEventListener("change", function () {
       var v = parseInt(frames.value, 10);
-      if (isFinite(v)) exec({ op: "panelDuration", id: panel.id, frames: v });
+      if (isFinite(v)) exec({ op: "panelDuration", id: pid, frames: v });
     });
     frames.addEventListener("keydown", function (ev) {
       ev.stopPropagation();
@@ -239,7 +249,7 @@
     cvs.addEventListener("pointerdown", function (ev) {
       if (view.animatic.playing) { stopAnimatic(); return; }
       flushCardEdits();
-      var hit = panelById(app.project, panel.id);
+      var hit = panelById(app.project, pid);
       if (!hit) return;
       if (boardsOf(app.project).cur.panel !== hit.index) {
         exec({ op: "boardsSelect", panel: hit.index });
@@ -250,22 +260,25 @@
       view.drawing = true;
       activeTool = app.toolByName(app.tool);
       if (activeTool && activeTool.onDown) {
-        activeTool.onDown(cardTwips(panel, cvs, ev));
-        drawCardFrame(panel, cvs, true);
+        activeTool.onDown(cardTwips(hit.panel, cvs, ev));
+        drawCardFrame(hit.panel, cvs, true);
       }
     });
     cvs.addEventListener("pointermove", function (ev) {
       if (!activeTool) return;
-      if (activeTool.onMove) activeTool.onMove(cardTwips(panel, cvs, ev));
-      drawCardFrame(panel, cvs, true);
+      var live = livePanel();
+      if (!live) return;
+      if (activeTool.onMove) activeTool.onMove(cardTwips(live, cvs, ev));
+      drawCardFrame(live, cvs, true);
     });
     function endStroke(ev, cancel) {
       if (!activeTool) return;
       var t = activeTool;
       activeTool = null;
       view.drawing = false;
-      if (cancel) { if (t.cancel) t.cancel(); }
-      else if (t.onUp) t.onUp(cardTwips(panel, cvs, ev));
+      var live = livePanel();
+      if (cancel || !live) { if (t.cancel) t.cancel(); }
+      else if (t.onUp) t.onUp(cardTwips(live, cvs, ev));
       refresh();
     }
     cvs.addEventListener("pointerup", function (ev) { endStroke(ev, false); });
@@ -285,7 +298,7 @@
     action.dataset.ph = "action…";
     action.addEventListener("blur", function () {
       var val = action.innerText.replace(/\n+$/, "");
-      var hit = panelById(app.project, panel.id);
+      var hit = panelById(app.project, pid);
       if (!hit) return;
       var row = actionRowOf(hit.panel);
       if (row) {
@@ -293,7 +306,7 @@
           exec({ op: "blockEdit", block: row.id, content: val });
         }
       } else if (val.trim() !== "") {
-        exec({ op: "blockAdd", id: VB.actorNewId("blk"), panel: panel.id,
+        exec({ op: "blockAdd", id: VB.actorNewId("blk"), panel: pid,
                index: 0, kind: "action", content: val });
       }
     });
@@ -311,7 +324,7 @@
     add.title = "Add a dialogue line to this panel's script";
     add.addEventListener("click", function () {
       exec({ op: "blockAdd", id: VB.actorNewId("line"),
-             panel: panel.id, kind: "line", character: "", text: "" });
+             panel: pid, kind: "line", character: "", text: "" });
       var whos = lines.querySelectorAll(".bdwho");
       if (whos.length) whos[whos.length - 1].focus();
     });
@@ -321,7 +334,7 @@
     var card = { root: root, cvs: cvs, frames: frames, action: action,
                  lines: lines, scene: fScene.val, num: fPanel.val,
                  time: fTime.val };
-    view.cards[panel.id] = card;
+    view.cards[pid] = card;
     return card;
   }
 
