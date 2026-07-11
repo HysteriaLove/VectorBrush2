@@ -70,6 +70,21 @@
     return v || fallback;
   }
 
+  /** ONE coalesced re-render, however many async completions (audio
+   *  decode, thumbnails) ask for it. Passing render itself as the
+   *  ready-callback froze the tab on open: a landing decode fired
+   *  thousands of queued callbacks, each doing a full synchronous
+   *  lane render (user report: "project is still frozen on opening"). */
+  var renderQueued = false;
+  function queueRender() {
+    if (renderQueued) return;
+    renderQueued = true;
+    setTimeout(function () {
+      renderQueued = false;
+      if (view.host) render();
+    }, 16);
+  }
+
   /** The rough-lane boundary under x, or null. Every block's RIGHT
    *  edge is draggable (the last one moves freely). */
   function boundaryAt(x) {
@@ -162,9 +177,7 @@
           ctx.restore();
         } else if (VB.thumbRequest) {
           VB.thumbRequest("panel:" + sp.panel.id, sp.panel.cell,
-                          96, 72, sp.index).then(function () {
-            if (view.host) render();
-          });
+                          96, 72, sp.index).then(queueRender);
         }
       }
     });
@@ -179,31 +192,34 @@
     ctx.moveTo(0, L.master + 0.5); ctx.lineTo(w, L.master + 0.5);
     ctx.stroke();
 
-    // AUDIO lane — the mixdown envelope (read-only sync surface)
+    // AUDIO lane — the mixdown envelope (read-only sync surface).
+    // Peaks resolve ONCE per clip per render — never inside the pixel
+    // loop (a per-pixel lookup kicked a decode-callback storm).
     ctx.fillStyle = "#2f3350";
     ctx.fillRect(0, L.master, w, MASTER_H);
     ctx.fillStyle = "#7b86e8";
     var mid = L.master + MASTER_H / 2;
     var amp = MASTER_H / 2 - 2;
     var tracks = (project.audio && project.audio.tracks) || [];
+    var clips = [];
+    tracks.forEach(function (tr) {
+      tr.clips.forEach(function (cl) {
+        clips.push({ cl: cl,
+                     pk: VB.audioPeaks(project, cl.asset, queueRender) });
+      });
+    });
     for (var mx = 0; mx < w; mx++) {
       var ms = msOf(mx);
       if (ms < 0) continue;
       var lo = 0, hi = 0;
-      for (var ti = 0; ti < tracks.length; ti++) {
-        for (var ci = 0; ci < tracks[ti].clips.length; ci++) {
-          var cl = tracks[ti].clips[ci];
-          if (ms < cl.at || ms > cl.at + cl.duration) continue;
-          var pk = VB.audioPeaks(project, cl.asset, function () {
-            if (view.host) render();
-          });
-          if (!pk) continue;
-          var b = Math.floor((cl.offset + ms - cl.at) / 1000 *
-                             pk.rate / pk.bin);
-          if (b < 0 || b >= pk.bins) continue;
-          lo += pk.min[b] * (cl.gain || 1);
-          hi += pk.max[b] * (cl.gain || 1);
-        }
+      for (var ci = 0; ci < clips.length; ci++) {
+        var cl = clips[ci].cl, pk = clips[ci].pk;
+        if (!pk || ms < cl.at || ms > cl.at + cl.duration) continue;
+        var b = Math.floor((cl.offset + ms - cl.at) / 1000 *
+                           pk.rate / pk.bin);
+        if (b < 0 || b >= pk.bins) continue;
+        lo += pk.min[b] * (cl.gain || 1);
+        hi += pk.max[b] * (cl.gain || 1);
       }
       lo = Math.max(-1, lo); hi = Math.min(1, hi);
       if (hi > lo) {
@@ -266,8 +282,7 @@
             ctx.drawImage(rc, fx + 2, L.frames + 6, rtw, rth);
             ctx.restore();
           } else if (VB.thumbRequest) {
-            VB.thumbRequest(key, cell, 96, 72, fs.index)
-              .then(function () { if (view.host) render(); });
+            VB.thumbRequest(key, cell, 96, 72, fs.index).then(queueRender);
           }
         }
         if (fw > 14) {
